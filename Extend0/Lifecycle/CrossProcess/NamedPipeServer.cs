@@ -97,10 +97,25 @@ namespace Extend0.Lifecycle.CrossProcess
 
                     try
                     {
-                        var iface = _impl.GetType().GetInterfaces().FirstOrDefault() ?? _impl.GetType();
-                        var methodsByName = iface.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                                                 .GroupBy(m => m.Name)
-                                                 .ToDictionary(g => g.Key, g => g.ToArray());
+                        // Build dispatch table
+                        var ifaceSet = _impl.GetType().GetInterfaces()
+                            .Where(i => typeof(ICrossProcessService).IsAssignableFrom(i))
+                            .ToHashSet();
+
+                        // Always include the base contract so getters like get_ContractName are exposed
+                        ifaceSet.Add(typeof(ICrossProcessService));
+
+                        // If nothing found, fall back to the concrete type
+                        if (ifaceSet.Count == 0) ifaceSet.Add(_impl.GetType());
+
+                        // Merge all methods (public instance). Keep special names so property getters work.
+                        var methodsByName = ifaceSet
+                            .Append(_impl.GetType())
+                            .Distinct()
+                            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                            .GroupBy(m => m.Name)
+                            .ToDictionary(g => g.Key, g => g.ToArray());
+
 
                         while (!token.IsCancellationRequested && server.IsConnected)
                         {

@@ -107,6 +107,6 @@ namespace Extend0.Lifecycle.CrossProcess
             try { _pipe.Dispose(); } catch { }
         }
 
-        private readonly record struct RpcReq(string Method, object?[] Args);
+        private readonly record struct RpcReq(string m, object?[] a);
     }
 }

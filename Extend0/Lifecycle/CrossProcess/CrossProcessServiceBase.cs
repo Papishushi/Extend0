@@ -2,36 +2,34 @@
 
 namespace Extend0.Lifecycle.CrossProcess
 {
-    /// <summary>
+    /// <summary>ICrossProcessService
     /// Convenience base class to implement <see cref="ICrossProcessService"/> once for all services.
     /// Inherit this in your concrete implementation and override virtual properties if needed.
     /// </summary>
-    public abstract class CrossProcessServiceBase : ICrossProcessService
+    public abstract class CrossProcessServiceBase<TService> : ICrossProcessService where TService : class, ICrossProcessService
     {
         private readonly DateTimeOffset _startUtc = DateTimeOffset.UtcNow;
 
         /// <summary>
-        /// The logical contract name reported by <see cref="GetServiceInfoAsync"/>.
-        /// Override to return your main interface name if needed.
+        /// Logical contract name reported by <see cref="GetServiceInfoAsync"/>.
+        /// Defaults to <c>typeof(TService)</c> full name.
         /// </summary>
         public virtual string ContractName =>
-            GetType().GetInterfaces().Length > 0
-                ? GetType().GetInterfaces()[0].FullName ?? GetType().GetInterfaces()[0].Name
-                : GetType().FullName ?? GetType().Name;
+            typeof(TService).FullName ?? typeof(TService).Name;
 
         /// <summary>
         /// The pipe name used by the host (if known). Override if you want it surfaced in diagnostics.
         /// </summary>
         protected virtual string? PipeName => null;
 
-        public Task<Heartbeat> PingAsync(CancellationToken cancellationToken = default)
+        public Task<Heartbeat> PingAsync()
         {
             var now = DateTimeOffset.UtcNow;
             var uptime = (long)(now - _startUtc).TotalSeconds;
             return Task.FromResult(new Heartbeat(now, uptime, CrossProcessUtils.CurrentFingerprint));
         }
 
-        public Task<ServiceInfo> GetServiceInfoAsync(CancellationToken cancellationToken = default)
+        public Task<ServiceInfo> GetServiceInfoAsync()
         {
             var asm = GetType().Assembly.GetName();
             using var proc = Process.GetCurrentProcess();

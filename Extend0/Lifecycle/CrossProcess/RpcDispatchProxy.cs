@@ -34,7 +34,7 @@ namespace Extend0.Lifecycle.CrossProcess;
 /// </remarks>
 /// <seealso cref="IClientTransport"/>
 /// <seealso cref="RemoteInvocationException"/>
-internal sealed class RpcDispatchProxy<TService> : DispatchProxy where TService : ICrossProcessService
+internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICrossProcessService
 {
     /// <summary>
     /// Cache of per-method metadata (name, parameter types, return kind).
