@@ -31,18 +31,45 @@
     public interface ICrossProcessService
     {
         /// <summary>
-        /// Logical contract name reported by <see cref="GetServiceInfoAsync"/>.
+        /// Gets the logical contract name for this service, as reported by <see cref="GetServiceInfoAsync"/>.
         /// </summary>
         string ContractName { get; }
 
         /// <summary>
-        /// Lightweight liveness probe.
+        /// Performs a lightweight liveness probe against the service.
         /// </summary>
+        /// <returns>
+        /// A task that completes with a <see cref="Heartbeat"/> snapshot describing
+        /// the current time, uptime and service fingerprint.
+        /// </returns>
         Task<Heartbeat> PingAsync();
 
         /// <summary>
-        /// Returns diagnostic and identity information about the hosted service instance.
+        /// Retrieves diagnostic and identity information about the hosted service instance.
         /// </summary>
+        /// <returns>
+        /// A task that completes with a <see cref="ServiceInfo"/> instance containing
+        /// contract, implementation, assembly, process and hosting details.
+        /// </returns>
         Task<ServiceInfo> GetServiceInfoAsync();
+
+        /// <summary>
+        /// Stops hosting this service instance over its named pipe and releases
+        /// all associated server-side resources.
+        /// </summary>
+        /// <remarks>
+        /// Implementations should be idempotent so that multiple calls are safe.
+        /// </remarks>
+        void StopHosting();
+
+        /// <summary>
+        /// Probes the configured named pipe to determine whether a server is
+        /// currently listening for connections.
+        /// </summary>
+        /// <returns>
+        /// A task whose result is <c>true</c> if a connection to the pipe can be
+        /// established within a short timeout; otherwise, <c>false</c>.
+        /// </returns>
+        Task<bool> CanConnectAsync();
     }
 }

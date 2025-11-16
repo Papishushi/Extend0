@@ -1,7 +1,7 @@
-﻿using System.Reflection;
-using System.Text.Json;
-using System.Buffers;
+﻿using System.Buffers;
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text.Json;
 
 namespace Extend0.Lifecycle.CrossProcess;
 
@@ -13,28 +13,59 @@ namespace Extend0.Lifecycle.CrossProcess;
 /// </typeparam>
 /// <remarks>
 /// <para>
-/// This proxy serializes method invocations over an <see cref="IClientTransport"/>. It caches per-method
-/// metadata (parameters and return-kind) to minimize reflection overhead and uses a <see cref="SemaphoreSlim"/>
-/// to serialize I/O, since most pipe/socket transports are not thread-safe for concurrent reads/writes.
+/// This proxy serializes method invocations over an <see cref="IClientTransport"/> using a simple JSON-RPC
+/// envelope. It caches per-method metadata (name, parameter types, and return-kind) to minimize reflection
+/// overhead, and uses a <see cref="SemaphoreSlim"/> to serialize transport I/O, since most pipe/socket
+/// transports are not safe for concurrent read/write operations.
 /// </para>
+///
 /// <para>
-/// Return types supported:
+/// Supported return shapes:
 /// <list type="bullet">
-/// <item><description><c>void</c> — one-way call, waits for server acknowledgment.</description></item>
-/// <item><description><see cref="Task"/> — async one-way; completes when the server acknowledges.</description></item>
-/// <item><description><see cref="Task{TResult}"/> — async call returning a JSON value deserialized to <c>TResult</c>.</description></item>
-/// <item><description>Sync result — call returning a JSON value deserialized to the declared return type.</description></item>
+/// <item><description><c>void</c> — one-way call; completes when the server acknowledges.</description></item>
+/// <item><description><see cref="Task"/> — asynchronous one-way call; completes on server acknowledgment.</description></item>
+/// <item><description><see cref="Task{TResult}"/> — asynchronous call returning a JSON value deserialized to <c>TResult</c>.</description></item>
+/// <item><description>
+/// Synchronous result type — call returning a JSON value deserialized to the declared return type.
+/// </description></item>
 /// </list>
 /// </para>
+///
 /// <para>
-/// The server is expected to return a JSON envelope: <c>{ "ok": true, "r": ... }</c> on success,
-/// or <c>{ "ok": false, "e": "error message" }</c> on failure. Remote failures are surfaced as
-/// <see cref="RemoteInvocationException"/>.
+/// The server is expected to return a JSON envelope:
+/// <c>{ "ok": true, "r": &lt;result&gt; }</c> on success, or
+/// <c>{ "ok": false, "e": "error message" }</c> on failure.
+/// Remote failures are surfaced as <see cref="RemoteInvocationException"/>.
+/// </para>
+///
+/// <para>
+/// Upgrade handling:
+/// When the remote endpoint signals an upgrade condition (for example by returning an envelope that maps
+/// to a <see cref="RemoteInvocationException"/> with <c>HResult == 426</c>, such as <c>"Server closed."</c>),
+/// and <see cref="UpgradeHandler"/> is configured, the proxy will:
+/// <list type="number">
+/// <item><description>Invoke <see cref="UpgradeHandler"/> exactly once for that call.</description></item>
+/// <item><description>
+/// If the handler returns <c>true</c>, transparently perform a single retry of the original RPC using the
+/// (potentially) recovered connection or singleton.
+/// </description></item>
+/// <item><description>
+/// If the handler returns <c>false</c> or the retry also fails, the corresponding
+/// <see cref="RemoteInvocationException"/> is propagated to the caller.
+/// </description></item>
+/// </list>
+/// This mechanism avoids infinite retry loops and centralizes cross-process upgrade/recovery logic outside
+/// of application call sites.
+/// </para>
+///
+/// <para>
+/// This type is intended to be used indirectly via <see cref="DispatchProxy.Create{T,TProxy}"/> and higher-level
+/// factory helpers; it is not expected to be instantiated directly by user code.
 /// </para>
 /// </remarks>
 /// <seealso cref="IClientTransport"/>
 /// <seealso cref="RemoteInvocationException"/>
-internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICrossProcessService
+public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, ICrossProcessService
 {
     /// <summary>
     /// Cache of per-method metadata (name, parameter types, return kind).
@@ -110,15 +141,58 @@ internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICros
     }
 
     /// <summary>
-    /// Intercepts a call to a method on <typeparamref name="TService"/> and performs an RPC.
+    /// Intercepts calls to the <typeparamref name="TService"/> contract and executes them as RPC
+    /// invocations over the underlying <see cref="IClientTransport"/>.
     /// </summary>
-    /// <param name="targetMethod">The method being invoked.</param>
-    /// <param name="args">The argument values (may be <c>null</c> or empty for no args).</param>
-    /// <returns>The method return value, if any.</returns>
-    /// <exception cref="RemoteInvocationException">The remote endpoint returned an error envelope.</exception>
-    /// <exception cref="OperationCanceledException">The call was canceled via the proxy's token.</exception>
+    /// <param name="targetMethod">
+    /// The contract method being invoked. Must be a method defined on <typeparamref name="TService"/>.
+    /// </param>
+    /// <param name="args">
+    /// The argument values for the invocation. May be <c>null</c> or empty when the method has no parameters.
+    /// </param>
+    /// <returns>
+    /// The result of the remote call:
+    /// <list type="bullet">
+    /// <item><description><c>null</c> for <c>void</c>-returning methods.</description></item>
+    /// <item><description>
+    /// A <see cref="Task"/> instance for <c>Task</c>-returning methods, representing the asynchronous RPC.
+    /// </description></item>
+    /// <item><description>
+    /// A <see cref="Task{TResult}"/> instance for <c>Task&lt;T&gt;</c>-returning methods, producing the
+    /// deserialized remote result.
+    /// </description></item>
+    /// <item><description>
+    /// A deserialized value of the declared return type for synchronous result methods.
+    /// </description></item>
+    /// </list>
+    /// </returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="targetMethod"/> is <c>null</c>.
+    /// </exception>
+    /// <exception cref="RemoteInvocationException">
+    /// Thrown when the remote endpoint returns an error envelope or an upgrade cannot be successfully
+    /// handled. If the remote endpoint signals an upgrade condition (for example, <c>HResult == 426</c>)
+    /// and <see cref="UpgradeHandler"/> is configured, the proxy will invoke the handler once and
+    /// transparently retry the call a single time; if that retry also fails, the exception is propagated.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when the call is canceled via the proxy's cancellation token.
+    /// </exception>
     /// <remarks>
-    /// This method is called by the <see cref="DispatchProxy"/> infrastructure and is not intended to be invoked directly.
+    /// <para>
+    /// This method is invoked by the <see cref="DispatchProxy"/> infrastructure and is not intended
+    /// to be called directly from user code.
+    /// </para>
+    /// <para>
+    /// Method metadata is cached to reduce reflection overhead. Calls are serialized via an internal
+    /// <see cref="SemaphoreSlim"/> to ensure safe use of transports that do not support concurrent I/O.
+    /// </para>
+    /// <para>
+    /// When <see cref="UpgradeHandler"/> is set and an upgrade-eligible <see cref="RemoteInvocationException"/>
+    /// is observed (e.g. server closed / version change), the handler is responsible for performing any
+    /// necessary recovery (such as recreating a singleton or reconnecting). If it returns <c>true</c>,
+    /// the proxy issues a single retry of the failed RPC; otherwise, the original exception is rethrown.
+    /// </para>
     /// </remarks>
     protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
     {
@@ -129,50 +203,180 @@ internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICros
 
         switch (shape.Kind)
         {
+            // Synchronous no result
             case RetKind.Void:
                 {
-                    // synchronous, no result
                     _ioLock.Wait(_ct);
                     try
                     {
-                        using var doc = _transport.CallAsync(shape.Name, args, shape.ParamTypes, typeof(void), _ct)
-                                                  .GetAwaiter().GetResult();
+                        // First attempt
+                        using var doc = _transport
+                            .CallAsync(shape.Name, args, shape.ParamTypes, typeof(void), _ct)
+                            .GetAwaiter().GetResult();
+
                         ThrowIfError(doc);
                         return null;
                     }
-                    finally { _ioLock.Release(); }
+                    catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+                    {
+                        throw;
+                    }
+                    catch (RemoteInvocationException rEx)
+                    {
+                        if (!TryHandleUpgrade(rEx))
+                            throw;
+
+                        // Single retry
+                        using var doc2 = _transport
+                            .CallAsync(shape.Name, args, shape.ParamTypes, typeof(void), _ct)
+                            .GetAwaiter().GetResult();
+
+                        ThrowIfError(doc2);
+                        return null;
+                    }
+                    finally
+                    {
+                        _ioLock.Release();
+                    }
                 }
 
+            // Synchronous with result
+            case RetKind.SyncResult:
+                {
+                    var returnType = targetMethod.ReturnType;
+
+                    _ioLock.Wait(_ct);
+                    try
+                    {
+                        // First attempt
+                        using var doc = _transport
+                            .CallAsync(shape.Name, args, shape.ParamTypes, returnType, _ct)
+                            .GetAwaiter().GetResult();
+
+                        var root = ThrowIfError(doc);
+                        return JsonSerializer.Deserialize(root.GetProperty("r").GetRawText(), returnType)!;
+                    }
+                    catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+                    {
+                        throw;
+                    }
+                    catch (RemoteInvocationException rEx)
+                    {
+                        if (!TryHandleUpgrade(rEx))
+                            throw;
+
+                        // Single retry
+                        using var doc2 = _transport
+                            .CallAsync(shape.Name, args, shape.ParamTypes, returnType, _ct)
+                            .GetAwaiter().GetResult();
+
+                        var root2 = ThrowIfError(doc2);
+                        return JsonSerializer.Deserialize(root2.GetProperty("r").GetRawText(), returnType)!;
+                    }
+                    finally
+                    {
+                        _ioLock.Release();
+                    }
+                }
+
+            // Task-returning (no result value)
             case RetKind.Task:
                 {
-                    // Task-returning (no result value)
                     return CallTaskAsync(shape, args);
                 }
 
+            // Task<T>-returning
             case RetKind.TaskOfT:
                 {
-                    // Task<T>-returning
                     var mi = _callTaskTCache.GetOrAdd(
                         shape.TaskResultType!,
                         resType => typeof(RpcDispatchProxy<TService>)
                             .GetMethod(nameof(CallTaskTAsync), BindingFlags.Instance | BindingFlags.NonPublic)!
                             .MakeGenericMethod(resType));
 
-                    return mi.Invoke(this, new object[] { shape, args })!;
+                    return mi.Invoke(this, [shape, args])!;
                 }
 
-            default: // SyncResult
-                {
-                    _ioLock.Wait(_ct);
-                    try
-                    {
-                        using var doc = _transport.CallAsync(shape.Name, args, shape.ParamTypes, targetMethod.ReturnType, _ct)
-                                                  .GetAwaiter().GetResult();
-                        var root = ThrowIfError(doc);
-                        return JsonSerializer.Deserialize(root.GetProperty("r").GetRawText(), targetMethod.ReturnType)!;
-                    }
-                    finally { _ioLock.Release(); }
-                }
+            default:
+                throw new InvalidOperationException("Unsupported return kind.");
+        }
+    }
+
+
+    /// <summary>
+    /// Optional callback used to handle remote upgrade scenarios (e.g. when the server closes or
+    /// signals that a newer instance must take over).
+    /// </summary>
+    /// <remarks>
+    /// The delegate receives the <see cref="RemoteInvocationException"/> that triggered the upgrade,
+    /// performs any required recovery (recreate singleton, promote to server, reconnect, etc.),
+    /// and returns <c>true</c> if the call can be safely retried, or <c>false</c> to propagate
+    /// the original error.
+    /// </remarks>
+    public static Func<RemoteInvocationException, ValueTask<bool>>? UpgradeHandler { get; set; }
+
+    /// <summary>
+    /// Attempts to handle an upgrade scenario asynchronously using <see cref="UpgradeHandler"/>.
+    /// </summary>
+    /// <param name="ex">
+    /// The <see cref="RemoteInvocationException"/> that indicates an upgrade condition
+    /// (typically with <c>HResult == 426</c> or equivalent).
+    /// </param>
+    /// <returns>
+    /// <c>true</c> if the upgrade handler completed successfully and the original RPC call
+    /// may be retried; otherwise, <c>false</c>.
+    /// </returns>
+    private static async ValueTask<bool> TryHandleUpgradeAsync(RemoteInvocationException ex)
+    {
+        var handler = UpgradeHandler;
+        if (handler is null)
+            return false;
+
+        try
+        {
+            return await handler(ex).ConfigureAwait(false);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous wrapper for <see cref="TryHandleUpgradeAsync"/> intended for use in
+    /// synchronous call paths.
+    /// </summary>
+    /// <param name="ex">
+    /// The <see cref="RemoteInvocationException"/> that indicates an upgrade condition.
+    /// </param>
+    /// <returns>
+    /// <c>true</c> if the upgrade handler completed successfully and the original RPC call
+    /// may be retried; otherwise, <c>false</c>.
+    /// </returns>
+    /// <remarks>
+    /// This method blocks on the asynchronous handler and should be used only from
+    /// synchronous contexts (e.g. non-async <see cref="DispatchProxy.Invoke"/> branches).
+    /// </remarks>
+    private static bool TryHandleUpgrade(RemoteInvocationException ex)
+    {
+        var handler = UpgradeHandler;
+        if (handler is null)
+            return false;
+
+        try
+        {
+            var vt = handler(ex);
+
+            // Fast-path si ya está completado sin fallo.
+            if (vt.IsCompletedSuccessfully)
+                return vt.Result;
+
+            // Si no, lo materializamos como Task de forma segura.
+            return vt.AsTask().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -219,12 +423,35 @@ internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICros
         await _ioLock.WaitAsync(_ct).ConfigureAwait(false);
         try
         {
-            using var doc = await _transport.CallAsync(shape.Name, args, shape.ParamTypes, typeof(Task), _ct)
-                                            .ConfigureAwait(false);
+            using var doc = await _transport
+                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(Task), _ct)
+                .ConfigureAwait(false);
+
             ThrowIfError(doc);
         }
-        finally { _ioLock.Release(); }
+        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+        {
+            throw;
+        }
+        catch (RemoteInvocationException rEx)
+        {
+            var handled = await TryHandleUpgradeAsync(rEx).ConfigureAwait(false);
+            if (!handled)
+                throw;
+
+            // Single retry after successful upgrade
+            using var doc2 = await _transport
+                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(Task), _ct)
+                .ConfigureAwait(false);
+
+            ThrowIfError(doc2);
+        }
+        finally
+        {
+            _ioLock.Release();
+        }
     }
+
 
     /// <summary>
     /// Performs an async RPC for a method that returns <see cref="Task{TRes}"/>.
@@ -234,17 +461,37 @@ internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICros
     /// <param name="args">Argument values.</param>
     /// <returns>A task producing the deserialized result value.</returns>
     /// <exception cref="RemoteInvocationException">The remote endpoint returned an error envelope.</exception>
-    private async Task<TRes> CallTaskTAsync<TRes>(MethodShape shape, object?[] args)
+    private async Task<TRes?> CallTaskTAsync<TRes>(MethodShape shape, object?[] args)
     {
         await _ioLock.WaitAsync(_ct).ConfigureAwait(false);
         try
         {
-            using var doc = await _transport.CallAsync(shape.Name, args, shape.ParamTypes, typeof(TRes), _ct)
-                                            .ConfigureAwait(false);
+            // First attempt
+            using var doc = await _transport
+                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(TRes), _ct)
+                .ConfigureAwait(false);
+
             var root = ThrowIfError(doc);
             return JsonSerializer.Deserialize<TRes>(root.GetProperty("r").GetRawText())!;
         }
-        finally { _ioLock.Release(); }
+        catch (RemoteInvocationException rEx) when (rEx.HResult == 426)
+        {
+            var handled = await TryHandleUpgradeAsync(rEx).ConfigureAwait(false);
+            if (!handled)
+                throw;
+
+            // Single retry after successful upgrade
+            using var doc2 = await _transport
+                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(TRes), _ct)
+                .ConfigureAwait(false);
+
+            var root2 = ThrowIfError(doc2);
+            return JsonSerializer.Deserialize<TRes>(root2.GetProperty("r").GetRawText())!;
+        }
+        finally
+        {
+            _ioLock.Release();
+        }
     }
 
     /// <summary>
@@ -258,8 +505,23 @@ internal class RpcDispatchProxy<TService> : DispatchProxy where TService : ICros
     private static JsonElement ThrowIfError(JsonDocument doc)
     {
         var root = doc.RootElement;
-        if (!root.GetProperty("ok").GetBoolean())
-            throw new RemoteInvocationException(root.GetProperty("e").GetString() ?? "Remote error");
+
+        if (root.TryGetProperty("ok", out var okProp) && !okProp.GetBoolean())
+        {
+            var msg = root.TryGetProperty("e", out var eProp) ? eProp.GetString() : null;
+
+            if (string.Equals(msg, "Server closed.", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new RemoteInvocationException(msg ?? "Upgrade required")
+                {
+                    HResult = 426
+                };
+            }
+
+            throw new RemoteInvocationException(msg ?? "Remote error");
+        }
+
         return root;
     }
+
 }

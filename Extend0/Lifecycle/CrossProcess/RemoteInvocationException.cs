@@ -12,7 +12,7 @@
     /// <param name="message">
     /// The error message returned by the remote endpoint or a local protocol error description.
     /// </param>
-    internal sealed class RemoteInvocationException(string message) : Exception(message)
+    public sealed class RemoteInvocationException(string message) : Exception(message)
     {
     }
 }

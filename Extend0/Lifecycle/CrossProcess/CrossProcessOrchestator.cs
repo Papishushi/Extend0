@@ -17,7 +17,7 @@
     /// it includes the contract type and the assembly MVID so different binaries do not collide.
     /// </para>
     /// </remarks>
-    public static class CrossProcessOrchestator<TService> where TService : class, ICrossProcessService
+    internal static class CrossProcessOrchestator<TService> where TService : class, ICrossProcessService
     {
         /// <summary>
         /// Starts or connects to a cross-process singleton for <typeparamref name="TService"/>.

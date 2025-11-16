@@ -1,8 +1,8 @@
-﻿using System.IO.Pipes;
+﻿using System.Buffers;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
-using System.Buffers;
 
 namespace Extend0.Lifecycle.CrossProcess
 {
@@ -71,7 +71,9 @@ namespace Extend0.Lifecycle.CrossProcess
         }
 
         /// <summary>
-        /// Accepts a client and processes NDJSON requests until the client disconnects or cancellation is requested.
+        /// Accepts clients and dispatches each one to a dedicated handler,
+        /// allowing multiple concurrent clients. Each handler processes NDJSON requests
+        /// until the client disconnects or cancellation is requested.
         /// Writes a <c>HELLO &lt;fingerprint&gt;</c> greeting on connect.
         /// </summary>
         /// <remarks>This is the server’s background loop; it completes on disposal or cancellation.</remarks>
@@ -79,125 +81,190 @@ namespace Extend0.Lifecycle.CrossProcess
         {
             var token = _cts.Token;
 
+            // Build dispatch table once; it's read-only
+            var ifaceSet = _impl.GetType().GetInterfaces()
+                .Where(i => typeof(ICrossProcessService).IsAssignableFrom(i))
+                .ToHashSet();
+
+            ifaceSet.Add(typeof(ICrossProcessService));
+            if (ifaceSet.Count == 0)
+                ifaceSet.Add(_impl.GetType());
+
+            // Merge all methods (public instance). Keep special names so property getters work.
+            var methodsByName = ifaceSet
+                .Append(_impl.GetType())
+                .Distinct()
+                .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                .GroupBy(m => m.Name)
+                .ToDictionary(g => g.Key, g => g.ToArray());
+
             try
             {
                 while (!token.IsCancellationRequested)
                 {
-                    using var server = new NamedPipeServerStream(
-                        _pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
-
-                    await server.WaitForConnectionAsync(token).ConfigureAwait(false);
-
-                    using var reader = new StreamReader(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    using var writer = new StreamWriter(server, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true)
-                    { AutoFlush = true };
-
-                    // Handshake: send host fingerprint
-                    await writer.WriteLineAsync($"HELLO {CrossProcessUtils.CurrentFingerprint}").ConfigureAwait(false);
+                    var server = new NamedPipeServerStream(
+                        _pipeName,
+                        PipeDirection.InOut,
+                        NamedPipeServerStream.MaxAllowedServerInstances,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous);
 
                     try
                     {
-                        // Build dispatch table
-                        var ifaceSet = _impl.GetType().GetInterfaces()
-                            .Where(i => typeof(ICrossProcessService).IsAssignableFrom(i))
-                            .ToHashSet();
-
-                        // Always include the base contract so getters like get_ContractName are exposed
-                        ifaceSet.Add(typeof(ICrossProcessService));
-
-                        // If nothing found, fall back to the concrete type
-                        if (ifaceSet.Count == 0) ifaceSet.Add(_impl.GetType());
-
-                        // Merge all methods (public instance). Keep special names so property getters work.
-                        var methodsByName = ifaceSet
-                            .Append(_impl.GetType())
-                            .Distinct()
-                            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                            .GroupBy(m => m.Name)
-                            .ToDictionary(g => g.Key, g => g.ToArray());
-
-
-                        while (!token.IsCancellationRequested && server.IsConnected)
-                        {
-                            var line = await reader.ReadLineAsync().ConfigureAwait(false);
-                            if (line is null) break;
-
-                            using var doc = JsonDocument.Parse(line);
-                            if (!doc.RootElement.TryGetProperty("m", out var mProp))
-                            { await WriteErr("Bad request"); continue; }
-
-                            var method = mProp.GetString();
-                            if (string.IsNullOrEmpty(method) || !methodsByName.TryGetValue(method, out var candidates))
-                            { await WriteErr($"Unknown method '{method}'"); continue; }
-
-                            var argsElem = doc.RootElement.GetProperty("a");
-                            var argVals = new object?[argsElem.GetArrayLength()];
-
-                            // Simple overload resolution by parameter count
-                            MethodInfo? target = candidates.FirstOrDefault(c => c.GetParameters().Length == argVals.Length)
-                                              ?? candidates.FirstOrDefault();
-                            if (target is null) { await WriteErr("No method overload found"); continue; }
-
-                            var pars = target.GetParameters();
-                            for (int i = 0; i < argVals.Length; i++)
-                            {
-                                var pType = pars[i].ParameterType;
-                                argVals[i] = JsonSerializer.Deserialize(argsElem[i].GetRawText(), pType);
-                            }
-
-                            try
-                            {
-                                var retType = target.ReturnType;
-                                var callRes = target.Invoke(_impl, argVals);
-
-                                if (retType == typeof(Task))
-                                {
-                                    await (Task)callRes!;
-                                    await WriteOk(null);
-                                }
-                                else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
-                                {
-                                    var t = (Task)callRes!;
-                                    await t;
-                                    var resProp = t.GetType().GetProperty("Result")!;
-                                    await WriteOk(resProp.GetValue(t));
-                                }
-                                else
-                                {
-                                    await WriteOk(callRes);
-                                }
-                            }
-                            catch (TargetInvocationException tex)
-                            {
-                                await WriteErr(tex.InnerException?.Message ?? tex.Message);
-                            }
-                            catch (Exception ex)
-                            {
-                                await WriteErr(ex.Message);
-                            }
-
-                            async Task WriteOk(object? r)
-                            {
-                                var payload = JsonSerializer.Serialize(new { ok = true, r });
-                                await writer.WriteLineAsync(payload).ConfigureAwait(false);
-                            }
-
-                            async Task WriteErr(string e)
-                            {
-                                var payload = JsonSerializer.Serialize(new { ok = false, e });
-                                await writer.WriteLineAsync(payload).ConfigureAwait(false);
-                            }
-                        }
+                        await server.WaitForConnectionAsync(token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested) { /* shutdown */ }
-                    catch (IOException) when (token.IsCancellationRequested) { /* shutdown */ }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        server.Dispose();
+                        break;
+                    }
+
+                    // Each client is processed by an observed fire and forget handler.
+                    HandleClientAsync(server, methodsByName, token).Forget();
+                }
+            }
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+            {
+                // swallow
+            }
+        }
+
+        /// <summary>
+        /// Processes NDJSON requests for a single connected client until disconnect or cancellation.
+        /// </summary>
+        private async Task HandleClientAsync(
+            NamedPipeServerStream server,
+            IReadOnlyDictionary<string, MethodInfo[]> methodsByName,
+            CancellationToken token)
+        {
+            using var reader = new StreamReader(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: false);
+            using var writer = new StreamWriter(server, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 1024, leaveOpen: false)
+            {
+                AutoFlush = true
+            };
+
+            try
+            {
+                // Handshake
+                await writer.WriteLineAsync($"HELLO {CrossProcessUtils.CurrentFingerprint}").ConfigureAwait(false);
+
+                while (!token.IsCancellationRequested && server.IsConnected)
+                {
+                    string? line;
+                    try
+                    {
+                        line = await reader.ReadLineAsync(token).ConfigureAwait(false);
+                    }
+                    catch (IOException)
+                    {
+                        break; // client dropped
+                    }
+
+                    if (line is null) break;
+
+                    JsonDocument doc;
+                    try
+                    {
+                        doc = JsonDocument.Parse(line);
+                    }
                     catch
                     {
-                        // Client dropped / transient error: keep accepting.
+                        await WriteErr("Bad JSON").ConfigureAwait(false);
+                        continue;
+                    }
+
+                    using (doc)
+                    {
+                        if (!doc.RootElement.TryGetProperty("m", out var mProp))
+                        {
+                            await WriteErr("Bad request: missing 'm'").ConfigureAwait(false);
+                            continue;
+                        }
+
+                        var methodName = mProp.GetString();
+                        if (string.IsNullOrEmpty(methodName) || !methodsByName.TryGetValue(methodName, out var candidates))
+                        {
+                            await WriteErr($"Unknown method '{methodName}'").ConfigureAwait(false);
+                            continue;
+                        }
+
+                        if (!doc.RootElement.TryGetProperty("a", out var argsElem) || argsElem.ValueKind != JsonValueKind.Array)
+                        {
+                            await WriteErr("Bad request: 'a' must be array").ConfigureAwait(false);
+                            continue;
+                        }
+
+                        var argVals = new object?[argsElem.GetArrayLength()];
+
+                        // naive overload: by parameter count
+                        var target = candidates.FirstOrDefault(c => c.GetParameters().Length == argVals.Length)
+                                  ?? candidates.FirstOrDefault();
+                        if (target is null)
+                        {
+                            await WriteErr("No method overload found").ConfigureAwait(false);
+                            continue;
+                        }
+
+                        var pars = target.GetParameters();
+                        for (int i = 0; i < argVals.Length; i++)
+                        {
+                            var pType = pars[i].ParameterType;
+                            argVals[i] = JsonSerializer.Deserialize(argsElem[i].GetRawText(), pType);
+                        }
+
+                        try
+                        {
+                            var retType = target.ReturnType;
+                            var callRes = target.Invoke(_impl, argVals);
+
+                            if (retType == typeof(Task))
+                            {
+                                await (Task)callRes!;
+                                await WriteOk(null).ConfigureAwait(false);
+                            }
+                            else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
+                            {
+                                var t = (Task)callRes!;
+                                await t.ConfigureAwait(false);
+                                var resProp = t.GetType().GetProperty("Result")!;
+                                await WriteOk(resProp.GetValue(t)).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                await WriteOk(callRes).ConfigureAwait(false);
+                            }
+                        }
+                        catch (TargetInvocationException tex)
+                        {
+                            await WriteErr(tex.InnerException?.Message ?? tex.Message).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            await WriteErr(ex.Message).ConfigureAwait(false);
+                        }
                     }
                 }
             }
-            catch (OperationCanceledException) when (_cts.IsCancellationRequested) { /* graceful */ }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // shutting down
+            }
+            finally
+            {
+                try { server.Dispose(); } catch { /* ignore */ }
+            }
+
+            async Task WriteOk(object? r)
+            {
+                var payload = JsonSerializer.Serialize(new { ok = true, r });
+                await writer.WriteLineAsync(payload).ConfigureAwait(false);
+            }
+
+            async Task WriteErr(string e)
+            {
+                var payload = JsonSerializer.Serialize(new { ok = false, e });
+                await writer.WriteLineAsync(payload).ConfigureAwait(false);
+            }
         }
 
         /// <summary>

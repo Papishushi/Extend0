@@ -22,7 +22,7 @@ namespace Extend0.Lifecycle.CrossProcess
     /// <see cref="JsonDocument"/>.
     /// </para>
     /// </remarks>
-    internal interface IClientTransport : IDisposable
+    public interface IClientTransport : IDisposable
     {
         /// <summary>
         /// Invokes a remote method over the transport and returns the raw JSON reply.

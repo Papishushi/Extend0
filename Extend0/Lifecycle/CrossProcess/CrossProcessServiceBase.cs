@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.IO.Pipes;
 
 namespace Extend0.Lifecycle.CrossProcess
 {
@@ -9,6 +10,12 @@ namespace Extend0.Lifecycle.CrossProcess
     public abstract class CrossProcessServiceBase<TService> : ICrossProcessService where TService : class, ICrossProcessService
     {
         private readonly DateTimeOffset _startUtc = DateTimeOffset.UtcNow;
+
+        // Host state is per TService.
+        private static readonly Lock s_hostGate = new();
+        private static NamedPipeServer? s_server;
+        private static CancellationTokenSource? s_serverCts;
+        private static Mutex? s_hostMutex;
 
         /// <summary>
         /// Logical contract name reported by <see cref="GetServiceInfoAsync"/>.
@@ -22,6 +29,24 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </summary>
         protected virtual string? PipeName => null;
 
+        /// <summary>
+        /// The server/machine name used by the host (if known). Override if you want it surfaced in diagnostics.
+        /// </summary>
+        protected virtual string? ServerName => null;
+
+        /// <summary>
+        /// Returns a lightweight heartbeat snapshot for this service instance.
+        /// </summary>
+        /// <returns>
+        /// A completed <see cref="Task{TResult}"/> whose result contains the current UTC
+        /// timestamp, the uptime in whole seconds since the service start, and the
+        /// current cross-process fingerprint.
+        /// </returns>
+        /// <remarks>
+        /// This method is intended as a cheap liveness probe that callers can use to
+        /// verify connectivity and basic service health without performing any
+        /// stateful work.
+        /// </remarks>
         public Task<Heartbeat> PingAsync()
         {
             var now = DateTimeOffset.UtcNow;
@@ -29,6 +54,18 @@ namespace Extend0.Lifecycle.CrossProcess
             return Task.FromResult(new Heartbeat(now, uptime, CrossProcessUtils.CurrentFingerprint));
         }
 
+        /// <summary>
+        /// Retrieves static and runtime metadata about the current service instance.
+        /// </summary>
+        /// <returns>
+        /// A completed <see cref="Task{TResult}"/> whose result describes the service
+        /// contract, implementation type, assembly version, fingerprint, host machine,
+        /// process identity, start time and the associated pipe name.
+        /// </returns>
+        /// <remarks>
+        /// The returned <see cref="ServiceInfo"/> is suitable for diagnostics, logging,
+        /// dashboards and troubleshooting cross-process deployments.
+        /// </remarks>
         public Task<ServiceInfo> GetServiceInfoAsync()
         {
             var asm = GetType().Assembly.GetName();
@@ -47,6 +84,81 @@ namespace Extend0.Lifecycle.CrossProcess
             );
 
             return Task.FromResult(info);
+        }
+
+        /// <summary>
+        /// Probes the configured named pipe to determine whether a server is currently listening.
+        /// </summary>
+        /// <returns>
+        /// A task whose result is <c>true</c> if a connection to <see cref="PipeName"/>
+        /// on <see cref="ServerName"/> is established within a short timeout;
+        /// otherwise, <c>false</c>.
+        /// </returns>
+        /// <remarks>
+        /// If <see cref="PipeName"/> is <see langword="null"/> or empty, the method
+        /// returns <c>false</c> without attempting a connection. All exceptions are
+        /// swallowed and treated as a negative result.
+        /// </remarks>
+
+        public async Task<bool> CanConnectAsync()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(PipeName)) return false;
+                using var client = new NamedPipeClientStream(
+                    ServerName ?? ".",
+                    PipeName,
+                    PipeDirection.InOut,
+                    PipeOptions.Asynchronous);
+
+                using var cts = new CancellationTokenSource(200);
+                await client.ConnectAsync(cts.Token).ConfigureAwait(false);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Stops hosting this service instance over the named pipe and releases all
+        /// associated server-side resources.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This method cancels the server loop, disposes the underlying
+        /// <see cref="NamedPipeServer"/> instance (if any), and releases the host
+        /// coordination mutex used for cross-process ownership. It is safe to call
+        /// multiple times; subsequent calls after the first will have no effect.
+        /// </para>
+        /// <para>
+        /// The operation is fully synchronized using <c>s_hostGate</c> so that concurrent
+        /// calls cannot interleave server shutdown with new hosting attempts.
+        /// </para>
+        /// </remarks>
+        public void StopHosting()
+        {
+            lock (s_hostGate)
+            {
+                try { s_serverCts?.Cancel(); } catch { }
+                s_serverCts?.Dispose();
+                s_serverCts = null;
+
+                if (s_server is IAsyncDisposable ad)
+                    ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                else
+                    (s_server as IDisposable)?.Dispose();
+
+                s_server = null;
+
+                if (s_hostMutex is not null)
+                {
+                    try { s_hostMutex.ReleaseMutex(); } catch { }
+                    s_hostMutex.Dispose();
+                    s_hostMutex = null;
+                }
+            }
         }
     }
 }

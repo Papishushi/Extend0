@@ -90,7 +90,14 @@ namespace Extend0.Lifecycle.CrossProcess
         {
             // Send: {"m":"Method","a":[...]}
             var req = new RpcReq(method, args);
-            await _writer.WriteLineAsync(JsonSerializer.Serialize(req)).ConfigureAwait(false);
+            try
+            {
+                await _writer.WriteLineAsync(JsonSerializer.Serialize(req)).ConfigureAwait(false);
+            }
+            catch
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Server closed.\"}");
+            }
 
             // Receive one line
             var line = await _reader.ReadLineAsync(ct).ConfigureAwait(false);
