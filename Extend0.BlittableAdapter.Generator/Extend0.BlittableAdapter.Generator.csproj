@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<AssemblyName>Extend0.BlittableAdapter.Generator</AssemblyName>
+		<PackageId>Extend0.BlittableAdapter.Generator</PackageId>
+		<Authors>Extend0</Authors>
+		<Description>Generates blittable object structs (GC Free) from a definition file '.blit.json' .</Description>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<SuppressWarnings>RS1035</SuppressWarnings>
+		<AssemblyVersion>1.0.9458.37216</AssemblyVersion>
+		<FileVersion>1.0.9458.37216</FileVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
+	</ItemGroup>
+
+</Project>
