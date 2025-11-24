@@ -1,18 +1,22 @@
 # Extend0
 
-Extend0 is a small .NET utility library that provides two main building blocks:
+Extend0 is a small .NET utility library that provides three main building blocks:
 
 - **Lifecycle primitives** for in-process and cross-process singletons, backed by named pipes and a lightweight RPC proxy.
 - **Task utilities** that make it safer to run fire-and-forget asynchronous work.
+- **Metadata storage and generators** for packing fixed-layout key/value pairs and blittable payloads into mapped tables without allocations.
 
-The library is designed for services that need a single owner across multiple processes while still allowing simple in-process use when IPC is unnecessary.
+The library is designed for services that need a single owner across multiple processes while still allowing simple in-process use when IPC is unnecessary, and for tools that need predictable, allocation-free metadata persistence.
 
 ## Installation
 
-Add a reference to the project from your solution. For example, from the repository root:
+Add project references from your solution. For example, from the repository root:
 
 ```bash
 dotnet add <YourProject>.csproj reference Extend0/Extend0.csproj
+# Optional source generators
+dotnet add <YourProject>.csproj reference Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj
+dotnet add <YourProject>.csproj reference Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj
 ```
 
 The package targets `net9.0` and depends on `Microsoft.Extensions.Logging.Abstractions` for optional logging. But an update to `net10.0` is planned soon.
@@ -126,6 +130,58 @@ Key behaviors to remember:
 - `SingletonMode.CrossProcess` enforces a single owner across processes; switch to `SingletonMode.InProcess` to bypass IPC for tests.
 - `CrossProcessSingletonOptions.Overwrite` controls whether a new instance replaces an existing owner (useful for upgrades or crash recovery).
 - `CrossProcessServiceBase` implements the contract helpers (`PingAsync`, `GetServiceInfoAsync`, `CanConnectAsync`) so your service only needs to provide domain methods.
+
+## Metadata storage and generators
+
+Extend0’s metadata layer provides fixed-size, allocation-free key/value storage backed by memory-mapped files. Two source generators help you define the binary shapes that live in these tables:
+
+- **`Extend0.MetadataEntry.Generator`** reads `[assembly: GenerateMetadataEntry(keyBytes, valueBytes)]` attributes and emits blittable `MetadataEntry{Key}x{Value}` structs plus a typed `MetadataCell` wrapper. The repository declares a catalog of common shapes in [`Metadata/Generator.attributes.cs`](Extend0/Metadata/Generator.attributes.cs), covering small tag-style keys up to larger “chubby” entries.
+- **`Extend0.BlittableAdapter.Generator`** consumes `*.blit.json` files and generates blittable structs with inline UTF-8/binary buffers. These adapters are intended for use as typed value columns inside metadata tables.
+
+### Quickstart: defining and using a table
+
+1. Declare one or more entry shapes (or use the defaults in `Generator.attributes.cs`):
+
+    ```csharp
+    [assembly: Extend0.Metadata.CodeGen.GenerateMetadataEntry(64, 512)]
+    ```
+
+2. Describe a table layout using `TableSpec`, mixing entry cells and blittable payloads:
+
+    ```csharp
+    using Extend0.Metadata;
+    using Extend0.Metadata.Schema;
+
+    var spec = new TableSpec(
+        Name: "Settings",
+        MapPath: "./data/settings.meta",
+        Columns: new[]
+        {
+            // Key/value entry column with 64-byte keys and 512-byte values
+            TableSpec.Column<MetadataEntry64x512>("Entries", capacity: 512),
+
+            // Blittable payload column generated from a .blit.json file
+            TableSpec.Column<MyBlittablePayload>("Payload", capacity: 512)
+        });
+    spec.SaveToFile("./data/settings.spec.json");
+    ```
+
+3. Register and use the table through `MetaDBManager`:
+
+    ```csharp
+    using Extend0.Metadata;
+
+    var manager = new MetaDBManager(logger: null);
+    var tableId = manager.RegisterTable(spec, createNow: true);
+
+    if (manager.TryGetCreated(spec.Name, out var table) &&
+        table.TryGetCell("Entries", row: 0, out var cell))
+    {
+        // `cell` is a view over the fixed-size buffer described by the generated entry type.
+    }
+    ```
+
+This workflow keeps your on-disk layout deterministic while letting Roslyn generate the unsafe structs needed to interact with the metadata store safely.
 
 ## Task utilities
 
