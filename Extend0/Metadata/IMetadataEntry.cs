@@ -44,7 +44,7 @@
         /// The caller is responsible for not reading or writing beyond
         /// <see cref="ValueCapacity"/> bytes from the returned pointer.
         /// </remarks>
-        static abstract unsafe byte* GetValuePointer(void* entry);
+        static abstract byte* GetValuePointer(void* entry);
 
         /// <summary>
         /// Compares the entry's key with a UTF-8 byte span.
@@ -59,7 +59,7 @@
         /// This comparison is typically ordinal and length-sensitive.
         /// Implementations must not allocate.
         /// </remarks>
-        static abstract unsafe bool KeyEquals(void* entry, ReadOnlySpan<byte> key);
+        static abstract bool KeyEquals(void* entry, ReadOnlySpan<byte> key);
 
         /// <summary>
         /// Compares the entry's key with a UTF-16 string.
@@ -74,7 +74,7 @@
         /// Implementations are expected to encode <paramref name="key"/> to UTF-8 and
         /// compare it against the internal key buffer without allocations when possible.
         /// </remarks>
-        static abstract unsafe bool KeyEquals(void* entry, string key);
+        static abstract bool KeyEquals(void* entry, string key);
 
         /// <summary>
         /// Gets the maximum number of bytes available for the key.

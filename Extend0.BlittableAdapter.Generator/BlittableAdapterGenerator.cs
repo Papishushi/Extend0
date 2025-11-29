@@ -37,7 +37,7 @@ namespace Extend0.BlittableAdapter.Generator
     /// </para>
     /// </remarks>
     [Generator]
-    public sealed partial class BlittableAdapterGenerator : IIncrementalGenerator
+    public sealed class BlittableAdapterGenerator : IIncrementalGenerator
     {
         /// <summary>
         /// Configures the incremental generator pipeline.

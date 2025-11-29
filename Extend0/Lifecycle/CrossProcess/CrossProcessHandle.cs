@@ -93,16 +93,61 @@
             _transport?.Dispose();
 
             // Host: stop server and wait for loop end (server.Dispose handles its own wait)
-            try { _cts?.Cancel(); } catch { }
-            try { (_server as IDisposable)?.Dispose(); } catch { }
+            try
+            {
+                _cts?.Cancel();
+            }
+            catch
+            {
+                // Best-effort cancellation: if the CTS is already disposed or in a bad state
+                // there's nothing meaningful we can do during teardown.
+            }
+
+            try
+            {
+                (_server as IDisposable)?.Dispose();
+            }
+            catch
+            {
+                // Server disposal failure is non-recoverable at this point; the handle is
+                // already being torn down and callers cannot do anything useful with the error.
+            }
 
             // Mutex at the end
-            try { _mutex?.ReleaseMutex(); } catch { }
-            try { _mutex?.Dispose(); } catch { }
+            try
+            {
+                _mutex?.ReleaseMutex();
+            }
+            catch
+            {
+                // Releasing a mutex that we don't own / is already released can throw,
+                // but during Dispose() this only means the mutex is no longer usable,
+                // which is acceptable because the handle is being destroyed.
+            }
+
+            try
+            {
+                _mutex?.Dispose();
+            }
+            catch
+            {
+                // Last-chance cleanup; failure to dispose the OS handle here is not actionable
+                // for the caller and the process is about to release all resources anyway.
+            }
 
             // Dispose real service only if we are the owner
             if (IsOwner && Service is IDisposable d)
-                try { d.Dispose(); } catch { }
+            {
+                try
+                {
+                    d.Dispose();
+                }
+                catch
+                {
+                    // Service-specific disposal errors must not leak out of Dispose():
+                    // callers expect Dispose() to be best-effort and never throw in teardown.
+                }
+            }
         }
 
         /// <summary>
@@ -123,22 +168,82 @@
 
             _transport?.Dispose();
 
-            try { _cts?.Cancel(); } catch { }
-            if (_server is IAsyncDisposable ad)
-                try { await ad.DisposeAsync().ConfigureAwait(false); } catch { }
-            else
+            try
             {
-                try { (_server as IDisposable)?.Dispose(); } catch { }
+                _cts?.Cancel();
+            }
+            catch
+            {
+                // Same rationale as in Dispose(): cancellation is best-effort and
+                // failures are not actionable for the caller during teardown.
             }
 
-            try { _mutex?.ReleaseMutex(); } catch { }
-            try { _mutex?.Dispose(); } catch { }
+            if (_server is IAsyncDisposable ad)
+            {
+                try
+                {
+                    await ad.DisposeAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Asynchronous server disposal failed; nothing sensible can be done
+                    // at this stage and the handle is already being disposed.
+                }
+            }
+            else
+            {
+                try
+                {
+                    (_server as IDisposable)?.Dispose();
+                }
+                catch
+                {
+                    // Same rationale as in the synchronous path: we don't surface teardown
+                    // failures to callers of DisposeAsync().
+                }
+            }
+
+            try
+            {
+                _mutex?.ReleaseMutex();
+            }
+            catch
+            {
+                // See sync version: mutex state errors during shutdown are harmless
+                // for the rest of the process.
+            }
+
+            try
+            {
+                _mutex?.Dispose();
+            }
+            catch
+            {
+                // Non-actionable failure when releasing OS handle during teardown.
+            }
 
             if (IsOwner && Service is IAsyncDisposable ad2)
-                try { await ad2.DisposeAsync().ConfigureAwait(false); } catch { }
+            {
+                try
+                {
+                    await ad2.DisposeAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Service-specific async disposal errors are intentionally swallowed:
+                    // DisposeAsync() is best-effort and should not throw in teardown.
+                }
+            }
             else if (IsOwner && Service is IDisposable d)
             {
-                try { d.Dispose(); } catch { }
+                try
+                {
+                    d.Dispose();
+                }
+                catch
+                {
+                    // Same rationale as above: do not leak teardown errors to the caller.
+                }
             }
         }
     }

@@ -32,7 +32,7 @@ namespace Extend0.Metadata.Refs
         /// <summary>
         /// Size in bytes of the header region (<c>Count</c> + <c>Flags</c>).
         /// </summary>
-        public const int HeaderSize = 4;
+        public static int HeaderSize => 4;
 
         /// <summary>
         /// Bit mask for the <c>Initialized</c> flag inside the <c>Flags</c> field.

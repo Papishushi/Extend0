@@ -37,7 +37,7 @@ namespace Extend0.Metadata.Storage
     /// end of the file and extended, updating the corresponding <see cref="ColumnDesc"/>.
     /// </para>
     /// </remarks>
-    internal sealed unsafe partial class MappedStore : ICellStore, ITryGrowableStore
+    internal sealed unsafe class MappedStore : ICellStore, ITryGrowableStore
     {
         private MemoryMappedFile _mmf;
         private MemoryMappedViewAccessor _view;
