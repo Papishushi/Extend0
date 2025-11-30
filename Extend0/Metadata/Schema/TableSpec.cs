@@ -17,7 +17,7 @@ namespace Extend0.Metadata.Schema
         /// <summary>
         /// Base size, in bytes, reserved for a reference cell.
         /// </summary>
-        public const int REF_SIZE = 0x80;
+        public static int RefSize => 0x80;
 
         // ─────────────────────────────────────────────────────────────────────
         // Column factories
@@ -94,7 +94,7 @@ namespace Extend0.Metadata.Schema
         /// </param>
         /// <param name="refsPerCell">
         /// Number of reference slots stored in each cell. The resulting value
-        /// size is <see cref="REF_SIZE"/> × <paramref name="refsPerCell"/>.
+        /// size is <see cref="RefSize"/> × <paramref name="refsPerCell"/>.
         /// </param>
         /// <param name="readOnly">
         /// Whether the column should be treated as read-only from the metadata layer.
@@ -109,7 +109,7 @@ namespace Extend0.Metadata.Schema
             int refsPerCell = 1,
             bool readOnly = false
         )
-            => new(MetadataEntrySizeExtensions.PackUnchecked(keyBits, REF_SIZE * refsPerCell), name, readOnly, capacity);
+            => new(MetadataEntrySizeExtensions.PackUnchecked(keyBits, RefSize * refsPerCell), name, readOnly, capacity);
 
         // ─────────────────────────────────────────────────────────────────────
         // Persistence (JSON)

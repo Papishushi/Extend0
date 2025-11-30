@@ -1121,10 +1121,13 @@ namespace Extend0.Metadata
                     int count = (int)Math.Min((uint)batchSize, rows - start);
                     int bytes = count * tSize;
                     T[]? rented = null;
-
-                    Span<T> batch = bytes <= MaxStackBytes
-                        ? stackalloc T[count]
-                        : (rented = ArrayPool<T>.Shared.Rent(count)).AsSpan(0, count);
+                    scoped Span<T> batch;
+                    if (bytes <= MaxStackBytes) batch = stackalloc T[count];
+                    else
+                    {
+                        rented = ArrayPool<T>.Shared.Rent(count);
+                        batch = rented.AsSpan(0, count);
+                    }
 
                     for (int i = 0; i < count; i++)
                         batch[i] = factory(start + (uint)i);
@@ -1138,7 +1141,7 @@ namespace Extend0.Metadata
                         Buffer.MemoryCopy(srcPtr, dest, srcBytes.Length, srcBytes.Length);
                     }
 
-                    if (rented is not null) ArrayPool<T>.Shared.Return(rented, false);
+                    if (rented is not null) ArrayPool<T>.Shared.Return(rented);
                 }
                 return true;
             }

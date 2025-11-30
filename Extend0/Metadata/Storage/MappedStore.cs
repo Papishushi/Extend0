@@ -152,13 +152,18 @@ namespace Extend0.Metadata.Storage
             long cursor = headerSize + colsSize;
 
             ColumnDesc[]? rented = null;
-            Span<ColumnDesc> temp = columns.Length <= 256
-                ? stackalloc ColumnDesc[columns.Length]
-                : (rented = ArrayPool<ColumnDesc>.Shared.Rent(columns.Length)).AsSpan(0, columns.Length);
+            scoped Span<ColumnDesc> batch;
+
+            if (columns.Length <= 256) batch = stackalloc ColumnDesc[columns.Length];
+            else
+            {
+                rented = ArrayPool<ColumnDesc>.Shared.Rent(columns.Length);
+                batch = rented.AsSpan(0, columns.Length);
+            }
 
             _colNameUtf8 = new byte[columns.Length][];
 
-            cursor = MapFile(columns, cursor, temp);
+            cursor = MapFile(columns, cursor, batch);
 
             long fileSize = cursor;
             _length = fileSize;
@@ -183,7 +188,7 @@ namespace Extend0.Metadata.Storage
             _cols = (ColumnDesc*)(_base + sizeof(FileHeader));
 
             // Initialize header and column descriptors if the file is new / uninitialized
-            InitializeMappedFile(columns, temp);
+            InitializeMappedFile(columns, batch);
 
             if (rented is not null) ArrayPool<ColumnDesc>.Shared.Return(rented, clearArray: true);
         }
@@ -249,7 +254,7 @@ namespace Extend0.Metadata.Storage
                     RowCapacity = c.InitialCapacity,
                     BaseOffset  = cursor
                 };
-                cursor = checked(cursor + entrySize * c.InitialCapacity);
+                cursor = cursor + entrySize * c.InitialCapacity;
 
                 // Pre-encode column name as UTF-8 (truncated to keySize - 1)
                 int max = Math.Max(0, keySize - 1);
@@ -433,7 +438,7 @@ namespace Extend0.Metadata.Storage
             // Minimal validation; assumes column < ColumnCount if the caller is well-behaved.
             ref readonly ColumnDesc desc = ref _cols[column];
 
-            var stride = checked(desc.KeySize + desc.ValueSize);
+            var stride = desc.KeySize + desc.ValueSize;
             var valueOffset = desc.KeySize;
             var colBase = _base + desc.BaseOffset;
 
