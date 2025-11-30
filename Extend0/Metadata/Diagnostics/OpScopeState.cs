@@ -89,9 +89,19 @@ namespace Extend0.Metadata.Diagnostics
         /// This enumerator is allocation-free and designed for use by logging infrastructure
         /// when consuming scope state for structured logging.
         /// </remarks>
-        public struct Enumerator(OpScopeState s) : IEnumerator<KeyValuePair<string, object?>>
+        public struct Enumerator(OpScopeState s) : IEnumerator<KeyValuePair<string, object?>>, IEquatable<Enumerator>
         {
             private int _i = -1;
+
+            /// <summary>
+            /// Gets the current zero-based index of the enumerator within the scope state.
+            /// </summary>
+            public readonly int Index => _i;
+
+            /// <summary>
+            /// Gets the underlying <see cref="OpScopeState"/> this enumerator iterates over.
+            /// </summary>
+            public readonly OpScopeState State => s;
 
             /// <summary>
             /// Gets the key–value pair at the current position of the enumerator.
@@ -132,7 +142,61 @@ namespace Extend0.Metadata.Diagnostics
             /// This enumerator does not hold unmanaged resources, so this method
             /// is a no-op.
             /// </remarks>
-            public readonly void Dispose() { /*Nothing to do here*/ }
+            public readonly void Dispose() { /* Nothing to do here */ }
+
+            /// <summary>
+            /// Indicates whether the current enumerator instance is equal to another
+            /// <see cref="Enumerator"/> instance.
+            /// </summary>
+            /// <param name="other">The other enumerator to compare with.</param>
+            /// <returns>
+            /// <see langword="true"/> if both enumerators reference the same underlying
+            /// <see cref="OpScopeState"/> and have the same position; otherwise,
+            /// <see langword="false"/>.
+            /// </returns>
+            public readonly bool Equals(Enumerator other) => _i == other._i && State.Equals(other.State);
+
+
+            /// <summary>
+            /// Determines whether the specified object is equal to the current enumerator.
+            /// </summary>
+            /// <param name="obj">The object to compare with the current enumerator.</param>
+            /// <returns>
+            /// <see langword="true"/> if <paramref name="obj"/> is an <see cref="Enumerator"/>
+            /// and is equal to this instance; otherwise, <see langword="false"/>.
+            /// </returns>
+            public override readonly bool Equals(object? obj) => obj is Enumerator enumerator && Equals(enumerator);
+
+            /// <summary>
+            /// Compares two <see cref="Enumerator"/> instances for equality.
+            /// </summary>
+            /// <param name="left">The first enumerator to compare.</param>
+            /// <param name="right">The second enumerator to compare.</param>
+            /// <returns>
+            /// <see langword="true"/> if both enumerators are equal; otherwise,
+            /// <see langword="false"/>.
+            /// </returns>
+            public static bool operator ==(Enumerator left, Enumerator right) => left.Equals(right);
+
+            /// <summary>
+            /// Compares two <see cref="Enumerator"/> instances for inequality.
+            /// </summary>
+            /// <param name="left">The first enumerator to compare.</param>
+            /// <param name="right">The second enumerator to compare.</param>
+            /// <returns>
+            /// <see langword="true"/> if the enumerators are not equal; otherwise,
+            /// <see langword="false"/>.
+            /// </returns>
+            public static bool operator !=(Enumerator left, Enumerator right) => !left.Equals(right);
+
+            /// <summary>
+            /// Returns a hash code for this enumerator instance.
+            /// </summary>
+            /// <returns>
+            /// A 32-bit signed integer hash code combining the underlying scope state
+            /// and the current position.
+            /// </returns>
+            public override readonly int GetHashCode() => HashCode.Combine(State, _i);
         }
     }
 }

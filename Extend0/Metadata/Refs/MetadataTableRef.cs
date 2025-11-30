@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Extend0.Metadata.Refs
 {
@@ -22,7 +23,7 @@ namespace Extend0.Metadata.Refs
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct MetadataTableRef
+    public struct MetadataTableRef : IEquatable<MetadataTableRef>
     {
         /// <summary>
         /// Globally unique identifier of the referenced metadata table.
@@ -43,5 +44,23 @@ namespace Extend0.Metadata.Refs
         /// Reserved 64-bit field for future extensions (e.g. flags, versioning).
         /// </summary>
         public ulong Reserved; // 8
+
+        public readonly bool Equals(MetadataTableRef other)
+        {
+            var a = TableId == other.TableId;
+            var b = Column == other.Column;
+            var c = Row == other.Row;
+            var d = Reserved == other.Reserved;
+            return a && b && c && d;
+        }
+
+        /// <inheritdoc/>
+        public override readonly bool Equals(object? obj) => obj is MetadataTableRef other && Equals(other);
+        public static bool operator ==(MetadataTableRef left, MetadataTableRef right) => left.Equals(right);
+        public static bool operator !=(MetadataTableRef left, MetadataTableRef right) => !(left==right);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override readonly int GetHashCode() => HashCode.Combine(TableId, Column, Row, Reserved);
+
     }
 }

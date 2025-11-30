@@ -5,10 +5,12 @@ using Extend0.Metadata.Storage;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Extend0.Metadata
 {
@@ -44,6 +46,10 @@ namespace Extend0.Metadata
     [SuppressMessage("Reliability", "CA2014", Justification = "SO is controlled and the stack allocations in loops are limited.")]
     public sealed partial class MetaDBManager
     {
+        /// <summary>
+        /// Default batch size(in rows) used by column operations when no explicit batch size is provided.
+        /// Tuned as a safe, conservative value for most workloads.
+        /// </summary>
         private const int DEFAULT_BATCH_SIZE = 512;
 
         /// <summary>
@@ -1072,22 +1078,40 @@ namespace Extend0.Metadata
         /// Core implementation for filling a column using a raw writer callback that
         /// receives a pointer to the VALUE buffer per row.
         /// </summary>
-        /// <param name="table">Target table.</param>
+        /// <param name="table">Target table whose column will be written.</param>
         /// <param name="column">Zero-based column index to fill.</param>
-        /// <param name="rows">Number of rows to fill (starting at 0).</param>
+        /// <param name="rows">Number of logical rows to fill (starting at 0).</param>
         /// <param name="writer">
-        /// Callback invoked per row with a pointer to the row VALUE buffer and its size in bytes.
+        /// Callback invoked once per row with:
+        /// <list type="bullet">
+        ///   <item><description>The zero-based row index.</description></item>
+        ///   <item><description>A pointer to the row VALUE buffer.</description></item>
+        ///   <item><description>The VALUE buffer size in bytes.</description></item>
+        /// </list>
+        /// The callback is responsible for writing exactly the intended payload
+        /// into the provided buffer.
         /// </param>
         /// <param name="policy">
-        /// Capacity policy controlling how to react when the current row capacity is insufficient.
+        /// Capacity policy controlling how to react when the current row capacity
+        /// is insufficient (e.g. <see cref="CapacityPolicy.Throw"/> or
+        /// <see cref="CapacityPolicy.AutoGrowZeroInit"/>).
         /// </param>
         /// <param name="batchSize">
-        /// Optional batch size for the column-block fast path. In per-cell mode it is used
-        /// only to chunk iterations.
+        /// Optional batch size for the column-block fast path. When a
+        /// <see cref="ColumnBlock"/> is not available, it is only used to chunk
+        /// the per-cell loop.
         /// </param>
         /// <remarks>
-        /// When a fixed-size <see cref="ColumnBlock"/> is available, the method uses a strided
-        /// pointer-based loop; otherwise it falls back to per-cell access.
+        /// <para>
+        /// When a fixed-size <see cref="ColumnBlock"/> is available for the target
+        /// column, the method uses a strided pointer-based loop over the underlying
+        /// memory-mapped buffer to minimize per-row overhead.
+        /// </para>
+        /// <para>
+        /// If no suitable column block exists (or the VALUE size is variable),
+        /// the method falls back to per-cell access using
+        /// <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>.
+        /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private unsafe void FillColumn(MetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE)
@@ -1097,57 +1121,104 @@ namespace Extend0.Metadata
             EnsureRowCapacity(table, column, rows, policy);
 
             // ── FAST PATH: via column block (MMF / flat buffer) ────────────────────
-            if (TryContiguousFill(table, column, rows, writer, batchSize)) return;
+            if (TryContiguousFillRaw(table, column, rows, writer, batchSize)) return;
+            PerCellFillRaw(table, column, rows, writer, batchSize);
+        }
 
-            // ── SLOW PATH: per-cell (compat) ───────────────────────────────────────
-            PerCellFill(table, column, rows, writer, batchSize);
+        /// <summary>
+        /// Attempts a block-based fast path for filling a fixed-size VALUE column
+        /// using a raw writer callback over a <see cref="ColumnBlock"/>.
+        /// </summary>
+        /// <param name="table">Target <see cref="MetadataTable"/>.</param>
+        /// <param name="column">Zero-based index of the column to fill.</param>
+        /// <param name="rows">Number of rows to fill (starting at 0).</param>
+        /// <param name="writer">
+        /// Callback invoked for each row with the row index, a pointer to the VALUE
+        /// buffer and its size in bytes.
+        /// </param>
+        /// <param name="batchSize">
+        /// Maximum number of rows to visit per outer-loop batch. Used to keep the
+        /// inner loop small and branch-free.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if a fixed-size <see cref="ColumnBlock"/> was
+        /// available and all rows were processed using the block-based fast path;
+        /// <see langword="false"/> if the column does not expose a suitable block
+        /// (in which case callers should fall back to per-cell mode).
+        /// </returns>
+        /// <remarks>
+        /// This helper is used as the “fast path” by
+        /// <see cref="FillColumn(MetadataTable, uint, uint, Action{uint, IntPtr, uint}, CapacityPolicy, int)"/>.
+        /// It only applies when the column reports a non-zero, fixed VALUE size.
+        /// Variable-size columns always return <see langword="false"/>.
+        /// </remarks>
+        private static unsafe bool TryContiguousFillRaw(MetadataTable table, uint column, uint rows, Action<uint, nint, uint> writer, int batchSize)
+        {
+            if (!table.TryGetColumnBlock(column, out var blk))
+                return false;
 
-            static unsafe void PerCellFill(
-                MetadataTable table, uint column, uint rows,
-                Action<uint, nint, uint> writer, int batchSize)
+            // Variable-size values cannot use the block fast path; fall back.
+            if (blk.ValueSize == 0)
+                return false;
+
+            byte* valueBase = blk.Base + blk.ValueOffset;
+            uint vsize = (uint)blk.ValueSize;
+            nuint pitch = (nuint)blk.Stride;
+
+            // Batching keeps the hot loop short and branch-free
+            for (uint start = 0; start < rows; start += (uint)batchSize)
             {
-                for (uint start = 0; start < rows; start += (uint)batchSize)
-                {
-                    int count = (int)Math.Min((uint)batchSize, rows - start);
+                int count = (int)Math.Min((uint)batchSize, rows - start);
 
-                    for (int i = 0; i < count; i++)
-                    {
-                        uint row = start + (uint)i;
-                        var cell = table.GetOrCreateCell(column, row);
-                        writer(row, (IntPtr)cell.GetValuePointer(), (uint)cell.ValueSize);
-                    }
+                byte* p = valueBase + pitch * (nuint)start;
+                for (int i = 0; i < count; i++)
+                {
+                    writer(start + (uint)i, (IntPtr)p, vsize);
+                    p += pitch;
                 }
             }
 
-            static unsafe bool TryContiguousFill(
-                MetadataTable table, uint column, uint rows,
-                Action<uint, nint, uint> writer, int batchSize)
+            return true;
+        }
+
+        /// <summary>
+        /// Fills a column cell-by-cell using the raw writer callback as a fallback
+        /// when no suitable fixed-size <see cref="ColumnBlock"/> is available.
+        /// </summary>
+        /// <param name="table">Target <see cref="MetadataTable"/>.</param>
+        /// <param name="column">Zero-based index of the column to fill.</param>
+        /// <param name="rows">Number of rows to fill (starting at 0).</param>
+        /// <param name="writer">
+        /// Callback invoked for each row with the row index, a pointer to the VALUE
+        /// buffer and its size in bytes.
+        /// </param>
+        /// <param name="batchSize">
+        /// Chunk size used only to segment the outer loop; does not affect the
+        /// semantics of the operation.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// This helper uses <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>
+        /// per row to retrieve the target cell and forwards its VALUE pointer and
+        /// size to the provided <paramref name="writer"/>.
+        /// </para>
+        /// <para>
+        /// Intended as a correctness-oriented fallback when block-based access
+        /// cannot be used (e.g. variable-size columns, missing blocks, etc.).
+        /// </para>
+        /// </remarks>
+        private static unsafe void PerCellFillRaw(MetadataTable table, uint column, uint rows, Action<uint, nint, uint> writer, int batchSize)
+        {
+            for (uint start = 0; start < rows; start += (uint)batchSize)
             {
-                if (!table.TryGetColumnBlock(column, out var blk))
-                    return false;
+                int count = (int)Math.Min((uint)batchSize, rows - start);
 
-                // Variable-size values cannot use the block fast path; fall back.
-                if (blk.ValueSize == 0)
-                    return false;
-
-                byte* valueBase = blk.Base + blk.ValueOffset;
-                uint vsize = (uint)blk.ValueSize;
-                nuint pitch = (nuint)blk.Stride;
-
-                // Batching keeps the hot loop short and branch-free
-                for (uint start = 0; start < rows; start += (uint)batchSize)
+                for (int i = 0; i < count; i++)
                 {
-                    int count = (int)Math.Min((uint)batchSize, rows - start);
-
-                    byte* p = valueBase + pitch * (nuint)start;
-                    for (int i = 0; i < count; i++)
-                    {
-                        writer(start + (uint)i, (IntPtr)p, vsize);
-                        p += pitch;
-                    }
+                    uint row = start + (uint)i;
+                    var cell = table.GetOrCreateCell(column, row);
+                    writer(row, (IntPtr)cell.GetValuePointer(), (uint)cell.ValueSize);
                 }
-
-                return true;
             }
         }
 

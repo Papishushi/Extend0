@@ -129,7 +129,29 @@ namespace Extend0.Metadata
         /// <see langword="true"/> if parsing succeeded; otherwise <see langword="false"/>.
         /// </returns>
         public static bool TryParse(ReadOnlySpan<char> s, out MetadataCellPointer value)
+            => TryParse(s, CultureInfo.InvariantCulture, out value);
+
+        /// <summary>
+        /// Attempts to parse a pointer from a textual representation using a specific format provider.
+        /// </summary>
+        /// <param name="s">
+        /// Input span containing either <c>"row:col"</c> or <c>"row,col"</c>,
+        /// in decimal or hexadecimal (prefix <c>0x</c> allowed for each part).
+        /// </param>
+        /// <param name="provider">
+        /// Format provider used for numeric parsing. When <see langword="null"/>,
+        /// <see cref="CultureInfo.InvariantCulture"/> is used.
+        /// </param>
+        /// <param name="value">
+        /// When this method returns <see langword="true"/>, contains the parsed value.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if parsing succeeded; otherwise <see langword="false"/>.
+        /// </returns>
+        public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out MetadataCellPointer value)
         {
+            var culture = provider as CultureInfo ?? CultureInfo.InvariantCulture;
+
             s = s.Trim();
             int i = s.IndexOfAny(':', ',');
             if (i <= 0 || i >= s.Length - 1) { value = default; return false; }
@@ -137,14 +159,20 @@ namespace Extend0.Metadata
             var left = s[..i].Trim();
             var right = s[(i + 1)..].Trim();
 
-            static bool ParseUInt(ReadOnlySpan<char> txt, out uint n)
+            static bool ParseUInt(ReadOnlySpan<char> txt, CultureInfo culture, out uint n)
             {
                 if (txt.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                    return uint.TryParse(txt[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out n);
-                return uint.TryParse(txt, NumberStyles.None, CultureInfo.InvariantCulture, out n);
+                    return uint.TryParse(txt[2..], NumberStyles.HexNumber, culture, out n);
+
+                return uint.TryParse(txt, NumberStyles.None, culture, out n);
             }
 
-            if (!ParseUInt(left, out var r) || !ParseUInt(right, out var c)) { value = default; return false; }
+            if (!ParseUInt(left, culture, out var r) || !ParseUInt(right, culture, out var c))
+            {
+                value = default;
+                return false;
+            }
+
             value = new MetadataCellPointer(r, c);
             return true;
         }
@@ -159,29 +187,47 @@ namespace Extend0.Metadata
         /// <returns>The parsed <see cref="MetadataCellPointer"/>.</returns>
         /// <exception cref="FormatException">If the input is not in a valid format.</exception>
         public static MetadataCellPointer Parse(string s)
-            => TryParse(s, out var v) ? v : throw new FormatException("Expected 'row:col' or 'row,col'");
+            => TryParse(s.AsSpan(), CultureInfo.InvariantCulture, out var v)
+               ? v
+               : throw new FormatException("Expected 'row:col' or 'row,col'");
 
         // IParsable<T> / ISpanParsable<T>
 
         /// <inheritdoc />
         static MetadataCellPointer IParsable<MetadataCellPointer>.Parse(string s, IFormatProvider? provider)
-            => Parse(s);
+            => TryParse(s.AsSpan(), provider, out var v)
+               ? v
+               : throw new FormatException("Expected 'row:col' or 'row,col'");
 
         /// <inheritdoc />
-        static bool IParsable<MetadataCellPointer>.TryParse(string? s, IFormatProvider? provider, out MetadataCellPointer result)
+        static bool IParsable<MetadataCellPointer>.TryParse(
+            string? s,
+            IFormatProvider? provider,
+            out MetadataCellPointer result)
         {
-            var a = s is not null;
-            var b = TryParse(s, out result);
-            return a && b;
+            if (s is null)
+            {
+                result = default;
+                return false;
+            }
+
+            return TryParse(s.AsSpan(), provider, out result);
         }
 
         /// <inheritdoc />
-        static MetadataCellPointer ISpanParsable<MetadataCellPointer>.Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
-            => TryParse(s, out var v) ? v : throw new FormatException("Expected 'row:col' or 'row,col'");
+        static MetadataCellPointer ISpanParsable<MetadataCellPointer>.Parse(
+            ReadOnlySpan<char> s,
+            IFormatProvider? provider)
+            => TryParse(s, provider, out var v)
+               ? v
+               : throw new FormatException("Expected 'row:col' or 'row,col'");
 
         /// <inheritdoc />
-        static bool ISpanParsable<MetadataCellPointer>.TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out MetadataCellPointer result)
-            => TryParse(s, out result);
+        static bool ISpanParsable<MetadataCellPointer>.TryParse(
+            ReadOnlySpan<char> s,
+            IFormatProvider? provider,
+            out MetadataCellPointer result)
+            => TryParse(s, provider, out result);
 
         /// <summary>
         /// Determines whether this instance and another pointer represent the same cell.

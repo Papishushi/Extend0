@@ -114,17 +114,17 @@
                 catch
                 {
                     // Clean up on failure to host
-                    try { server?.Dispose(); } catch { }
-                    try { cts?.Cancel(); cts?.Dispose(); } catch { }
-                    try { m.ReleaseMutex(); } catch { }
-                    try { m.Dispose(); } catch { }
+                    try { server?.Dispose(); } catch { /*swallow, client does not care*/ }
+                    try { cts?.Cancel(); cts?.Dispose(); } catch { /*swallow, client does not care*/ }
+                    try { m.ReleaseMutex(); } catch { /*swallow, client does not care*/ }
+                    try { m.Dispose(); } catch { /*swallow, client does not care*/ }
                     throw;
                 }
             }
             else
             {
                 // Not the creator → act as client (no need to keep the mutex object)
-                try { m.Dispose(); } catch { }
+                try { m.Dispose(); } catch { /*We dont really need the mutex so we dont care about it really*/ }
 
                 var transport = new NamedPipeClientTransport(serverName, pipeName, connectTimeoutMs);
                 var proxy = RpcDispatchProxy<TService>.Create(transport, CancellationToken.None);
