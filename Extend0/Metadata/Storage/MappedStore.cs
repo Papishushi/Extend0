@@ -62,10 +62,27 @@ namespace Extend0.Metadata.Storage
         internal uint ColumnCount => _hdr->ColumnCount;
 
         /// <summary>
+        /// Magic value stored in <see cref="FileHeader.Magic"/> to identify a valid
+        /// mapped store file created by this implementation.
+        /// </summary>
+        /// <remarks>
+        /// The constant corresponds to the ASCII literal <c>'LBTM'</c> encoded as a
+        /// 32-bit integer.
+        /// </remarks>
+        private const int MAGIC_VALUE = 0x4C42544D; // 'LBTM'
+
+        /// <summary>
         /// Returns the current row capacity for the given column.
         /// </summary>
         /// <param name="c">Zero-based column index.</param>
         internal uint GetRowCapacity(uint c) => _cols[c].RowCapacity;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static ColumnConfiguration FromDesc(in ColumnDesc cd, int index) =>
+            new(Size: MetadataEntrySizeExtensions.PackUnchecked(cd.KeySize, cd.ValueSize), 
+                Name: $"c{index}",
+                ReadOnly: false,
+                InitialCapacity: cd.RowCapacity);
 
         /// <summary>
         /// Builds a <see cref="ColumnConfiguration"/> snapshot for a mapped column.
@@ -84,36 +101,45 @@ namespace Extend0.Metadata.Storage
         internal ColumnConfiguration GetColumnConfiguration(uint c)
         {
             ref readonly var cd = ref _cols[c];
-            return new ColumnConfiguration(
-                Size: MetadataEntrySizeExtensions.PackUnchecked(cd.KeySize, cd.ValueSize),
-                Name: $"c{c}",
-                ReadOnly: false,
-                InitialCapacity: cd.RowCapacity);
+            return FromDesc(cd, (int)c);
         }
 
         /// <summary>
-        /// Creates a new mapped store from a <see cref="TableSpec"/>, allocating the file if needed.
+        /// Creates a new memory-mapped store from a <see cref="TableSpec"/>, allocating
+        /// or growing the backing file as needed.
         /// </summary>
         /// <param name="spec">
-        /// Table specification describing column sizes, capacities and target map path.
+        /// Table specification describing the target map path, the column layout
+        /// (key/value sizes), and initial row capacities.
         /// </param>
         /// <remarks>
         /// <para>
-        /// The constructor:
+        /// The constructor performs the following steps:
         /// </para>
         /// <list type="number">
         ///   <item><description>
-        ///     Computes the required file size and per-column <see cref="ColumnDesc"/> metadata.
+        ///     Computes the required file size by laying out the <see cref="FileHeader"/>,
+        ///     the <see cref="ColumnDesc"/> table, and all column areas according to
+        ///     the <paramref name="spec"/> (including alignment padding).
         ///   </description></item>
         ///   <item><description>
-        ///     Creates or grows the backing file if necessary.
+        ///     Pre-encodes column names as UTF-8 and stores them in <see cref="_colNameUtf8"/>,
+        ///     truncating each name to at most <c>KeySize - 1</c> bytes.
         ///   </description></item>
         ///   <item><description>
-        ///     Memory-maps the file and initializes the <see cref="FileHeader"/> and
-        ///     <see cref="ColumnDesc"/> array if the magic value is not present.
+        ///     Ensures the target directory exists, persists the <see cref="TableSpec"/> to
+        ///     disk (via <see cref="TableSpec.SaveToDirectory(string)"/>), and creates or
+        ///     grows the backing file to the computed size.
         ///   </description></item>
         ///   <item><description>
-        ///     Pre-encodes column names in UTF-8, truncated to <c>KeySize - 1</c> bytes.
+        ///     Memory-maps the file, computes the base pointer for the view, and initializes
+        ///     <see cref="_hdr"/> and <see cref="_cols"/> to point to the header and
+        ///     column descriptor array respectively.
+        ///   </description></item>
+        ///   <item><description>
+        ///     If the file does not contain the expected magic value, initializes the
+        ///     <see cref="FileHeader"/> and writes the computed <see cref="ColumnDesc"/>
+        ///     descriptors, flushing the view to disk.
         ///   </description></item>
         /// </list>
         /// </remarks>
@@ -131,30 +157,8 @@ namespace Extend0.Metadata.Storage
                 : (rented = ArrayPool<ColumnDesc>.Shared.Rent(columns.Length)).AsSpan(0, columns.Length);
 
             _colNameUtf8 = new byte[columns.Length][];
-            const int Align = 64;
 
-            for (int i = 0; i < columns.Length; i++)
-            {
-                ref readonly var c = ref columns[i];
-                int keySize = c.Size.GetKeySize();
-                int valueSize = c.Size.GetValueSize();
-                int entrySize = checked(keySize + valueSize);
-
-                cursor = AlignUp(cursor, Align);
-                temp[i] = new ColumnDesc
-                {
-                    KeySize     = keySize,
-                    ValueSize   = valueSize,
-                    RowCapacity = c.InitialCapacity,
-                    BaseOffset  = cursor
-                };
-                cursor = checked(cursor + entrySize * c.InitialCapacity);
-
-                // Pre-encode column name as UTF-8 (truncated to keySize - 1)
-                int max = Math.Max(0, keySize - 1);
-                var bytes = Encoding.UTF8.GetBytes(c.Name);
-                _colNameUtf8[i] = bytes.Length > max ? bytes.AsSpan(0, max).ToArray() : bytes;
-            }
+            cursor = MapFile(columns, cursor, temp);
 
             long fileSize = cursor;
             _length = fileSize;
@@ -179,20 +183,132 @@ namespace Extend0.Metadata.Storage
             _cols = (ColumnDesc*)(_base + sizeof(FileHeader));
 
             // Initialize header and column descriptors if the file is new / uninitialized
-            if (_hdr->Magic != 0x4C42544D)
-            {
-                *_hdr = new FileHeader
-                {
-                    Magic = 0x4C42544D,
-                    Version = 1,
-                    ColumnCount = (ushort)columns.Length,
-                    ColumnsTableOffset = sizeof(FileHeader)
-                };
-                for (int i = 0; i < columns.Length; i++) _cols[i] = temp[i];
-                _view.Flush();
-            }
+            InitializeMappedFile(columns, temp);
 
             if (rented is not null) ArrayPool<ColumnDesc>.Shared.Return(rented, clearArray: true);
+        }
+
+        /// <summary>
+        /// Computes the physical layout of all columns, updating a temporary
+        /// <see cref="ColumnDesc"/> buffer and returning the final file size cursor.
+        /// </summary>
+        /// <param name="columns">
+        /// Column configurations taken from the <see cref="TableSpec"/>.
+        /// </param>
+        /// <param name="cursor">
+        /// Initial byte offset in the file, typically just after the header
+        /// and the column descriptor table.
+        /// </param>
+        /// <param name="temp">
+        /// Temporary span used to store computed <see cref="ColumnDesc"/> entries
+        /// (key/value sizes, row capacities and base offsets).
+        /// </param>
+        /// <returns>
+        /// The updated cursor positioned just after the last column region; this
+        /// value represents the required file size in bytes.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// For each column, this method:
+        /// </para>
+        /// <list type="number">
+        ///   <item><description>
+        ///     Computes key and value sizes from the configured column size kind
+        ///     (via <c>c.Size.GetKeySize()</c> and <c>c.Size.GetValueSize()</c>).
+        ///   </description></item>
+        ///   <item><description>
+        ///     Aligns the current <paramref name="cursor"/> to a 64-byte boundary
+        ///     (via <see cref="AlignUp(long, int)"/> with <c>a = 64</c>) and stores it as
+        ///     <see cref="ColumnDesc.BaseOffset"/>.
+        ///   </description></item>
+        ///   <item><description>
+        ///     Advances the cursor by <c>entrySize * InitialCapacity</c>, where
+        ///     <c>entrySize = keySize + valueSize</c>.
+        ///   </description></item>
+        ///   <item><description>
+        ///     Pre-encodes the column name in UTF-8 and stores it in
+        ///     <see cref="_colNameUtf8"/>, truncating to <c>KeySize - 1</c>
+        ///     bytes to leave room for a null terminator.
+        ///   </description></item>
+        /// </list>
+        /// </remarks>
+        private long MapFile(ColumnConfiguration[] columns, long cursor, Span<ColumnDesc> temp)
+        {
+            for (int i = 0; i < columns.Length; i++)
+            {
+                ref readonly var c = ref columns[i];
+                int keySize = c.Size.GetKeySize();
+                int valueSize = c.Size.GetValueSize();
+                int entrySize = checked(keySize + valueSize);
+
+                cursor = AlignUp(cursor);
+                temp[i] = new ColumnDesc
+                {
+                    KeySize     = keySize,
+                    ValueSize   = valueSize,
+                    RowCapacity = c.InitialCapacity,
+                    BaseOffset  = cursor
+                };
+                cursor = checked(cursor + entrySize * c.InitialCapacity);
+
+                // Pre-encode column name as UTF-8 (truncated to keySize - 1)
+                int max = Math.Max(0, keySize - 1);
+                var bytes = Encoding.UTF8.GetBytes(c.Name);
+                _colNameUtf8[i] = bytes.Length > max ? bytes.AsSpan(0, max).ToArray() : bytes;
+            }
+
+            return cursor;
+        }
+
+        /// <summary>
+        /// Initializes the memory-mapped file header and column descriptors
+        /// when the file is new or uninitialized.
+        /// </summary>
+        /// <param name="columns">
+        /// Column configurations taken from the <see cref="TableSpec"/> used
+        /// to construct this <see cref="MappedStore"/>.
+        /// </param>
+        /// <param name="temp">
+        /// Temporary buffer containing the computed <see cref="ColumnDesc"/> entries
+        /// (key/value sizes, row capacities and base offsets).
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// If the current <see cref="_hdr"/> does not contain the expected
+        /// <see cref="MAGIC_VALUE"/>, this method:
+        /// </para>
+        /// <list type="number">
+        ///   <item><description>
+        ///     Writes a fresh <see cref="FileHeader"/> with magic, version,
+        ///     column count and the offset of the column descriptor table.
+        ///   </description></item>
+        ///   <item><description>
+        ///     Copies the precomputed <see cref="ColumnDesc"/> entries from
+        ///     <paramref name="temp"/> into the mapped descriptor array
+        ///     referenced by <see cref="_cols"/>.
+        ///   </description></item>
+        ///   <item><description>
+        ///     Flushes the <see cref="_view"/> to ensure the header and descriptors
+        ///     are persisted to disk.
+        ///   </description></item>
+        /// </list>
+        /// <para>
+        /// If the magic value is already present, the method is a no-op and assumes
+        /// the existing header and descriptors are valid.
+        /// </para>
+        /// </remarks>
+        private void InitializeMappedFile(ColumnConfiguration[] columns, Span<ColumnDesc> temp)
+        {
+            if (_hdr->Magic == MAGIC_VALUE) return;
+            *_hdr = new FileHeader
+            {
+                Magic              = MAGIC_VALUE,
+                Version            = 1,
+                ColumnCount        = (ushort)columns.Length,
+                ColumnsTableOffset = sizeof(FileHeader)
+            };
+            for (int i = 0; i < columns.Length; i++) _cols[i] = temp[i];
+            _view.Flush();
         }
 
         /// <summary>
@@ -234,10 +350,34 @@ namespace Extend0.Metadata.Storage
         /// <summary>
         /// Aligns a value up to the next multiple of <paramref name="a"/>.
         /// </summary>
-        /// <param name="v">Value to align.</param>
-        /// <param name="a">Alignment in bytes.</param>
-        /// <returns>Next multiple of <paramref name="a"/> greater than or equal to <paramref name="v"/>.</returns>
-        static long AlignUp(long v, int a) => (v + (a - 1)) / a * a;
+        /// <param name="v">
+        /// Value to align (typically a byte offset).
+        /// </param>
+        /// <param name="a">
+        /// Alignment in bytes. Must be a positive integer. Defaults to 64 bytes,
+        /// which matches the slab alignment used by <see cref="MappedStore"/>.
+        /// </param>
+        /// <returns>
+        /// The smallest multiple of <paramref name="a"/> that is greater than or equal to
+        /// <paramref name="v"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a classic integer alignment helper:
+        /// </para>
+        /// <code>
+        /// // Example: v = 70, a = 64 → returns 128
+        /// result = AlignUp(70, 64);
+        /// </code>
+        /// <para>
+        /// The method assumes <paramref name="a"/> &gt; 0. Passing zero or a negative value
+        /// results in undefined behavior (integer division by zero or bogus results).
+        /// </para>
+        /// </remarks>
+        [DebuggerStepThrough]
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private static long AlignUp(long v, int a = 64) => unchecked(v + (a - 1)) / a * a;
+
 
         /// <summary>
         /// Computes a raw pointer to the beginning of the (key,value) entry
@@ -376,24 +516,11 @@ namespace Extend0.Metadata.Storage
                 if (basePtr == null) return false;
 
                 var hdr = (FileHeader*)basePtr;
-                if (hdr->Magic != 0x4C42544D) return false;
+                if (hdr->Magic != MAGIC_VALUE) return false;
 
                 var cols = new ColumnConfiguration[hdr->ColumnCount];
                 var cdesc = (ColumnDesc*)(basePtr + hdr->ColumnsTableOffset);
-                for (int i = 0; i < cols.Length; i++)
-                {
-                    int key = cdesc[i].KeySize;
-                    int val = cdesc[i].ValueSize;
-                    uint cap = cdesc[i].RowCapacity;
-
-                    cols[i] = new ColumnConfiguration
-                    {
-                        Name = $"c{i}", // until names are persisted, synthesize them
-                        ReadOnly = false,
-                        InitialCapacity = cap,
-                        Size = MetadataEntrySizeExtensions.PackUnchecked(key, val)
-                    };
-                }
+                for (int i = 0; i < cols.Length; i++) cols[i] = FromDesc(cdesc[i], i);
                 columns = cols;
                 return true;
             }
@@ -465,8 +592,7 @@ namespace Extend0.Metadata.Storage
             long newBytes = entrySize * newCap;
 
             // Append at end of file (keep 64B alignment)
-            const int Align = 64;
-            long newOffset = AlignUp(_length, Align);
+            long newOffset = AlignUp(_length);
             long newFileLen = newOffset + newBytes;
 
             // Ensure mapping covers the new length
