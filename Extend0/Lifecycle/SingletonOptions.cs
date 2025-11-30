@@ -33,6 +33,6 @@ namespace Extend0.Lifecycle
         /// When <see langword="true"/>, allows replacing an existing instance of the same concrete singleton type.
         /// When <see langword="false"/>, attempting to construct a second instance will throw.
         /// </summary>
-        public bool Overwrite { get; init; } = false;
+        public bool Overwrite { get; init; }
     }
 }

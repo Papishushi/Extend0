@@ -61,7 +61,7 @@ namespace Extend0.Metadata
         /// Application logger used for structured traces, scopes, and diagnostics.
         /// </summary>
         private readonly ILogger? _log;
-        private readonly bool _isLogActivated = false;
+        private readonly bool _isLogActivated;
         private readonly CapacityPolicy _capacityPolicy = CapacityPolicy.Throw;
 
         /// <summary>
@@ -85,40 +85,80 @@ namespace Extend0.Metadata
         /// </summary>
         private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<uint, Guid>> _childIndex = new();
 
+        /// <summary>
+        /// Attempts to retrieve the materialized <see cref="MetadataTable"/> associated
+        /// with the specified identifier without throwing on failure.
+        /// </summary>
+        /// <param name="id">
+        /// The table identifier to look up. If no managed table is registered
+        /// for this id, the method returns <see langword="false"/>.
+        /// </param>
+        /// <param name="table">
+        /// When this method returns <see langword="true"/>, contains the
+        /// resolved <see cref="MetadataTable"/> instance. When it returns
+        /// <see langword="false"/>, this value is <see langword="null"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if a managed table was found for the given
+        /// <paramref name="id"/> and its underlying <see cref="MetadataTable"/>
+        /// could be obtained; otherwise <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a non-throwing probe around the internal id registry:
+        /// it returns <see langword="false"/> when no entry exists, when the
+        /// managed wrapper is <see langword="null"/>, or in any other failure
+        /// scenario, and never forces creation beyond accessing
+        /// <see cref="ManagedTable.Table"/>.
+        /// </para>
+        /// <para>
+        /// The <see cref="NotNullWhenAttribute"/> on <paramref name="table"/>
+        /// allows callers to rely on flow analysis when the method returns
+        /// <see langword="true"/>.
+        /// </para>
+        /// </remarks>
         public bool TryGetManaged(Guid id, [NotNullWhen(true)] out MetadataTable? table)
         {
             table = null;
-            var control = _byId.TryGetValue(id, out ManagedTable? managed);
-            if (!control) return false;
+            var found = _byId.TryGetValue(id, out ManagedTable? managed);
+            if (!found) return false;
             if (managed is null) return false;
             table = managed.Table;
             return true;
         }
 
         /// <summary>
-        /// Per-instance hook used to grow a column to at least a given row capacity,
-        /// typically wired to <c>MetadataTable</c>-specific APIs (e.g. <c>t.GrowTo(col, minRows)</c>).
+        /// Per-instance hook that attempts to grow a column to at least the requested
+        /// row capacity for a given <see cref="MetadataTable"/> and column index.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// When set (via the <see cref="MetaDBManager"/> constructor), this delegate is invoked
-        /// by capacity helpers such as <see cref="EnsureRowCapacity"/> whenever
-        /// <see cref="CapacityPolicy.AutoGrowZeroInit"/> is in effect.
+        /// When configured (typically via the <see cref="MetaDBManager"/> constructor),
+        /// this delegate is invoked by helpers such as <see cref="EnsureRowCapacity"/>
+        /// whenever <see cref="CapacityPolicy.AutoGrowZeroInit"/> is in effect.
         /// </para>
         /// <para>
-        /// The hook is per manager: each MetaDBManager can configure its own growth policy.
+        /// The delegate receives the target table, the zero-based column index and the
+        /// minimum required row count. It must return <see langword="true"/> when the
+        /// column was successfully grown (or already large enough), or
+        /// <see langword="false"/> if growth could not be achieved.
         /// </para>
         /// </remarks>
         private Func<MetadataTable, uint, uint, bool>? GrowColumnTo { get; set; }
 
-
         /// <summary>
         /// Factory used by <see cref="_childIndex"/> to lazily create the per-parent
-        /// row→child-table map on first use.
+        /// row-to-child-table map on first access.
         /// </summary>
+        /// <remarks>
+        /// The factory ignores the parent <see cref="Guid"/> and always returns a new
+        /// <see cref="ConcurrentDictionary{TKey, TValue}"/> mapping parent row indices
+        /// to child table identifiers. It is passed to
+        /// <see cref="ConcurrentDictionary{TKey, TValue}.GetOrAdd(TKey, Func{TKey, TValue})"/>
+        /// to avoid allocating intermediate lambdas on each call.
+        /// </remarks>
         private static readonly Func<Guid, ConcurrentDictionary<uint, Guid>> s_ChildMapFactory =
             static _ => new ConcurrentDictionary<uint, Guid>();
-
 
         /// <summary>
         /// Default <see cref="MetadataTable"/> factory used when no custom factory
@@ -134,7 +174,6 @@ namespace Extend0.Metadata
 
             return new MetadataTable(spec.Value);
         };
-
 
         /// <summary>
         /// Initializes a new <see cref="MetaDBManager"/> that orchestrates <see cref="MetadataTable"/> creation,
@@ -295,6 +334,38 @@ namespace Extend0.Metadata
             }
         }
 
+        /// <summary>
+        /// Registers a <see cref="ManagedTable"/> instance in the internal registries,
+        /// enforcing unique identifiers and table names.
+        /// </summary>
+        /// <param name="m">
+        /// The <see cref="ManagedTable"/> to register. Its <see cref="ManagedTable.Id"/>
+        /// must be unique within this manager and its <see cref="ManagedTable.Name"/>
+        /// must be a non-null, unique key.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// The method updates three internal structures:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item>
+        ///     <description><c>_byId</c>: maps table <see cref="Guid"/> to <see cref="ManagedTable"/>.</description>
+        ///   </item>
+        ///   <item>
+        ///     <description><c>_byName</c>: maps table name to its <see cref="Guid"/>.</description>
+        ///   </item>
+        ///   <item>
+        ///     <description><c>_childIndex</c>: initializes the per-parent child-table cache.</description>
+        ///   </item>
+        /// <para>
+        /// If name registration fails, the previously added id entry is rolled back and a warning
+        /// is logged when debug logging is enabled.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the managed table has no name, when a table with the same id is already
+        /// registered, or when a table with the same name is already registered.
+        /// </exception>
         private void RegisterManagedTable(ManagedTable m)
         {
             var id = m.Id;
@@ -677,24 +748,28 @@ namespace Extend0.Metadata
             ArgumentNullException.ThrowIfNull(operationName);
             ArgumentNullException.ThrowIfNull(action);
 
-            IDisposable? scope = null;
-            var sw = Stopwatch.StartNew();
+            if (!_isLogActivated || _log is null)
+            {
+                await action(this).ConfigureAwait(false);
+                return;
+            }
+
+            using var op = new OpScope(
+                _log,
+                operationName,
+                state,
+                LogLevel.Information,
+                ActivitySrc,
+                ActivityKind.Internal);
+
             try
             {
-                if (_isLogActivated) scope = _log!.BeginScope(new Dictionary<string, object?> { ["op"] = operationName, ["state"] = state });
-
-                if (_isLogActivated) Log.RunStart(_log!, operationName);
                 await action(this).ConfigureAwait(false);
-                if (_isLogActivated) Log.RunEnd(_log!, operationName, sw.Elapsed.TotalMilliseconds);
             }
             catch (Exception ex)
             {
-                if (_isLogActivated) Log.RunFail(_log!, operationName, sw.Elapsed.TotalMilliseconds, ex);
+                op.Fail(ex);
                 throw;
-            }
-            finally
-            {
-                scope?.Dispose();
             }
         }
 
@@ -832,11 +907,7 @@ namespace Extend0.Metadata
         /// </list>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        private unsafe void FillColumn<T>(
-            MetadataTable table, uint column, uint rows,
-            Func<uint, T> factory,
-            CapacityPolicy policy,
-            int batchSize = DEFAULT_BATCH_SIZE) where T : unmanaged
+        private unsafe void FillColumn<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE) where T : unmanaged
         {
             if (rows == 0) return;
 
@@ -871,6 +942,16 @@ namespace Extend0.Metadata
             PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
         }
 
+        /// <summary>Fills a column cell-by-cell using a per-row factory, batching value creation and using stack allocation or an array pool depending on the total byte size.</summary>
+        /// <typeparam name="T">Unmanaged value type written into each row.</typeparam>
+        /// <param name="table">Target <see cref="MetadataTable"/> whose column will be filled.</param>
+        /// <param name="column">Zero-based column index to fill.</param>
+        /// <param name="rows">Number of rows to fill, starting at 0.</param>
+        /// <param name="factory">Factory that produces a value for a given row index.</param>
+        /// <param name="batchSize">Maximum number of rows processed per batch when generating and writing values.</param>
+        /// <param name="tSize">Size in bytes of <typeparamref name="T"/>; used to compute batch byte size.</param>
+        /// <param name="MaxStackBytes">Maximum total bytes allowed on the stack before falling back to the shared array pool.</param>
+        /// <exception cref="InvalidOperationException">Thrown when a cell's VALUE buffer is smaller than <paramref name="tSize"/>.</exception>
         private static unsafe void PerCellFill<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes) where T : unmanaged
         {
             for (uint start = 0; start < rows; start += (uint)batchSize)
@@ -902,6 +983,14 @@ namespace Extend0.Metadata
             }
         }
 
+        /// <summary>Fills a fixed-size VALUE column using strided writes over a <see cref="ColumnBlock"/>, batching allocations and using stack or pooled buffers based on byte size.</summary>
+        /// <typeparam name="T">Unmanaged value type written into each row.</typeparam>
+        /// <param name="rows">Number of rows to fill, starting at 0.</param>
+        /// <param name="factory">Factory that produces a value for a given row index.</param>
+        /// <param name="batchSize">Maximum number of rows processed per batch when generating and writing values.</param>
+        /// <param name="tSize">Size in bytes of <typeparamref name="T"/>; used to compute batch byte size.</param>
+        /// <param name="MaxStackBytes">Maximum total bytes allowed on the stack before falling back to the shared array pool.</param>
+        /// <param name="blk">Column block describing the underlying fixed-size VALUE layout (base pointer, stride and offsets).</param>
         private static unsafe void StridedFill<T>(uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes, ColumnBlock blk) where T : unmanaged
         {
             byte* colBase = blk.Base + blk.ValueOffset;
@@ -935,6 +1024,15 @@ namespace Extend0.Metadata
             }
         }
 
+        /// <summary>Attempts a contiguous fast-path column fill over a <see cref="ColumnBlock"/> when VALUEs are tightly packed and match <typeparamref name="T"/> in size.</summary>
+        /// <typeparam name="T">Unmanaged value type written into each row.</typeparam>
+        /// <param name="rows">Number of rows to fill, starting at 0.</param>
+        /// <param name="factory">Factory that produces a value for a given row index.</param>
+        /// <param name="batchSize">Maximum number of rows processed per batch when generating values.</param>
+        /// <param name="tSize">Size in bytes of <typeparamref name="T"/>; must match <see cref="ColumnBlock.ValueSize"/> for the fast path to be used.</param>
+        /// <param name="MaxStackBytes">Maximum total bytes allowed on the stack before falling back to the shared array pool.</param>
+        /// <param name="blk">Column block describing the contiguous VALUE layout (base pointer, stride and offsets).</param>
+        /// <returns><see langword="true"/> if the contiguous fast path was taken and all rows were written; otherwise <see langword="false"/> so that callers can fall back to strided or per-cell paths.</returns>
         private static unsafe bool TryContiguousFill<T>(uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes, ColumnBlock blk) where T : unmanaged
         {
             // Only when truly contiguous AND sizes match exactly.
@@ -992,11 +1090,7 @@ namespace Extend0.Metadata
         /// pointer-based loop; otherwise it falls back to per-cell access.
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        private unsafe void FillColumn(
-            MetadataTable table, uint column, uint rows,
-            Action<uint, IntPtr, uint> writer,
-            CapacityPolicy policy,
-            int batchSize = DEFAULT_BATCH_SIZE)
+        private unsafe void FillColumn(MetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE)
         {
             if (rows == 0) return;
 
@@ -1143,91 +1237,116 @@ namespace Extend0.Metadata
         /// <exception cref="InvalidOperationException">
         /// Thrown when the source and destination column blocks have different <c>ValueSize</c>.
         /// </exception>
-        private static unsafe bool PerBlockStridedCopy(
-            MetadataTable src,
-            uint srcCol,
-            MetadataTable dst,
-            uint dstCol,
-            uint rows,
-            int batchSize)
+        private static unsafe bool PerBlockStridedCopy(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, int batchSize)
         {
-            if (src.TryGetColumnBlock(srcCol, out ColumnBlock srcBlk) && dst.TryGetColumnBlock(dstCol, out ColumnBlock dstBlk))
+            // Fast exit when blocks are not available
+            if (!src.TryGetColumnBlock(srcCol, out ColumnBlock srcBlk) ||
+                !dst.TryGetColumnBlock(dstCol, out ColumnBlock dstBlk))
+                return false;
+
+            if (srcBlk.ValueSize != dstBlk.ValueSize)
+                throw new InvalidOperationException($"CopyColumn: VALUE sizes differ (src {srcBlk.ValueSize} != dst {dstBlk.ValueSize})");
+
+            var valueSize = (uint)srcBlk.ValueSize;
+            if (valueSize == 0 || rows == 0) return true;
+
+            bool srcContig = srcBlk.Stride == srcBlk.ValueSize;
+            bool dstContig = dstBlk.Stride == dstBlk.ValueSize;
+
+            // ===== FAST-PATH: contiguous (values back-to-back) =====
+            if (srcContig && dstContig)
             {
-                if (srcBlk.ValueSize != dstBlk.ValueSize)
-                    throw new InvalidOperationException($"CopyColumn: VALUE sizes differ (src {srcBlk.ValueSize} != dst {dstBlk.ValueSize})");
+                byte* s0 = srcBlk.GetValuePtr(0);
+                byte* d0 = dstBlk.GetValuePtr(0);
 
-                var valueSize = (uint)srcBlk.ValueSize;
-                if (valueSize == 0 || rows == 0) return true;
-
-                bool srcContig = srcBlk.Stride == srcBlk.ValueSize;
-                bool dstContig = dstBlk.Stride == dstBlk.ValueSize;
-
-                // ===== FAST-PATH: contiguo (values back-to-back) =====
-                if (srcContig && dstContig)
-                {
-                    byte* s0 = srcBlk.GetValuePtr(0);
-                    byte* d0 = dstBlk.GetValuePtr(0);
-
-                    long total = checked(rows * srcBlk.ValueSize);
-                    Buffer.MemoryCopy(s0, d0, total, total);
-                    return true;
-                }
-
-                // ===== STRIDED =====
-                var sPitch = (nuint)srcBlk.Stride;
-                var dPitch = (nuint)dstBlk.Stride;
-                var sStart = srcBlk.GetValuePtr(0);
-                var dStart = dstBlk.GetValuePtr(0);
-
-                uint done = 0;
-                uint maxBatch = (uint)Math.Max(1, batchSize);
-                maxBatch = (maxBatch + 3u) & ~3u; // round up to multiple of 4
-
-                if (valueSize == 64)
-                {
-                    while (done < rows)
-                    {
-                        var take = Math.Min(rows - done, maxBatch);
-                        StridedCopy64(dStart + dPitch * done, sStart + sPitch * done, dPitch, sPitch, take);
-                        done += take;
-                    }
-                    return true;
-                }
-
-                if (valueSize == 128)
-                {
-                    while (done < rows)
-                    {
-                        var take = Math.Min(rows - done, maxBatch);
-                        StridedCopy128(dStart + dPitch * done, sStart + sPitch * done, dPitch, sPitch, take);
-                        done += take;
-                    }
-                    return true;
-                }
-
-                if (valueSize == 256)
-                {
-                    while (done < rows)
-                    {
-                        var take = Math.Min(rows - done, maxBatch);
-                        StridedCopy256(dStart + dPitch * done, sStart + sPitch * done, dPitch, sPitch, take);
-                        done += take;
-                    }
-                    return true;
-                }
-
-                // Genérico
-                while (done < rows)
-                {
-                    var take = Math.Min(rows - done, maxBatch);
-                    StridedCopyGeneric(dStart + dPitch * done, sStart + sPitch * done, dPitch, sPitch, valueSize, take);
-                    done += take;
-                }
+                long total = checked(rows * srcBlk.ValueSize);
+                Buffer.MemoryCopy(s0, d0, total, total);
                 return true;
             }
 
-            return false;
+            // ===== STRIDED =====
+            var sPitch = (nuint)srcBlk.Stride;
+            var dPitch = (nuint)dstBlk.Stride;
+            var sStart = srcBlk.GetValuePtr(0);
+            var dStart = dstBlk.GetValuePtr(0);
+
+            uint maxBatch = (uint)Math.Max(1, batchSize);
+            maxBatch = (maxBatch + 3u) & ~3u; // round up to multiple of 4
+
+            switch (valueSize)
+            {
+                case 64:
+                    CopyStridedBatched(rows, maxBatch, dStart, sStart, dPitch, sPitch, &StridedCopy64);
+                    break;
+                case 128:
+                    CopyStridedBatched(rows, maxBatch, dStart, sStart, dPitch, sPitch, &StridedCopy128);
+                    break;
+                case 256:
+                    CopyStridedBatched(rows, maxBatch, dStart, sStart, dPitch, sPitch, &StridedCopy256);
+                    break;
+                default:
+                    CopyStridedGenericBatched(rows, maxBatch, dStart, sStart, dPitch, sPitch, valueSize);
+                    break;
+            }
+
+            return true;
         }
+
+        /// <summary>
+        /// Executes a strided copy loop in batches, delegating the actual per-row copy
+        /// to a specialized worker for a fixed VALUE size.
+        /// </summary>
+        /// <param name="rows">Total number of rows to copy.</param>
+        /// <param name="maxBatch">
+        /// Maximum number of rows to process per batch. Typically already aligned
+        /// to a multiple of 4 for unrolled inner loops.
+        /// </param>
+        /// <param name="dStart">Pointer to the first destination VALUE in the column.</param>
+        /// <param name="sStart">Pointer to the first source VALUE in the column.</param>
+        /// <param name="dPitch">Destination stride in bytes between consecutive rows.</param>
+        /// <param name="sPitch">Source stride in bytes between consecutive rows.</param>
+        /// <param name="worker">
+        /// Function pointer that performs the actual strided copy for a given batch
+        /// and VALUE size (e.g., <see cref="StridedCopy64"/>, <see cref="StridedCopy128"/>).
+        /// </param>
+        private static unsafe void CopyStridedBatched(uint rows, uint maxBatch, byte* dStart, byte* sStart, nuint dPitch, nuint sPitch, delegate*<byte*, byte*, nuint, nuint, uint, void> worker)
+        {
+            uint done = 0;
+            while (done < rows)
+            {
+                var take = Math.Min(rows - done, maxBatch);
+                worker(dStart + dPitch * done, sStart + sPitch * done, dPitch, sPitch, take);
+                done += take;
+            }
+        }
+
+        /// <summary>
+        /// Executes a strided copy loop in batches for arbitrary VALUE sizes,
+        /// using <see cref="StridedCopyGeneric"/> as the inner worker.
+        /// </summary>
+        /// <param name="rows">Total number of rows to copy.</param>
+        /// <param name="maxBatch">
+        /// Maximum number of rows to process per batch. Typically already aligned
+        /// to a multiple of 4 for unrolled inner loops.
+        /// </param>
+        /// <param name="dStart">Pointer to the first destination VALUE in the column.</param>
+        /// <param name="sStart">Pointer to the first source VALUE in the column.</param>
+        /// <param name="dPitch">Destination stride in bytes between consecutive rows.</param>
+        /// <param name="sPitch">Source stride in bytes between consecutive rows.</param>
+        /// <param name="valueSize">Size in bytes of each VALUE payload to copy.</param>
+        private static unsafe void CopyStridedGenericBatched(uint rows, uint maxBatch, byte* dStart, byte* sStart, nuint dPitch, nuint sPitch, uint valueSize)
+        {
+            uint done = 0;
+            while (done < rows)
+            {
+                var take = Math.Min(rows - done, maxBatch);
+                var aPitch = dStart + dPitch * done;
+                var bPitch = sStart + sPitch * done;
+                StridedCopyGeneric(aPitch, bPitch, dPitch, sPitch, valueSize, take);
+                done += take;
+            }
+        }
+
 
         /// <summary>
         /// Copies values row-by-row from a source column to a destination column,
@@ -1253,12 +1372,7 @@ namespace Extend0.Metadata
         /// Thrown when a source cell for a given row is missing, or when the value sizes
         /// of the source and destination cells differ for any row.
         /// </exception>
-        private static unsafe void PerCellCopy(
-            MetadataTable src,
-            uint srcCol,
-            MetadataTable dst,
-            uint dstCol,
-            uint rows)
+        private static unsafe void PerCellCopy(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows)
         {
             for (uint row = 0; row < rows; row++)
             {
@@ -1421,12 +1535,7 @@ namespace Extend0.Metadata
         /// This method assumes the cell is already initialized; call
         /// <see cref="EnsureRefVec(MetadataTable, uint, uint, CapacityPolicy)"/> first if unsure.
         /// </remarks>
-        private static unsafe void LinkRef(
-            MetadataTable parent,
-            uint refsCol,
-            uint parentRow,
-            in MetadataTableRef tref
-        )
+        private static unsafe void LinkRef(MetadataTable parent, uint refsCol, uint parentRow, in MetadataTableRef tref)
         {
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
             var buf = new Span<byte>(cell.GetValuePointer(), cell.ValueSize);

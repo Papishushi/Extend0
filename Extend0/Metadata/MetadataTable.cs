@@ -1,6 +1,6 @@
-﻿using Extend0.Metadata.Schema;
+﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
-using Extend0.Metadata.CodeGen;
 
 namespace Extend0.Metadata
 {

@@ -1,7 +1,7 @@
-﻿using System.Runtime.CompilerServices;
+﻿using Extend0.Metadata.CodeGen;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using Extend0.Metadata.CodeGen;
 
 namespace Extend0.Metadata.Schema
 {

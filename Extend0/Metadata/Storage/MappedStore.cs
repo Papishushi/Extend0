@@ -1,6 +1,6 @@
-﻿using Extend0.Metadata.Schema;
+﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage.Files;
-using Extend0.Metadata.CodeGen;
 using System.Buffers;
 using System.Diagnostics;
 using System.IO.MemoryMappedFiles;

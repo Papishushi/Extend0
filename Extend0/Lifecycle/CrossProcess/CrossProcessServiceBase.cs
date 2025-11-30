@@ -99,7 +99,6 @@ namespace Extend0.Lifecycle.CrossProcess
         /// returns <c>false</c> without attempting a connection. All exceptions are
         /// swallowed and treated as a negative result.
         /// </remarks>
-
         public async Task<bool> CanConnectAsync()
         {
             try

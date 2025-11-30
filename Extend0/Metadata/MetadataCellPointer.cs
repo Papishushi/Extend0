@@ -95,7 +95,7 @@ namespace Extend0.Metadata
             ReadOnlySpan<char> numFmt = f == 'X' ? "X" : [];
 
             // Capacity pre-check (worst case: decimal 10+1+10; hex 8+1+8)
-            int worst = (f == 'X') ? (8 + 1 + 8) : (10 + 1 + 10);
+            int worst = f == 'X' ? 17 : 21;
             if (destination.Length < worst)
             {
                 charsWritten = 0;

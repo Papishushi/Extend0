@@ -1,5 +1,5 @@
-﻿using Extend0.Metadata.Schema;
-using Extend0.Metadata.CodeGen;
+﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Schema;
 using System.Runtime.CompilerServices;
 
 namespace Extend0.Metadata.Storage

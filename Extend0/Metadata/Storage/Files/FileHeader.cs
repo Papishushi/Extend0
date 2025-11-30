@@ -1,5 +1,4 @@
-﻿using Extend0.Metadata.Storage;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Extend0.Metadata.Storage.Files
 {

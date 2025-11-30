@@ -497,7 +497,7 @@ namespace Extend0.Metadata.CodeGen
     }}
 }}");
 
-            return sbEnum.ToString() + '\n' + sbExt.ToString();
+            return sbEnum.ToString() + sbExt + '\n';
         }
     }
 }
