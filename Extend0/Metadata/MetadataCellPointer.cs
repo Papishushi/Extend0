@@ -17,7 +17,7 @@ namespace Extend0.Metadata
     ///   <item><description><see cref="ISpanFormattable"/> for allocation-free formatting.</description></item>
     ///   <item><description><see cref="IComparable{T}"/> with ordering by <c>(Column, Row)</c>.</description></item>
     ///   <item><description><see cref="IParsable{T}"/> and <see cref="ISpanParsable{T}"/> for text parsing.</description></item>
-    ///   <item><description><see cref="System.IUtf8SpanParsable{T}"/> for UTF-8 based parsing.</description></item>
+    ///   <item><description><see cref="IUtf8SpanParsable{T}"/> for UTF-8 based parsing.</description></item>
     /// </list>
     /// <para>
     /// The default textual representation is <c>"row:column"</c> in decimal form.
@@ -30,7 +30,7 @@ namespace Extend0.Metadata
         IComparable<MetadataCellPointer>,
         IParsable<MetadataCellPointer>,
         ISpanParsable<MetadataCellPointer>,
-        System.IUtf8SpanParsable<MetadataCellPointer>
+        IUtf8SpanParsable<MetadataCellPointer>
     {
         /// <summary>
         /// Gets the zero-based row index of the cell.
@@ -91,8 +91,8 @@ namespace Extend0.Metadata
                               ReadOnlySpan<char> format, IFormatProvider? provider)
         {
             char f = (format.Length == 0) ? 'G' : char.ToUpperInvariant(format[0]);
-            char sep = f switch { 'C' => ',', _ => ':' };
-            ReadOnlySpan<char> numFmt = f == 'X' ? "X" : ReadOnlySpan<char>.Empty;
+            char sep = f == 'C' ? ',' : ':';
+            ReadOnlySpan<char> numFmt = f == 'X' ? "X" : [];
 
             // Capacity pre-check (worst case: decimal 10+1+10; hex 8+1+8)
             int worst = (f == 'X') ? (8 + 1 + 8) : (10 + 1 + 10);
@@ -312,49 +312,6 @@ namespace Extend0.Metadata
         /// </returns>
         public static bool TryParse(ReadOnlySpan<byte> utf8Text, IFormatProvider? provider, out MetadataCellPointer value)
         {
-            static ReadOnlySpan<byte> TrimAscii(ReadOnlySpan<byte> s)
-            {
-                int i = 0, j = s.Length - 1;
-                while (i <= j && s[i] <= 0x20) i++;
-                while (j >= i && s[j] <= 0x20) j--;
-                return s.Slice(i, j - i + 1);
-            }
-
-            static bool TryParseUIntUtf8(ReadOnlySpan<byte> s, out uint n)
-            {
-                n = 0;
-                s = TrimAscii(s);
-                if (s.Length == 0) return false;
-
-                // Hex with 0x/0X prefix
-                if (s.Length >= 2 && s[0] == (byte)'0' && (s[1] == (byte)'x' || s[1] == (byte)'X'))
-                {
-                    s = s[2..];
-                    if (s.Length == 0) return false;
-                    foreach (byte b in s)
-                    {
-                        uint v = b switch
-                        {
-                            >= (byte)'0' and <= (byte)'9' => (uint)(b - (byte)'0'),
-                            >= (byte)'a' and <= (byte)'f' => (uint)(b - (byte)'a' + 10),
-                            >= (byte)'A' and <= (byte)'F' => (uint)(b - (byte)'A' + 10),
-                            _ => 0xFFFF_FFFFu
-                        };
-                        if (v == 0xFFFF_FFFFu) return false;
-                        n = (n << 4) | v;
-                    }
-                    return true;
-                }
-
-                // Decimal
-                foreach (byte b in s)
-                {
-                    if (b < (byte)'0' || b > (byte)'9') return false;
-                    n = checked(n * 10 + (uint)(b - (byte)'0'));
-                }
-                return true;
-            }
-
             utf8Text = TrimAscii(utf8Text);
             int sep = utf8Text.IndexOf((byte)':');
             if (sep < 0) sep = utf8Text.IndexOf((byte)',');
@@ -375,6 +332,83 @@ namespace Extend0.Metadata
             }
 
             value = new MetadataCellPointer(r, c);
+            return true;
+        }
+
+        /// <summary>
+        /// Trims leading and trailing ASCII whitespace characters from the given span.
+        /// </summary>
+        /// <param name="s">
+        /// The input span containing ASCII bytes. Characters with values less than or
+        /// or equal to <c>0x20</c> at the start and end are treated as whitespace.
+        /// </param>
+        /// <returns>
+        /// A slice of <paramref name="s"/> with leading and trailing ASCII whitespace removed.
+        /// If the span consists only of whitespace, returns an empty span.
+        /// </returns>
+        static ReadOnlySpan<byte> TrimAscii(ReadOnlySpan<byte> s)
+        {
+            int i = 0, j = s.Length - 1;
+            while (i <= j && s[i] <= 0x20) i++;
+            while (j >= i && s[j] <= 0x20) j--;
+            return s.Slice(i, j - i + 1);
+        }
+
+        /// <summary>
+        /// Attempts to parse an unsigned 32-bit integer from a UTF-8 byte span.
+        /// </summary>
+        /// <param name="s">
+        /// The UTF-8 encoded input span. Leading and trailing ASCII whitespace
+        /// (bytes &lt;= <c>0x20</c>) are ignored.
+        /// Supports decimal numbers (e.g. <c>"123"</c>) and hexadecimal numbers
+        /// prefixed with <c>"0x"</c> or <c>"0X"</c> (e.g. <c>"0xFF"</c>).
+        /// </param>
+        /// <param name="n">
+        /// When this method returns <see langword="true"/>, contains the parsed
+        /// unsigned 32-bit integer value.
+        /// When it returns <see langword="false"/>, the value is undefined.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the span contains a valid unsigned integer in
+        /// decimal or hexadecimal form; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// Decimal parsing uses a checked context and will throw an <see cref="OverflowException"/>
+        /// if the value does not fit in a <see cref="uint"/>.
+        /// Hexadecimal parsing returns <see langword="false"/> for any non-hex character.
+        /// </remarks>
+        static bool TryParseUIntUtf8(ReadOnlySpan<byte> s, out uint n)
+        {
+            n = 0;
+            s = TrimAscii(s);
+            if (s.Length == 0) return false;
+
+            // Hex with 0x/0X prefix
+            if (s.Length >= 2 && s[0] == (byte)'0' && (s[1] == (byte)'x' || s[1] == (byte)'X'))
+            {
+                s = s[2..];
+                if (s.Length == 0) return false;
+                foreach (byte b in s)
+                {
+                    uint v = b switch
+                    {
+                        >= (byte)'0' and <= (byte)'9' => (uint)(b - (byte)'0'),
+                        >= (byte)'a' and <= (byte)'f' => (uint)(b - (byte)'a' + 10),
+                        >= (byte)'A' and <= (byte)'F' => (uint)(b - (byte)'A' + 10),
+                        _ => 0xFFFF_FFFFu
+                    };
+                    if (v == 0xFFFF_FFFFu) return false;
+                    n = (n << 4) | v;
+                }
+                return true;
+            }
+
+            // Decimal
+            foreach (byte b in s)
+            {
+                if (b < (byte)'0' || b > (byte)'9') return false;
+                n = checked(n * 10 + (uint)(b - (byte)'0'));
+            }
             return true;
         }
 

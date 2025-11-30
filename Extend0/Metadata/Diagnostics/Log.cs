@@ -23,15 +23,15 @@ namespace Extend0.Metadata.Diagnostics
         // ───────── Registry / Open (2000-2099) ─────────
 
         [LoggerMessage(2000, LogLevel.Warning,
-            "MetaDb.GrowColumnTo was already configured. It will be overwritten...")]
+            "MetaDbManager.GrowColumnTo for this instance was already configured. It will be overwritten.")]
         public static partial void GrowHookOverwrite(ILogger logger);
 
         [LoggerMessage(2001, LogLevel.Information,
-            "'{Name}' was lazy registered. Id={Id} Path={Path}")]
+            "'{Name}' was lazily registered. Id={Id} Path={Path}")]
         public static partial void TableRegisteredLazy(ILogger logger, string name, Guid id, string path);
 
         [LoggerMessage(2002, LogLevel.Information,
-            "'{Name}' created inmediatly. Id={Id} Path={Path}")]
+            "'{Name}' created immediately. Id={Id} Path={Path}")]
         public static partial void TableCreatedNow(ILogger logger, string name, Guid id, string path);
 
         [LoggerMessage(2003, LogLevel.Debug,
@@ -89,7 +89,7 @@ namespace Extend0.Metadata.Diagnostics
         public static partial void EnsureRefVecInit(ILogger logger, string table, uint refsCol, uint row);
 
         [LoggerMessage(2301, LogLevel.Error,
-            "REFS: ValueSize is to small to host refs (len={Len})")]
+            "REFS: ValueSize is too small to host refs (len={Len})")]
         public static partial void RefCellTooSmall(ILogger logger, int len);
 
         [LoggerMessage(2302, LogLevel.Debug,
@@ -97,11 +97,11 @@ namespace Extend0.Metadata.Diagnostics
         public static partial void LinkRefAdded(ILogger logger, string parent, uint row, Guid childId, uint col, uint childRow);
 
         [LoggerMessage(2303, LogLevel.Error,
-            "Full Refs; increment ValueBytes or implement overflow.")]
+            "Refs vector is full; increment ValueBytes or implement overflow.")]
         public static partial void RefsFull(ILogger logger);
 
         [LoggerMessage(2310, LogLevel.Information,
-            "Reutilizing children for {Parent} row={Row}: ChildId={ChildId}")]
+            "Reusing children for {Parent} row={Row}: ChildId={ChildId}")]
         public static partial void ChildReused(ILogger logger, string parent, uint row, Guid childId);
 
         [LoggerMessage(2311, LogLevel.Information,
@@ -120,13 +120,16 @@ namespace Extend0.Metadata.Diagnostics
         public static partial void CapacityGrow(ILogger logger, string table, uint col, uint rows, CapacityPolicy policy);
 
         [LoggerMessage(2402, LogLevel.Error,
-            "AutoGrowZeroInit requires MetaDb.GrowColumnTo hook")]
+            "CapacityPolicy.AutoGrowZeroInit requires configuring GrowColumnTo on MetaDBManager.")]
         public static partial void CapacityGrowHookMissing(ILogger logger);
 
         [LoggerMessage(2403, LogLevel.Error,
             "GrowColumnTo could not grow {Table}[{Col}] to {Rows} rows")]
         public static partial void CapacityGrowFailed(ILogger logger, string table, uint col, uint rows);
 
+        [LoggerMessage(2404, LogLevel.Error,
+            "EnsureRowCapacityProbe failed for {Table}[{Col}] needing {NeededRows} rows")]
+        public static partial void EnsureRowCapacityProbeFailed(ILogger logger, string table, uint col, uint neededRows, Exception ex);
 
         // ───────── Run/RunAsync (2500-2599) ─────────
 

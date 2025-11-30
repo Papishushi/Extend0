@@ -117,17 +117,37 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
         {
             // Already initialized and not allowed to overwrite?
             if (_service is not null && !options.Overwrite)
-                throw new InvalidOperationException($"A singleton service for '{typeof(TService).FullName}' is already initialized.");
+                throw new InvalidOperationException(
+                    $"A singleton service for '{typeof(TService).FullName}' is already initialized.");
 
             // Tear down previous state if overwriting
             if (_handle is not null)
             {
-                try { _handle.Dispose(); } catch { }
+                try
+                {
+                    _handle.Dispose();
+                }
+                catch
+                {
+                    // Best-effort teardown of previous cross-process handle.
+                    // At this point we are reinitializing the singleton anyway,
+                    // and callers cannot do anything useful with an error in Dispose().
+                }
+
                 _handle = null;
             }
             else if (_service is IDisposable d && options.Overwrite)
             {
-                try { d.Dispose(); } catch { }
+                try
+                {
+                    d.Dispose();
+                }
+                catch
+                {
+                    // Same rationale: failure to dispose the previous in-process service
+                    // during overwrite is non-recoverable cannot be managed upstream.
+                    // Prefer to swallow and continue.
+                }
             }
 
             _service = null;
@@ -155,4 +175,5 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
             }
         }
     }
+
 }

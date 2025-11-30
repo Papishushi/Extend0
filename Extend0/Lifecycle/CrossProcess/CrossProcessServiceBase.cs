@@ -141,21 +141,72 @@ namespace Extend0.Lifecycle.CrossProcess
         {
             lock (s_hostGate)
             {
-                try { s_serverCts?.Cancel(); } catch { }
-                s_serverCts?.Dispose();
+                try
+                {
+                    s_serverCts?.Cancel();
+                }
+                catch
+                {
+                    // Best-effort cancellation: if the CTS is already disposed or faulted,
+                    // there is nothing meaningful the caller can do during shutdown.
+                }
+
+                try
+                {
+                    s_serverCts?.Dispose();
+                }
+                catch
+                {
+                    // Failure to dispose the cancellation source is non-critical in teardown
+                    // and must not prevent the rest of the shutdown sequence.
+                }
+
                 s_serverCts = null;
 
-                if (s_server is IAsyncDisposable ad)
-                    ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                else
-                    (s_server as IDisposable)?.Dispose();
+                try
+                {
+                    if (s_server is IAsyncDisposable ad)
+                    {
+                        // Synchronous wait is acceptable here because we are in a controlled
+                        // shutdown path under a lock, not on a hot path.
+                        ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                    }
+                    else
+                    {
+                        (s_server as IDisposable)?.Dispose();
+                    }
+                }
+                catch
+                {
+                    // Server disposal failure is non-recoverable at this point and callers
+                    // cannot act on it; we swallow it to keep StopHosting() idempotent and safe.
+                }
 
                 s_server = null;
 
                 if (s_hostMutex is not null)
                 {
-                    try { s_hostMutex.ReleaseMutex(); } catch { }
-                    s_hostMutex.Dispose();
+                    try
+                    {
+                        s_hostMutex.ReleaseMutex();
+                    }
+                    catch
+                    {
+                        // Releasing a mutex we don't own / already released can throw, but
+                        // during shutdown this only means the mutex is no longer usable,
+                        // which is acceptable because hosting is being stopped.
+                    }
+
+                    try
+                    {
+                        s_hostMutex.Dispose();
+                    }
+                    catch
+                    {
+                        // Failure to dispose the OS mutex handle is not actionable for the caller
+                        // and the process will release OS resources on exit anyway.
+                    }
+
                     s_hostMutex = null;
                 }
             }

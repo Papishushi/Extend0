@@ -47,10 +47,16 @@ namespace Extend0.Metadata
         private readonly ICellStore _store;
         private readonly TableSpec _spec;
 
+
         /// <summary>
         /// Gets the total number of columns defined in this table.
         /// </summary>
         public int ColumnCount => _columns.Count;
+
+        /// <summary>
+        /// Retrieves the <see cref="TableSpec"/> that defines this table.
+        /// </summary>
+        public TableSpec Spec => _spec;
 
         /// <summary>
         /// Opens an existing metadata table from the memory-mapped file described by
