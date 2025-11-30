@@ -132,139 +132,284 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <summary>
         /// Processes NDJSON requests for a single connected client until disconnect or cancellation.
         /// </summary>
-        private async Task HandleClientAsync(
-            NamedPipeServerStream server,
-            IReadOnlyDictionary<string, MethodInfo[]> methodsByName,
-            CancellationToken token)
+        /// <param name="server">
+        /// Connected <see cref="NamedPipeServerStream"/> representing the client connection.
+        /// </param>
+        /// <param name="methodsByName">
+        /// Map of method name to available overloads used to resolve RPC targets.
+        /// </param>
+        /// <param name="token">
+        /// Cancellation token used to stop the processing loop (typically when the host is shutting down).
+        /// </param>
+        private async Task HandleClientAsync(NamedPipeServerStream server, IReadOnlyDictionary<string, MethodInfo[]> methodsByName, CancellationToken token)
         {
-            using var reader = new StreamReader(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: false);
-            using var writer = new StreamWriter(server, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 1024, leaveOpen: false)
+            using var reader = new StreamReader(
+                server,
+                Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: false,
+                leaveOpen: false);
+
+            using var writer = new StreamWriter(
+                server,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                bufferSize: 1024,
+                leaveOpen: false)
             {
                 AutoFlush = true
             };
 
             try
             {
-                // Handshake
-                await writer.WriteLineAsync($"HELLO {CrossProcessUtils.CurrentFingerprint}").ConfigureAwait(false);
-
-                while (!token.IsCancellationRequested && server.IsConnected)
-                {
-                    string? line;
-                    try
-                    {
-                        line = await reader.ReadLineAsync(token).ConfigureAwait(false);
-                    }
-                    catch (IOException)
-                    {
-                        break; // client dropped
-                    }
-
-                    if (line is null) break;
-
-                    JsonDocument doc;
-                    try
-                    {
-                        doc = JsonDocument.Parse(line);
-                    }
-                    catch
-                    {
-                        await WriteErr("Bad JSON").ConfigureAwait(false);
-                        continue;
-                    }
-
-                    using (doc)
-                    {
-                        if (!doc.RootElement.TryGetProperty("m", out var mProp))
-                        {
-                            await WriteErr("Bad request: missing 'm'").ConfigureAwait(false);
-                            continue;
-                        }
-
-                        var methodName = mProp.GetString();
-                        if (string.IsNullOrEmpty(methodName) || !methodsByName.TryGetValue(methodName, out var candidates))
-                        {
-                            await WriteErr($"Unknown method '{methodName}'").ConfigureAwait(false);
-                            continue;
-                        }
-
-                        if (!doc.RootElement.TryGetProperty("a", out var argsElem) || argsElem.ValueKind != JsonValueKind.Array)
-                        {
-                            await WriteErr("Bad request: 'a' must be array").ConfigureAwait(false);
-                            continue;
-                        }
-
-                        var argVals = new object?[argsElem.GetArrayLength()];
-
-                        // naive overload: by parameter count
-                        var target = candidates.FirstOrDefault(c => c.GetParameters().Length == argVals.Length)
-                                  ?? candidates.FirstOrDefault();
-                        if (target is null)
-                        {
-                            await WriteErr("No method overload found").ConfigureAwait(false);
-                            continue;
-                        }
-
-                        var pars = target.GetParameters();
-                        for (int i = 0; i < argVals.Length; i++)
-                        {
-                            var pType = pars[i].ParameterType;
-                            argVals[i] = JsonSerializer.Deserialize(argsElem[i].GetRawText(), pType);
-                        }
-
-                        try
-                        {
-                            var retType = target.ReturnType;
-                            var callRes = target.Invoke(_impl, argVals);
-
-                            if (retType == typeof(Task))
-                            {
-                                await (Task)callRes!;
-                                await WriteOk(null).ConfigureAwait(false);
-                            }
-                            else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
-                            {
-                                var t = (Task)callRes!;
-                                await t.ConfigureAwait(false);
-                                var resProp = t.GetType().GetProperty("Result")!;
-                                await WriteOk(resProp.GetValue(t)).ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                await WriteOk(callRes).ConfigureAwait(false);
-                            }
-                        }
-                        catch (TargetInvocationException tex)
-                        {
-                            await WriteErr(tex.InnerException?.Message ?? tex.Message).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            await WriteErr(ex.Message).ConfigureAwait(false);
-                        }
-                    }
-                }
+                await SendHandshakeAsync(writer).ConfigureAwait(false);
+                await ProcessClientLoopAsync(server, reader, writer, methodsByName, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                // shutting down
+                // Graceful shutdown requested.
             }
             finally
             {
-                try { server.Dispose(); } catch { /* ignore */ }
+                try
+                {
+                    server.Dispose();
+                }
+                catch
+                {
+                    // Best-effort cleanup; ignore failures during teardown.
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sends the initial textual handshake line to the connected client.
+        /// </summary>
+        /// <param name="writer">
+        /// The <see cref="StreamWriter"/> bound to the client connection.
+        /// </param>
+        /// <returns>
+        /// A task that completes when the handshake line has been written.
+        /// </returns>
+        private static Task SendHandshakeAsync(StreamWriter writer) => writer.WriteLineAsync($"HELLO {CrossProcessUtils.CurrentFingerprint}");
+
+        /// <summary>
+        /// Main NDJSON processing loop for a single client connection.
+        /// </summary>
+        /// <param name="server">
+        /// The underlying <see cref="NamedPipeServerStream"/> used to check connection state.
+        /// </param>
+        /// <param name="reader">
+        /// Reader used to consume NDJSON request lines from the client.
+        /// </param>
+        /// <param name="writer">
+        /// Writer used to send JSON responses back to the client.
+        /// </param>
+        /// <param name="methodsByName">
+        /// Map of method name to available overloads for RPC resolution.
+        /// </param>
+        /// <param name="token">
+        /// Cancellation token used to terminate the loop.
+        /// </param>
+        /// <returns>
+        /// A task that completes when the client disconnects or cancellation is requested.
+        /// </returns>
+        private async Task ProcessClientLoopAsync(NamedPipeServerStream server, StreamReader reader, StreamWriter writer, IReadOnlyDictionary<string, MethodInfo[]> methodsByName, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && server.IsConnected)
+            {
+                var line = await ReadRequestLineAsync(reader, token).ConfigureAwait(false);
+                if (line is null) break;
+                await ProcessRequestLineAsync(line, methodsByName, writer).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Reads a single NDJSON request line from the client, handling IO drop semantics.
+        /// </summary>
+        /// <param name="reader">
+        /// Reader bound to the client stream.
+        /// </param>
+        /// <param name="token">
+        /// Cancellation token to abort the read.
+        /// </param>
+        /// <returns>
+        /// The line read from the client, or <see langword="null"/> when the client disconnects
+        /// or an <see cref="IOException"/> occurs.
+        /// </returns>
+        private static async Task<string?> ReadRequestLineAsync(StreamReader reader, CancellationToken token)
+        {
+            try
+            {
+                return await reader.ReadLineAsync(token).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // Client dropped or stream broken.
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Parses and dispatches a single NDJSON request line.
+        /// </summary>
+        /// <param name="line">Raw JSON line received from the client.</param>
+        /// <param name="methodsByName">Lookup of method names to candidate overloads.</param>
+        /// <param name="writer">Writer used to emit JSON responses.</param>
+        /// <returns>
+        /// A task that completes when the request has been processed and a response written.
+        /// </returns>
+        private async Task ProcessRequestLineAsync(string line, IReadOnlyDictionary<string, MethodInfo[]> methodsByName, StreamWriter writer)
+        {
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(line);
+            }
+            catch
+            {
+                await WriteErr("Bad JSON", writer).ConfigureAwait(false);
+                return;
             }
 
-            async Task WriteOk(object? r)
+            using (doc)
             {
-                var payload = JsonSerializer.Serialize(new { ok = true, r });
-                await writer.WriteLineAsync(payload).ConfigureAwait(false);
+                var root = doc.RootElement;
+
+                if (!TryResolveMethod(root, methodsByName, out var target, out var argsElem, out var error))
+                {
+                    await WriteErr(error, writer).ConfigureAwait(false);
+                    return;
+                }
+
+                await InvokeTargetAsync(target!, argsElem, writer).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Resolves the target method and argument array element from a JSON request payload.
+        /// </summary>
+        /// <param name="root">
+        /// Root JSON element for the request document.
+        /// </param>
+        /// <param name="methodsByName">
+        /// Map of RPC method names to reflectable overloads.
+        /// </param>
+        /// <param name="target">
+        /// When this method returns <see langword="true"/>, contains the selected <see cref="MethodInfo"/>.
+        /// </param>
+        /// <param name="argsElem">
+        /// When this method returns <see langword="true"/>, contains the JSON array element with arguments.
+        /// </param>
+        /// <param name="error">
+        /// When this method returns <see langword="false"/>, contains a human-readable error message.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> when a suitable method and argument array were found;
+        /// otherwise <see langword="false"/>.
+        /// </returns>
+        private static bool TryResolveMethod(JsonElement root, IReadOnlyDictionary<string, MethodInfo[]> methodsByName, out MethodInfo? target, out JsonElement argsElem, out string error)
+        {
+            target = null;
+            argsElem = default;
+
+            if (!root.TryGetProperty("m", out var mProp))
+            {
+                error = "Bad request: missing 'm'";
+                return false;
             }
 
-            async Task WriteErr(string e)
+            var methodName = mProp.GetString();
+            if (string.IsNullOrEmpty(methodName) || !methodsByName.TryGetValue(methodName, out var candidates))
             {
-                var payload = JsonSerializer.Serialize(new { ok = false, e });
-                await writer.WriteLineAsync(payload).ConfigureAwait(false);
+                error = $"Unknown method '{methodName}'";
+                return false;
             }
+
+            if (!root.TryGetProperty("a", out argsElem) || argsElem.ValueKind != JsonValueKind.Array)
+            {
+                error = "Bad request: 'a' must be array";
+                return false;
+            }
+
+            var argCount = argsElem.GetArrayLength();
+
+            // Naive overload resolution by parameter count, then fallback to first candidate.
+            target = candidates.FirstOrDefault(c => c.GetParameters().Length == argCount)
+                  ?? candidates.FirstOrDefault();
+
+            if (target is null)
+            {
+                error = "No method overload found";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Invokes a reflected RPC target and writes the corresponding JSON response.
+        /// </summary>
+        /// <param name="target">The reflected method to invoke.</param>
+        /// <param name="argsElem">JSON array with the arguments for the invocation.</param>
+        /// <param name="writer">Writer used to emit JSON responses.</param>
+        /// <returns>
+        /// A task that completes when the method has been invoked and an OK or error response has been written.
+        /// </returns>
+        private async Task InvokeTargetAsync(MethodInfo target, JsonElement argsElem, StreamWriter writer)
+        {
+            var pars = target.GetParameters();
+            var argVals = new object?[pars.Length];
+
+            try
+            {
+                // Materialize arguments from JSON into CLR types.
+                for (int i = 0; i < argVals.Length; i++)
+                {
+                    var pType = pars[i].ParameterType;
+                    argVals[i] = JsonSerializer.Deserialize(argsElem[i].GetRawText(), pType);
+                }
+
+                var retType = target.ReturnType;
+                var callRes = target.Invoke(_impl, argVals);
+
+                if (retType == typeof(Task))
+                {
+                    await (Task)callRes!;
+                    await WriteOk(null, writer).ConfigureAwait(false);
+                }
+                else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
+                {
+                    var t = (Task)callRes!;
+                    await t.ConfigureAwait(false);
+                    var resProp = t.GetType().GetProperty("Result")!;
+                    await WriteOk(resProp.GetValue(t), writer).ConfigureAwait(false);
+                }
+                else
+                {
+                    await WriteOk(callRes, writer).ConfigureAwait(false);
+                }
+            }
+            catch (TargetInvocationException tex)
+            {
+                await WriteErr(tex.InnerException?.Message ?? tex.Message, writer).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteErr(ex.Message, writer).ConfigureAwait(false);
+            }
+        }
+
+
+        private static async Task WriteErr(string e, StreamWriter writer)
+        {
+            var payload = JsonSerializer.Serialize(new { ok = false, e });
+            await writer.WriteLineAsync(payload).ConfigureAwait(false);
+        }
+
+        private static async Task WriteOk(object? r, StreamWriter writer)
+        {
+            var payload = JsonSerializer.Serialize(new { ok = true, r });
+            await writer.WriteLineAsync(payload).ConfigureAwait(false);
         }
 
         /// <summary>

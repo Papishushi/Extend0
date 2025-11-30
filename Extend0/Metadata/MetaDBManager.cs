@@ -202,11 +202,7 @@ namespace Extend0.Metadata
         /// If <see cref="CapacityPolicy.None"/> is passed here, it is normalized
         /// internally to <see cref="CapacityPolicy.Throw"/>.
         /// </param>
-        public MetaDBManager(
-            ILogger? logger,
-            Func<MetadataTable, uint, uint, bool>? growHook = null,
-            Func<TableSpec?, MetadataTable>? factory = null,
-            CapacityPolicy capacityPolicy = CapacityPolicy.Throw)
+        public MetaDBManager(ILogger? logger, Func<MetadataTable, uint, uint, bool>? growHook = null, Func<TableSpec?, MetadataTable>? factory = null, CapacityPolicy capacityPolicy = CapacityPolicy.Throw)
         {
             _log = logger;
             _isLogActivated = _log != null && _log.IsEnabled(LogLevel.Debug);
@@ -218,32 +214,35 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Registers a table by specification. By default this is lazy: the underlying file/mapping
-        /// is not created until the first actual use, unless <paramref name="createNow"/> is true.
+        /// Registers a table according to the provided <see cref="TableSpec"/>. 
+        /// Registration is lazy by default: the physical <see cref="MetadataTable"/> is not
+        /// created until it is first accessed, unless <paramref name="createNow"/> is set to <c>true</c>.
         /// </summary>
-        /// <param name="spec">The table specification (name, map path and columns). Must not be null.</param>
-        /// <param name="createNow">
-        /// If true, forces immediate creation of the underlying <see cref="MetadataTable"/> (eager).
-        /// If false (default), the table is created on first access (lazy).
+        /// <param name="spec">
+        /// The table specification describing the table name, map path, and column definitions.
+        /// Must not be <c>null</c> and must contain a non-empty name, map path, and at least one column.
         /// </param>
-        /// <returns>The generated <see cref="Guid"/> identifier of the registered table.</returns>
-        /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> is null.</exception>
+        /// <param name="createNow">
+        /// When <c>true</c>, forces eager creation of the underlying mapped table immediately upon
+        /// registration. When <c>false</c> (default), table creation is deferred until first use.
+        /// </param>
+        /// <returns>
+        /// The <see cref="Guid"/> identifier assigned to the registered table.
+        /// </returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="spec"/> is <c>null</c>.
+        /// </exception>
         /// <exception cref="ArgumentException">
-        /// Thrown if <see cref="TableSpec.Name"/> or <see cref="TableSpec.MapPath"/> is null/whitespace,
-        /// or if <see cref="TableSpec.Columns"/> is null or empty.
+        /// Thrown when <see cref="TableSpec.Name"/> or <see cref="TableSpec.MapPath"/> is null or whitespace,
+        /// or when <see cref="TableSpec.Columns"/> is null or contains no entries.
         /// </exception>
         /// <exception cref="InvalidOperationException">
-        /// Thrown if a table with the same name is already registered, or if the internal id registry
-        /// cannot accept the new entry due to an id conflict.
+        /// Thrown when a table with the same name is already registered, or when an internal id conflict
+        /// prevents inserting the new table into the registry.
         /// </exception>
         public Guid RegisterTable(TableSpec spec, bool createNow = false)
         {
-            if (string.IsNullOrWhiteSpace(spec.Name))
-                throw new ArgumentException("TableSpec.Name cannot be null or whitespace.", nameof(spec));
-            if (string.IsNullOrWhiteSpace(spec.MapPath))
-                throw new ArgumentException("TableSpec.MapPath cannot be null or whitespace.", nameof(spec));
-            if (spec.Columns is null || spec.Columns.Length == 0)
-                throw new ArgumentException("TableSpec.Columns must contain at least one column.", nameof(spec));
+            ValidateTableSpec(spec);
 
             if (_isLogActivated) Log.TableRegistering(_log!, spec.Name);
 
@@ -261,6 +260,25 @@ namespace Extend0.Metadata
             else if (_isLogActivated) Log.TableRegisteredLazy(_log!, spec.Name, id, spec.MapPath);
 
             return id;
+        }
+
+        /// <summary>
+        /// Validates that a <see cref="TableSpec"/> contains all required fields.
+        /// </summary>
+        /// <param name="spec">The table specification to validate.</param>
+        /// <exception cref="ArgumentException">
+        /// Thrown when the table name or map path is null/whitespace, or when the column list is null or empty.
+        /// </exception>
+        private static void ValidateTableSpec(TableSpec spec)
+        {
+            if (string.IsNullOrWhiteSpace(spec.Name))
+                throw new ArgumentException("TableSpec.Name cannot be null or whitespace.", nameof(spec));
+
+            if (string.IsNullOrWhiteSpace(spec.MapPath))
+                throw new ArgumentException("TableSpec.MapPath cannot be null or whitespace.", nameof(spec));
+
+            if (spec.Columns is null || spec.Columns.Length == 0)
+                throw new ArgumentException("TableSpec.Columns must contain at least one column.", nameof(spec));
         }
 
         /// <summary>
@@ -1277,31 +1295,42 @@ namespace Extend0.Metadata
         /// Copies an entire column from a source <see cref="MetadataTable"/> to a destination table
         /// using block-based, strided memory copies when possible.
         /// </summary>
-        /// <param name="src">The source <see cref="MetadataTable"/> containing the column to copy.</param>
-        /// <param name="srcCol">The zero-based index of the source column.</param>
-        /// <param name="dst">The destination <see cref="MetadataTable"/> that will receive the data.</param>
-        /// <param name="dstCol">The zero-based index of the destination column.</param>
-        /// <param name="rows">The number of rows to copy.</param>
+        /// <param name="src">
+        /// The source <see cref="MetadataTable"/> containing the column to copy.
+        /// </param>
+        /// <param name="srcCol">
+        /// The zero-based index of the source column.
+        /// </param>
+        /// <param name="dst">
+        /// The destination <see cref="MetadataTable"/> that will receive the data.
+        /// </param>
+        /// <param name="dstCol">
+        /// The zero-based index of the destination column.
+        /// </param>
+        /// <param name="rows">
+        /// The number of rows to copy.
+        /// </param>
         /// <param name="batchSize">
         /// Maximum number of rows to copy per batch when performing strided copies.
-        /// The actual batch size is rounded up to the next multiple of 4.
+        /// The effective batch size is rounded up to the next multiple of 4.
         /// </param>
         /// <returns>
-        /// <see langword="true"/> if both columns exist and the copy operation completed successfully;
-        /// <see langword="false"/> if either the source or destination column block could not be obtained.
+        /// <see langword="true"/> if both columns expose fixed-size <see cref="ColumnBlock"/>s and
+        /// the copy operation completed successfully; <see langword="false"/> if either the source
+        /// or destination block could not be obtained, so the caller can fall back to a per-cell path.
         /// </returns>
         /// <remarks>
         /// <para>
-        /// If both source and destination column blocks are contiguous (value size equals stride),
-        /// the method uses a single call to <see cref="Buffer.MemoryCopy"/> for a fast, bulk copy.
+        /// If both source and destination column blocks are contiguous (VALUE size equals stride),
+        /// the method uses a single call to <see cref="Buffer.MemoryCopy"/> for a fast bulk copy.
         /// </para>
         /// <para>
         /// For non-contiguous (strided) layouts, the method uses specialized strided copy routines
-        /// for common value sizes (<c>64</c>, <c>128</c>, and <c>256</c> bytes) and falls back to a
-        /// generic strided copy implementation for other sizes.
+        /// for common VALUE sizes (<c>64</c>, <c>128</c> and <c>256</c> bytes) and falls back to a
+        /// generic strided implementation for other sizes.
         /// </para>
         /// <para>
-        /// If <paramref name="rows"/> is zero or the column value size is zero, the method returns
+        /// If <paramref name="rows"/> is zero or the column VALUE size is zero, the method returns
         /// <see langword="true"/> without performing any copy.
         /// </para>
         /// </remarks>
@@ -1321,19 +1350,8 @@ namespace Extend0.Metadata
             var valueSize = (uint)srcBlk.ValueSize;
             if (valueSize == 0 || rows == 0) return true;
 
-            bool srcContig = srcBlk.Stride == srcBlk.ValueSize;
-            bool dstContig = dstBlk.Stride == dstBlk.ValueSize;
-
             // ===== FAST-PATH: contiguous (values back-to-back) =====
-            if (srcContig && dstContig)
-            {
-                byte* s0 = srcBlk.GetValuePtr(0);
-                byte* d0 = dstBlk.GetValuePtr(0);
-
-                long total = checked(rows * srcBlk.ValueSize);
-                Buffer.MemoryCopy(s0, d0, total, total);
-                return true;
-            }
+            if (MemCopy(rows, srcBlk, dstBlk)) return true;
 
             // ===== STRIDED =====
             var sPitch = (nuint)srcBlk.Stride;
@@ -1344,6 +1362,81 @@ namespace Extend0.Metadata
             uint maxBatch = (uint)Math.Max(1, batchSize);
             maxBatch = (maxBatch + 3u) & ~3u; // round up to multiple of 4
 
+            StridedCopySelector(rows, valueSize, sPitch, dPitch, sStart, dStart, maxBatch);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts a single bulk memory copy for the requested number of rows when both
+        /// source and destination column blocks are laid out contiguously.
+        /// </summary>
+        /// <param name="rows">
+        /// Number of rows whose VALUE payloads should be copied.
+        /// </param>
+        /// <param name="srcBlk">
+        /// Source <see cref="ColumnBlock"/> describing the VALUE layout in the origin column.
+        /// </param>
+        /// <param name="dstBlk">
+        /// Destination <see cref="ColumnBlock"/> describing the VALUE layout in the target column.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if a single contiguous <see cref="Buffer.MemoryCopy"/> was performed;
+        /// otherwise <see langword="false"/>, so that the caller can fall back to a strided copy path.
+        /// </returns>
+        /// <remarks>
+        /// Assumes both blocks have the same <c>ValueSize</c>; this is enforced by the caller
+        /// (see <see cref="PerBlockStridedCopy"/>).
+        /// </remarks>
+        private static unsafe bool MemCopy(uint rows, ColumnBlock srcBlk, ColumnBlock dstBlk)
+        {
+            bool srcContig = srcBlk.Stride == srcBlk.ValueSize;
+            bool dstContig = dstBlk.Stride == dstBlk.ValueSize;
+
+            if (!(srcContig && dstContig))
+                return false;
+
+            byte* s0 = srcBlk.GetValuePtr(0);
+            byte* d0 = dstBlk.GetValuePtr(0);
+
+            long total = checked(rows * srcBlk.ValueSize);
+            Buffer.MemoryCopy(s0, d0, total, total);
+            return true;
+        }
+
+        /// <summary>
+        /// Selects the appropriate strided copy routine based on VALUE size and executes
+        /// the copy in batches for the given source and destination layouts.
+        /// </summary>
+        /// <param name="rows">
+        /// Total number of rows to copy.
+        /// </param>
+        /// <param name="valueSize">
+        /// Size in bytes of each VALUE payload in the column.
+        /// </param>
+        /// <param name="sPitch">
+        /// Stride in bytes between consecutive rows in the source column.
+        /// </param>
+        /// <param name="dPitch">
+        /// Stride in bytes between consecutive rows in the destination column.
+        /// </param>
+        /// <param name="sStart">
+        /// Pointer to the first VALUE in the source column.
+        /// </param>
+        /// <param name="dStart">
+        /// Pointer to the first VALUE in the destination column.
+        /// </param>
+        /// <param name="maxBatch">
+        /// Maximum number of rows to process per batch; typically already aligned
+        /// to a multiple of 4 for unrolled inner loops.
+        /// </param>
+        /// <remarks>
+        /// For common fixed VALUE sizes (<c>64</c>, <c>128</c>, <c>256</c> bytes), this method
+        /// delegates to specialized unrolled workers; for other sizes it uses a generic
+        /// strided copy implementation.
+        /// </remarks>
+        private static unsafe void StridedCopySelector(uint rows, uint valueSize, nuint sPitch, nuint dPitch, byte* sStart, byte* dStart, uint maxBatch)
+        {
             switch (valueSize)
             {
                 case 64:
@@ -1359,8 +1452,6 @@ namespace Extend0.Metadata
                     CopyStridedGenericBatched(rows, maxBatch, dStart, sStart, dPitch, sPitch, valueSize);
                     break;
             }
-
-            return true;
         }
 
         /// <summary>

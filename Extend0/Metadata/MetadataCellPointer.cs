@@ -431,30 +431,82 @@ namespace Extend0.Metadata
 
             // Hex with 0x/0X prefix
             if (s.Length >= 2 && s[0] == (byte)'0' && (s[1] == (byte)'x' || s[1] == (byte)'X'))
-            {
-                s = s[2..];
-                if (s.Length == 0) return false;
-                foreach (byte b in s)
-                {
-                    uint v = b switch
-                    {
-                        >= (byte)'0' and <= (byte)'9' => (uint)(b - (byte)'0'),
-                        >= (byte)'a' and <= (byte)'f' => (uint)(b - (byte)'a' + 10),
-                        >= (byte)'A' and <= (byte)'F' => (uint)(b - (byte)'A' + 10),
-                        _ => 0xFFFF_FFFFu
-                    };
-                    if (v == 0xFFFF_FFFFu) return false;
-                    n = (n << 4) | v;
-                }
-                return true;
-            }
+                return ParseHex(ref s, ref n);
 
             // Decimal
+            return ParseDecimal(s, ref n);
+        }
+
+        /// <summary>
+        /// Parses a decimal unsigned 32-bit integer from a UTF-8 byte span.
+        /// </summary>
+        /// <param name="s">
+        /// The UTF-8 encoded span representing a decimal number (digits <c>'0'</c>–<c>'9'</c> only).
+        /// </param>
+        /// <param name="n">
+        /// On successful return, contains the parsed unsigned 32-bit integer value.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if all characters in <paramref name="s"/> are decimal digits
+        /// and the value was parsed successfully; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// Uses a checked context and will throw an <see cref="OverflowException"/> if the
+        /// accumulated value does not fit in a <see cref="uint"/>. Callers like
+        /// <see cref="TryParseUIntUtf8"/> are responsible for catching that if they want
+        /// a non-throwing contract.
+        /// </remarks>
+        private static bool ParseDecimal(ReadOnlySpan<byte> s, ref uint n)
+        {
             foreach (byte b in s)
             {
-                if (b < (byte)'0' || b > (byte)'9') return false;
+                if (b < (byte)'0' || b > (byte)'9')
+                    return false;
+
                 n = checked(n * 10 + (uint)(b - (byte)'0'));
             }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Parses a hexadecimal unsigned 32-bit integer from a UTF-8 byte span
+        /// that starts with a <c>"0x"</c> / <c>"0X"</c> prefix.
+        /// </summary>
+        /// <param name="s">
+        /// The UTF-8 encoded span whose first two bytes are <c>'0'</c> and <c>'x'</c> or <c>'X'</c>.
+        /// On entry, it may contain the full literal (e.g. <c>"0xFF"</c>); on return, the span
+        /// has been sliced past the prefix and points to the hex digits only.
+        /// </param>
+        /// <param name="n">
+        /// On successful return, contains the parsed unsigned 32-bit integer value.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if all remaining characters after the prefix are valid
+        /// hexadecimal digits (<c>0–9</c>, <c>a–f</c>, <c>A–F</c>) and the value was parsed;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
+        private static bool ParseHex(ref ReadOnlySpan<byte> s, ref uint n)
+        {
+            s = s[2..];
+            if (s.Length == 0) return false;
+
+            foreach (byte b in s)
+            {
+                uint v = b switch
+                {
+                    >= (byte)'0' and <= (byte)'9' => (uint)(b - (byte)'0'),
+                    >= (byte)'a' and <= (byte)'f' => (uint)(b - (byte)'a' + 10),
+                    >= (byte)'A' and <= (byte)'F' => (uint)(b - (byte)'A' + 10),
+                    _ => 0xFFFF_FFFFu
+                };
+
+                if (v == 0xFFFF_FFFFu)
+                    return false;
+
+                n = (n << 4) | v;
+            }
+
             return true;
         }
 

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -89,24 +90,83 @@ internal static class CrossProcessUtils
         if (!OperatingSystem.IsWindows()) return new Mutex(initiallyOwned: true, baseName, out createdNew);
 
         // Windows: try Global\ first if requested
-        if (preferGlobal)
-        {
-            var globalName = $@"Global\{baseName}";
-            try
-            {
-                var m = new Mutex(initiallyOwned: true, globalName, out createdNew);
-                isGlobal = true;
-                return m;
-            }
-            catch (UnauthorizedAccessException uae)
-            {
-                logger?.LogInformation(uae,
-                    "No permission for Global\\ mutex '{Name}'. Falling back to Local\\.", globalName);
-                // fall through to Local\
-            }
-        }
+        if (preferGlobal && TryGetGlobalMutex(baseName, out var globalMutex, out createdNew, ref isGlobal, logger))
+            return globalMutex;
 
         // Local\ (or explicitly chosen when preferGlobal == false)
+        return GetLocalMutexOrDefault(baseName, out createdNew, logger);
+    }
+
+    /// <summary>
+    /// Tries to create and own a <c>Global\</c> named mutex on Windows.
+    /// </summary>
+    /// <param name="baseName">Base mutex name (without any <c>Global\</c>/<c>Local\</c> prefix).</param>
+    /// <param name="mutex">
+    /// When this method returns <see langword="true"/>, contains the created <see cref="Mutex"/> instance.
+    /// When it returns <see langword="false"/>, this value is <c>null</c>.
+    /// </param>
+    /// <param name="createdNew">
+    /// Set to <see langword="true"/> if the <c>Global\</c> mutex was created; otherwise <see langword="false"/>.
+    /// Meaningful only when the method returns <see langword="true"/>.
+    /// </param>
+    /// <param name="isGlobal">
+    /// Set to <see langword="true"/> when a <c>Global\</c> mutex is successfully created and owned.
+    /// Left unchanged if the attempt fails.
+    /// </param>
+    /// <param name="logger">
+    /// Optional logger used to record diagnostics when access to the <c>Global\</c> namespace is denied.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> if a <c>Global\</c> mutex was successfully created and owned;
+    /// otherwise <see langword="false"/>, in which case the caller should fall back to <c>Local\</c>.
+    /// </returns>
+    /// <remarks>
+    /// When access to <c>Global\</c> is denied (for example, missing <c>SeCreateGlobalPrivilege</c>),
+    /// this method logs an informational message (if <paramref name="logger"/> is provided) and
+    /// returns <see langword="false"/> so the caller can attempt a <c>Local\</c> mutex.
+    /// </remarks>
+    private static bool TryGetGlobalMutex(string baseName, [NotNullWhen(true)] out Mutex? mutex, out bool createdNew, ref bool isGlobal, ILogger? logger)
+    {
+        var globalName = $@"Global\{baseName}";
+        try
+        {
+            mutex = new Mutex(initiallyOwned: true, globalName, out createdNew);
+            isGlobal = true;
+            return true;
+        }
+        catch (UnauthorizedAccessException uae)
+        {
+            logger?.LogInformation(uae, "No permission for Global\\ mutex '{Name}'. Falling back to Local\\.", globalName);
+            // fall through to Local\
+            mutex = null;
+            createdNew = false;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates and owns a <c>Local\</c> named mutex on Windows, with a final fallback
+    /// to an unprefixed name when <c>Local\</c> is not permitted.
+    /// </summary>
+    /// <param name="baseName">Base mutex name (without any <c>Global\</c>/<c>Local\</c> prefix).</param>
+    /// <param name="createdNew">
+    /// Set to <see langword="true"/> if the mutex (either <c>Local\</c> or unprefixed) was created;
+    /// otherwise <see langword="false"/> when it already existed.
+    /// </param>
+    /// <param name="logger">
+    /// Optional logger used to record diagnostics when access to the <c>Local\</c> namespace is denied.
+    /// </param>
+    /// <returns>
+    /// An owned <see cref="Mutex"/> instance. The returned mutex is created under <c>Local\</c> when
+    /// possible, or under the unprefixed name as a final fallback when <c>Local\</c> is not allowed.
+    /// </returns>
+    /// <remarks>
+    /// If creating the <c>Local\</c> mutex throws <see cref="UnauthorizedAccessException"/>, this method
+    /// logs a warning (when <paramref name="logger"/> is provided) and retries with the unprefixed name,
+    /// which typically results in a session-local object.
+    /// </remarks>
+    private static Mutex GetLocalMutexOrDefault(string baseName, out bool createdNew, ILogger? logger)
+    {
         var localName = $@"Local\{baseName}";
         try
         {
@@ -120,6 +180,7 @@ internal static class CrossProcessUtils
             return new Mutex(initiallyOwned: true, baseName, out createdNew);
         }
     }
+
 
     /// <summary>
     /// Builds a cross-platform, named-pipe-safe endpoint name from an arbitrary base name.

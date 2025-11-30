@@ -21,8 +21,7 @@ namespace Extend0.Lifecycle.CrossProcess
         /// Logical contract name reported by <see cref="GetServiceInfoAsync"/>.
         /// Defaults to <c>typeof(TService)</c> full name.
         /// </summary>
-        public virtual string ContractName =>
-            typeof(TService).FullName ?? typeof(TService).Name;
+        public virtual string ContractName => typeof(TService).FullName ?? typeof(TService).Name;
 
         /// <summary>
         /// The pipe name used by the host (if known). Override if you want it surfaced in diagnostics.
@@ -126,89 +125,121 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </summary>
         /// <remarks>
         /// <para>
-        /// This method cancels the server loop, disposes the underlying
-        /// <see cref="NamedPipeServer"/> instance (if any), and releases the host
-        /// coordination mutex used for cross-process ownership. It is safe to call
-        /// multiple times; subsequent calls after the first will have no effect.
+        /// Cancels the server loop, disposes the underlying <see cref="NamedPipeServer"/>
+        /// instance (if any), and releases the host coordination mutex used for cross-process
+        /// ownership. It is safe to call multiple times; subsequent calls after the first
+        /// will have no effect.
         /// </para>
         /// <para>
-        /// The operation is fully synchronized using <c>s_hostGate</c> so that concurrent
-        /// calls cannot interleave server shutdown with new hosting attempts.
+        /// The operation is synchronized using <c>s_hostGate</c> so that concurrent calls
+        /// cannot interleave server shutdown with new hosting attempts.
         /// </para>
         /// </remarks>
         public void StopHosting()
         {
             lock (s_hostGate)
             {
-                try
+                CancelAndDisposeServerCts();
+                DisposeServerInstance();
+                ReleaseAndDisposeHostMutex();
+            }
+        }
+
+        /// <summary>
+        /// Cancels and disposes the server <see cref="CancellationTokenSource"/> if present.
+        /// </summary>
+        /// <remarks>
+        /// Exceptions during cancellation or disposal are ignored because teardown is
+        /// best-effort and callers cannot take corrective action here.
+        /// </remarks>
+        private static void CancelAndDisposeServerCts()
+        {
+            if (s_serverCts is null) return;
+
+            try
+            {
+                s_serverCts.Cancel();
+            }
+            catch
+            {
+                // Best-effort cancellation during shutdown.
+            }
+
+            try
+            {
+                s_serverCts.Dispose();
+            }
+            catch
+            {
+                // Non-critical failure when disposing CTS in teardown.
+            }
+
+            s_serverCts = null;
+        }
+
+        /// <summary>
+        /// Disposes the hosted <see cref="NamedPipeServer"/> instance, using async disposal
+        /// when available, and clears the static reference.
+        /// </summary>
+        /// <remarks>
+        /// Any exceptions during disposal are swallowed to keep shutdown idempotent and safe.
+        /// </remarks>
+        private static void DisposeServerInstance()
+        {
+            if (s_server is null) return;
+
+            try
+            {
+                if (s_server is IAsyncDisposable ad)
                 {
-                    s_serverCts?.Cancel();
+                    // Synchronous wait is acceptable in a controlled shutdown path.
+                    ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 }
-                catch
+                else if (s_server is IDisposable d)
                 {
-                    // Best-effort cancellation: if the CTS is already disposed or faulted,
-                    // there is nothing meaningful the caller can do during shutdown.
-                }
-
-                try
-                {
-                    s_serverCts?.Dispose();
-                }
-                catch
-                {
-                    // Failure to dispose the cancellation source is non-critical in teardown
-                    // and must not prevent the rest of the shutdown sequence.
-                }
-
-                s_serverCts = null;
-
-                try
-                {
-                    if (s_server is IAsyncDisposable ad)
-                    {
-                        // Synchronous wait is acceptable here because we are in a controlled
-                        // shutdown path under a lock, not on a hot path.
-                        ad.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                    }
-                    else
-                    {
-                        (s_server as IDisposable)?.Dispose();
-                    }
-                }
-                catch
-                {
-                    // Server disposal failure is non-recoverable at this point and callers
-                    // cannot act on it; we swallow it to keep StopHosting() idempotent and safe.
-                }
-
-                s_server = null;
-
-                if (s_hostMutex is not null)
-                {
-                    try
-                    {
-                        s_hostMutex.ReleaseMutex();
-                    }
-                    catch
-                    {
-                        // Releasing a mutex we don't own / already released can throw, but
-                        // during shutdown this only means the mutex is no longer usable,
-                        // which is acceptable because hosting is being stopped.
-                    }
-
-                    try
-                    {
-                        s_hostMutex.Dispose();
-                    }
-                    catch
-                    {
-                        // Failure to dispose the OS mutex handle is not actionable for the caller
-                        // and the process will release OS resources on exit anyway.
-                    }
-
-                    s_hostMutex = null;
+                    d.Dispose();
                 }
             }
+            catch
+            {
+                // Server disposal failure is non-recoverable at this point.
+            }
+            finally
+            {
+                s_server = null;
+            }
+        }
+
+        /// <summary>
+        /// Releases and disposes the hosting mutex if present, then clears the static reference.
+        /// </summary>
+        /// <remarks>
+        /// Errors when releasing or disposing the OS mutex handle are ignored because the
+        /// process is already tearing down hosting and cannot recover from them.
+        /// </remarks>
+        private static void ReleaseAndDisposeHostMutex()
+        {
+            if (s_hostMutex is null) return;
+
+            try
+            {
+                s_hostMutex.ReleaseMutex();
+            }
+            catch
+            {
+                // Releasing an invalid/already-released mutex is harmless during shutdown.
+            }
+
+            try
+            {
+                s_hostMutex.Dispose();
+            }
+            catch
+            {
+                // Failure to dispose the OS handle is non-actionable for the caller.
+            }
+
+            s_hostMutex = null;
         }
     }
 }

@@ -428,82 +428,81 @@ namespace Extend0.Metadata
             for (int c = 0; c < colCount; c++)
                 widths[c + 1] = Math.Min(MAX_COL_WIDTH, Math.Max(3, _columns[c].Name.Length));
 
-            // ================ Helpers ================
-            string Border()
+            // Sample to compute column widths (uses Preview with MAX_COL_WIDTH)
+            ObtainWidths(colCount, rowsToShow, MAX_COL_WIDTH, widths);
+
+            // Header
+            sb.Append("MetadataTable { Columns=").Append(_columns.Count)
+              .Append(", Rows≈").Append(totalRows).AppendLine(" }");
+
+            sb.Append(Border(colCount, widths));
+            sb.Append("| ").Append(Pad("Row", widths[0])).Append(' ');
+            for (int c = 0; c < colCount; c++)
+                sb.Append("| ").Append(Pad(_columns[c].Name, widths[c + 1])).Append(' ');
+            sb.Append("|\n");
+            sb.Append(Border(colCount, widths));
+
+            // Rows
+            WriteRows(sb, colCount, rowsToShow, widths);
+
+            if (rowsToShow < totalRows)
             {
-                var b = new System.Text.StringBuilder();
-                b.Append('+').Append(new string('-', widths[0] + 2));
+                sb.Append(Border(colCount, widths));
+                sb.Append("… ").Append(totalRows - rowsToShow).Append(" more rows\n");
+            }
+            sb.Append(Border(colCount, widths));
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Writes the table body rows into the provided <see cref="System.Text.StringBuilder"/>.
+        /// </summary>
+        /// <param name="sb">The string builder that accumulates the textual table representation.</param>
+        /// <param name="colCount">Total number of columns in the table.</param>
+        /// <param name="rowsToShow">Number of rows to render in the preview.</param>
+        /// <param name="widths">Precomputed column widths (including the row index column at index 0).</param>
+        /// <remarks>
+        /// Each cell is retrieved from the underlying store and rendered using <see cref="Preview(ReadOnlySpan{byte}, int)"/>.
+        /// Missing or unreadable cells are rendered as empty strings.
+        /// </remarks>
+        private void WriteRows(System.Text.StringBuilder sb, int colCount, int rowsToShow, int[] widths)
+        {
+            for (int r = 0; r < rowsToShow; r++)
+            {
+                sb.Append("| ").Append(Pad(r.ToString(), widths[0])).Append(' ');
                 for (int c = 0; c < colCount; c++)
-                    b.Append('+').Append(new string('-', widths[c + 1] + 2));
-                b.Append("+\n");
-                return b.ToString();
-            }
-            static string Pad(string s, int w) => s.Length >= w ? s : s + new string(' ', w - s.Length);
-
-            // Evita cortar UTF-16 en medio de un surrogate
-            static string SafeEllipsis(string s, int maxChars)
-            {
-                if (maxChars <= 0) return string.Empty;
-                if (s.Length <= maxChars) return s;
-                int cut = Math.Max(0, maxChars - 1);
-                if (cut > 0 && char.IsHighSurrogate(s[cut - 1])) cut--;
-                return s.AsSpan(0, cut).ToString() + "…";
-            }
-
-            static void FillHex(ReadOnlySpan<byte> v, Span<char> outChars)
-            {
-                static char Hex(byte x) => (char)(x < 10 ? '0' + x : 'A' + (x - 10));
-                int ci = 0;
-                foreach (var b in v)
                 {
-                    outChars[ci++] = Hex((byte)(b >> 4));
-                    outChars[ci++] = Hex((byte)(b & 0xF));
+                    string cellText = "";
+                    if (_store.TryGetCell((uint)c, (uint)r, out var cell) &&
+                        cell.TryGetKey(out ReadOnlySpan<byte> k) &&
+                        cell.TryGetValue(k, out ReadOnlySpan<byte> v))
+                    {
+                        // Use final column width for preview
+                        cellText = Preview(v, widths[c + 1]);
+                    }
+                    sb.Append("| ").Append(Pad(cellText, widths[c + 1])).Append(' ');
                 }
+                sb.Append("|\n");
             }
+        }
 
-            // UTF-8 válido "imprimible": sin U+FFFD ni controles (salvo \t\r\n)
-            static bool TryDecodePrintableUtf8(ReadOnlySpan<byte> v, out string text)
-            {
-                text = System.Text.Encoding.UTF8.GetString(v);
-                if (text.Contains('\uFFFD')) return false;
-                foreach (var ch in text)
-                    if (char.IsControl(ch) && ch != '\t' && ch != '\r' && ch != '\n')
-                        return false;
-                return true;
-            }
-
-            static string HexPreview(ReadOnlySpan<byte> v, int maxChars)
-            {
-                if (maxChars <= 0) return string.Empty;
-
-                int fullChars = v.Length * 2;
-                if (fullChars <= maxChars)
-                {
-                    var chars = new char[fullChars];
-                    FillHex(v, chars);
-                    return new string(chars);
-                }
-                else
-                {
-                    int maxBytes = Math.Max(0, (maxChars - 1) / 2); // deja 1 para la elipsis
-                    var chars = new char[maxBytes * 2 + 1];
-                    FillHex(v[..maxBytes], chars);
-                    chars[maxBytes * 2] = '…';
-                    return new string(chars);
-                }
-            }
-
-            static string Utf8Preview(ReadOnlySpan<byte> v, int maxChars)
-            {
-                if (!TryDecodePrintableUtf8(v, out var s)) return HexPreview(v, maxChars);
-                return SafeEllipsis(s, maxChars);
-            }
-
-            static string Preview(ReadOnlySpan<byte> v, int maxChars)
-                => v.Length == 0 ? "" : Utf8Preview(v, maxChars);
-            // =========================================
-
-            // Muestreo para calcular anchos (usa Preview con MAX_COL_WIDTH)
+        /// <summary>
+        /// Computes the effective width for each column by sampling up to the requested number of rows.
+        /// </summary>
+        /// <param name="colCount">Total number of columns in the table.</param>
+        /// <param name="rowsToShow">Number of rows to sample for width calculation.</param>
+        /// <param name="MAX_COL_WIDTH">Maximum allowed width for any column.</param>
+        /// <param name="widths">
+        /// Array of column widths to be updated in place. Index 0 holds the row-index column width;
+        /// indices 1..colCount hold the widths for each data column.
+        /// </param>
+        /// <remarks>
+        /// Uses <see cref="Preview(ReadOnlySpan{byte}, int)"/> with <paramref name="MAX_COL_WIDTH"/>
+        /// to estimate a reasonable width for each column, capped at the specified maximum.
+        /// </remarks>
+        private void ObtainWidths(int colCount, int rowsToShow, int MAX_COL_WIDTH, int[] widths)
+        {
             for (int r = 0; r < rowsToShow; r++)
             {
                 for (int c = 0; c < colCount; c++)
@@ -517,45 +516,164 @@ namespace Extend0.Metadata
                     }
                 }
             }
+        }
 
-            // Cabecera
-            sb.Append("MetadataTable { Columns=").Append(_columns.Count)
-              .Append(", Rows≈").Append(totalRows).AppendLine(" }");
+        /// <summary>
+        /// Produces a short textual preview for a VALUE payload given the maximum width.
+        /// </summary>
+        /// <param name="v">The raw VALUE bytes to render.</param>
+        /// <param name="maxChars">Maximum number of characters to include in the preview.</param>
+        /// <returns>
+        /// An empty string when <paramref name="v"/> is empty; otherwise a UTF-8 or hexadecimal
+        /// preview string truncated with an ellipsis if necessary.
+        /// </returns>
+        /// <remarks>
+        /// Delegates to <see cref="Utf8Preview(ReadOnlySpan{byte}, int)"/> which prefers UTF-8 decoding
+        /// when the bytes form a printable string, or to a hexadecimal preview otherwise.
+        /// </remarks>
+        private static string Preview(ReadOnlySpan<byte> v, int maxChars) => v.Length == 0 ? "" : Utf8Preview(v, maxChars);
 
-            sb.Append(Border());
-            sb.Append("| ").Append(Pad("Row", widths[0])).Append(' ');
+        /// <summary>
+        /// Attempts to render the given VALUE bytes as a printable UTF-8 string, falling back
+        /// to a hexadecimal preview when decoding fails or produces non-printable characters.
+        /// </summary>
+        /// <param name="v">The raw VALUE bytes to render.</param>
+        /// <param name="maxChars">Maximum number of characters allowed in the resulting string.</param>
+        /// <returns>
+        /// A UTF-8 decoded preview string (possibly truncated with an ellipsis) when the data is
+        /// printable, or a hexadecimal preview produced by <see cref="HexPreview(ReadOnlySpan{byte}, int)"/>
+        /// otherwise.
+        /// </returns>
+        private static string Utf8Preview(ReadOnlySpan<byte> v, int maxChars)
+        {
+            if (!TryDecodePrintableUtf8(v, out var s)) return HexPreview(v, maxChars);
+            return SafeEllipsis(s, maxChars);
+        }
+
+        /// <summary>
+        /// Renders VALUE bytes as an uppercase hexadecimal string, truncated with an ellipsis if needed.
+        /// </summary>
+        /// <param name="v">The raw VALUE bytes to render.</param>
+        /// <param name="maxChars">
+        /// Maximum number of characters in the output, including the ellipsis character if truncation occurs.
+        /// </param>
+        /// <returns>
+        /// A hexadecimal representation of <paramref name="v"/>. If the full representation would exceed
+        /// <paramref name="maxChars"/>, the output is truncated to fit and suffixed with <c>'…'</c>.
+        /// </returns>
+        private static string HexPreview(ReadOnlySpan<byte> v, int maxChars)
+        {
+            if (maxChars <= 0) return string.Empty;
+
+            int fullChars = v.Length * 2;
+            if (fullChars <= maxChars)
+            {
+                var chars = new char[fullChars];
+                FillHex(v, chars);
+                return new string(chars);
+            }
+            else
+            {
+                int maxBytes = Math.Max(0, (maxChars - 1) / 2); // leave 1 char for ellipsis
+                var chars = new char[maxBytes * 2 + 1];
+                FillHex(v[..maxBytes], chars);
+                chars[maxBytes * 2] = '…';
+                return new string(chars);
+            }
+        }
+
+        /// <summary>
+        /// Tries to decode a UTF-8 byte span into a printable string.
+        /// </summary>
+        /// <param name="v">The UTF-8 encoded bytes to decode.</param>
+        /// <param name="text">
+        /// When this method returns <see langword="true"/>, contains the decoded string.
+        /// When it returns <see langword="false"/>, the value is undefined.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the bytes decode cleanly to UTF-8 without replacement characters
+        /// and do not contain control characters other than TAB, CR, or LF; otherwise <see langword="false"/>.
+        /// </returns>
+        private static bool TryDecodePrintableUtf8(ReadOnlySpan<byte> v, out string text)
+        {
+            text = System.Text.Encoding.UTF8.GetString(v);
+            if (text.Contains('\uFFFD')) return false;
+            foreach (var ch in text)
+                if (char.IsControl(ch) && ch != '\t' && ch != '\r' && ch != '\n')
+                    return false;
+            return true;
+        }
+
+        /// <summary>
+        /// Converts a sequence of bytes to their uppercase hexadecimal representation
+        /// and writes the result into a caller-provided character span.
+        /// </summary>
+        /// <param name="v">The input bytes to convert.</param>
+        /// <param name="outChars">
+        /// Destination span that receives the hexadecimal characters. Its length must be
+        /// at least <c>2 * v.Length</c>.
+        /// </param>
+        private static void FillHex(ReadOnlySpan<byte> v, Span<char> outChars)
+        {
+            static char Hex(byte x) => (char)(x < 10 ? '0' + x : 'A' + (x - 10));
+            int ci = 0;
+            foreach (var b in v)
+            {
+                outChars[ci++] = Hex((byte)(b >> 4));
+                outChars[ci++] = Hex((byte)(b & 0xF));
+            }
+        }
+
+        /// <summary>
+        /// Safely truncates a string to a maximum length and appends an ellipsis when needed.
+        /// </summary>
+        /// <param name="s">The input string to truncate.</param>
+        /// <param name="maxChars">Maximum allowed number of characters in the result.</param>
+        /// <returns>
+        /// The original string if it fits within <paramref name="maxChars"/>;
+        /// otherwise, a truncated version with a trailing <c>'…'</c>. Surrogate pairs at the cut
+        /// boundary are preserved by backing off one character when necessary.
+        /// </returns>
+        private static string SafeEllipsis(string s, int maxChars)
+        {
+            if (maxChars <= 0) return string.Empty;
+            if (s.Length <= maxChars) return s;
+            int cut = Math.Max(0, maxChars - 1);
+            if (cut > 0 && char.IsHighSurrogate(s[cut - 1])) cut--;
+            return s.AsSpan(0, cut).ToString() + "…";
+        }
+
+        /// <summary>
+        /// Pads a string on the right with spaces so that its length is at least the specified width.
+        /// </summary>
+        /// <param name="s">The string to pad.</param>
+        /// <param name="w">The desired minimum width.</param>
+        /// <returns>
+        /// The original string if its length is greater than or equal to <paramref name="w"/>;
+        /// otherwise, the string padded with spaces on the right to reach the given width.
+        /// </returns>
+        private static string Pad(string s, int w) => s.Length >= w ? s : s + new string(' ', w - s.Length);
+
+        /// <summary>
+        /// Builds a horizontal border line for the textual table representation.
+        /// </summary>
+        /// <param name="colCount">Number of data columns in the table.</param>
+        /// <param name="widths">
+        /// Column widths array, where index 0 corresponds to the row index column and indices 1..colCount
+        /// correspond to the data columns.
+        /// </param>
+        /// <returns>
+        /// A string containing a border line composed of <c>'+'</c> and <c>'-'</c> characters,
+        /// followed by a newline.
+        /// </returns>
+        private static string Border(int colCount, int[] widths)
+        {
+            var b = new System.Text.StringBuilder();
+            b.Append('+').Append(new string('-', widths[0] + 2));
             for (int c = 0; c < colCount; c++)
-                sb.Append("| ").Append(Pad(_columns[c].Name, widths[c + 1])).Append(' ');
-            sb.Append("|\n");
-            sb.Append(Border());
-
-            // Filas
-            for (int r = 0; r < rowsToShow; r++)
-            {
-                sb.Append("| ").Append(Pad(r.ToString(), widths[0])).Append(' ');
-                for (int c = 0; c < colCount; c++)
-                {
-                    string cellText = "";
-                    if (_store.TryGetCell((uint)c, (uint)r, out var cell) &&
-                        cell.TryGetKey(out ReadOnlySpan<byte> k) &&
-                        cell.TryGetValue(k, out ReadOnlySpan<byte> v))
-                    {
-                        // Usa el ancho final de la columna
-                        cellText = Preview(v, widths[c + 1]);
-                    }
-                    sb.Append("| ").Append(Pad(cellText, widths[c + 1])).Append(' ');
-                }
-                sb.Append("|\n");
-            }
-
-            if (rowsToShow < totalRows)
-            {
-                sb.Append(Border());
-                sb.Append("… ").Append(totalRows - rowsToShow).Append(" more rows\n");
-            }
-            sb.Append(Border());
-
-            return sb.ToString();
+                b.Append('+').Append(new string('-', widths[c + 1] + 2));
+            b.Append("+\n");
+            return b.ToString();
         }
 
         /// <summary>
