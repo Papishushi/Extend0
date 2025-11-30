@@ -5,12 +5,10 @@ using Extend0.Metadata.Storage;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Data.Common;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace Extend0.Metadata
 {
@@ -572,19 +570,26 @@ namespace Extend0.Metadata
         {
             var s = Require(srcTableId);
             var d = Require(dstTableId);
-            Stopwatch? sw = _isLogActivated ? Stopwatch.StartNew() : null;
+            var sName = s.Name ?? string.Empty;
+            var dName = d.Name ?? string.Empty;
+
+            Stopwatch? sw = null;
             var effectivePolicy = dstPolicy == CapacityPolicy.None ? _capacityPolicy : dstPolicy;
             uint valueSize = GetColumnValueSize(d.Table, dstCol);
 
-            if (_isLogActivated) Log.CopyStart(_log!, s.Name ?? string.Empty, srcCol, d.Name ?? string.Empty, dstCol, rows, effectivePolicy);
+            if (_isLogActivated)
+            {
+                sw = Stopwatch.StartNew();
+                Log.CopyStart(_log!, sName, srcCol, dName, dstCol, rows, effectivePolicy);
+            }
 
             // Ensure capacity at destination if requested
-            if (effectivePolicy != CapacityPolicy.Throw) EnsureRowCapacity(d.Table, dstCol, rows, effectivePolicy);
+            EnsureRowCapacity(d.Table, dstCol, rows, effectivePolicy);
 
             // Will throw if value sizes differ per row; that exception is the signal.
             CopyColumn(s.Table, srcCol, d.Table, dstCol, rows, effectivePolicy, ComputeBatchFromValueSize(valueSize));
 
-            if (_isLogActivated) Log.CopyEnd(_log!, s.Name ?? string.Empty, d.Name ?? string.Empty, sw!.Elapsed.TotalMilliseconds);
+            if (_isLogActivated) Log.CopyEnd(_log!, sName, dName, sw!.Elapsed.TotalMilliseconds);
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -931,7 +936,7 @@ namespace Extend0.Metadata
         /// </list>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        private unsafe void FillColumn<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE) where T : unmanaged
+        private void FillColumn<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE) where T : unmanaged
         {
             if (rows == 0) return;
 
@@ -967,15 +972,53 @@ namespace Extend0.Metadata
         }
 
         /// <summary>Fills a column cell-by-cell using a per-row factory, batching value creation and using stack allocation or an array pool depending on the total byte size.</summary>
-        /// <typeparam name="T">Unmanaged value type written into each row.</typeparam>
-        /// <param name="table">Target <see cref="MetadataTable"/> whose column will be filled.</param>
-        /// <param name="column">Zero-based column index to fill.</param>
-        /// <param name="rows">Number of rows to fill, starting at 0.</param>
-        /// <param name="factory">Factory that produces a value for a given row index.</param>
-        /// <param name="batchSize">Maximum number of rows processed per batch when generating and writing values.</param>
-        /// <param name="tSize">Size in bytes of <typeparamref name="T"/>; used to compute batch byte size.</param>
-        /// <param name="MaxStackBytes">Maximum total bytes allowed on the stack before falling back to the shared array pool.</param>
-        /// <exception cref="InvalidOperationException">Thrown when a cell's VALUE buffer is smaller than <paramref name="tSize"/>.</exception>
+        /// <typeparam name="T">
+        /// Unmanaged value type written into each row. The raw bytes of <typeparamref name="T"/>
+        /// are copied directly into the VALUE buffer of each cell.
+        /// </typeparam>
+        /// <param name="table">
+        /// Target <see cref="MetadataTable"/> whose column will be filled.
+        /// </param>
+        /// <param name="column">
+        /// Zero-based column index to fill.
+        /// </param>
+        /// <param name="rows">
+        /// Number of rows to fill, starting at 0.
+        /// </param>
+        /// <param name="factory">
+        /// Factory that produces a value for a given row index. It is invoked once per row
+        /// in each batch and its result is written into the corresponding cell.
+        /// </param>
+        /// <param name="batchSize">
+        /// Maximum number of rows processed per batch when generating and writing values.
+        /// Larger batches reduce per-call overhead but increase transient memory usage.
+        /// </param>
+        /// <param name="tSize">
+        /// Size in bytes of <typeparamref name="T"/>; used to compute the total batch byte size
+        /// and decide whether to use stack allocation or rent from the shared <see cref="ArrayPool{T}"/>.
+        /// </param>
+        /// <param name="MaxStackBytes">
+        /// Maximum total number of bytes allowed on the stack for a single batch. When
+        /// <c>batchSize * tSize</c> exceeds this threshold, the method rents a temporary
+        /// buffer from <see cref="ArrayPool{T}.Shared"/> instead of using <c>stackalloc</c>.
+        /// </param>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when a cell's VALUE buffer is smaller than <paramref name="tSize"/> for any row,
+        /// i.e. when <c>cell.ValueSize &lt; tSize</c>, indicating a mismatch between the column
+        /// layout and the size of <typeparamref name="T"/>.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// This routine is used when a contiguous <see cref="ColumnBlock"/> fast-path is not
+        /// available and the column must be populated via per-cell access. Values are generated
+        /// in batches into a temporary span and then written into the underlying cells using
+        /// <see cref="Unsafe.WriteUnaligned{T}(void*, T)"/>.
+        /// </para>
+        /// <para>
+        /// The method does not clear rented buffers when returning them to the pool, as the
+        /// contents are transient and not reused outside the current batch.
+        /// </para>
+        /// </remarks>
         private static unsafe void PerCellFill<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes) where T : unmanaged
         {
             for (uint start = 0; start < rows; start += (uint)batchSize)
@@ -984,9 +1027,14 @@ namespace Extend0.Metadata
 
                 int bytes = count * tSize;
                 T[]? rented = null;
-                Span<T> batch = bytes <= MaxStackBytes
-                    ? stackalloc T[count]
-                    : (rented = ArrayPool<T>.Shared.Rent(count)).AsSpan(0, count);
+                scoped Span<T> batch = [];
+
+                if (bytes <= MaxStackBytes) batch = stackalloc T[count];
+                else
+                {
+                    rented = ArrayPool<T>.Shared.Rent(count);
+                    batch = rented.AsSpan(0, count);
+                }
 
                 for (int i = 0; i < count; i++)
                     batch[i] = factory(start + (uint)i);
@@ -1003,7 +1051,7 @@ namespace Extend0.Metadata
                 }
 
                 if (rented is not null)
-                    ArrayPool<T>.Shared.Return(rented, clearArray: false);
+                    ArrayPool<T>.Shared.Return(rented);
             }
         }
 
@@ -1027,9 +1075,14 @@ namespace Extend0.Metadata
                 // Decide stack vs pool by bytes, not items
                 int bytes = count * tSize;
                 T[]? rented = null;
-                Span<T> batch = bytes <= MaxStackBytes
-                    ? stackalloc T[count]
-                    : (rented = ArrayPool<T>.Shared.Rent(count)).AsSpan(0, count);
+                scoped Span<T> batch = [];
+
+                if (bytes <= MaxStackBytes) batch = stackalloc T[count];
+                else
+                {
+                    rented = ArrayPool<T>.Shared.Rent(count);
+                    batch = rented.AsSpan(0, count);
+                }
 
                 // Produce values
                 for (int i = 0; i < count; i++)
@@ -1044,7 +1097,7 @@ namespace Extend0.Metadata
                 }
 
                 if (rented is not null)
-                    ArrayPool<T>.Shared.Return(rented, clearArray: false);
+                    ArrayPool<T>.Shared.Return(rented);
             }
         }
 
@@ -1132,7 +1185,7 @@ namespace Extend0.Metadata
         /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        private unsafe void FillColumn(MetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE)
+        private void FillColumn(MetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = DEFAULT_BATCH_SIZE)
         {
             if (rows == 0) return;
 
@@ -1280,7 +1333,7 @@ namespace Extend0.Metadata
         /// If no column blocks are available, the method falls back to per-cell copying.
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        private unsafe void CopyColumn(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, CapacityPolicy dstPolicy, int batchSize = DEFAULT_BATCH_SIZE)
+        private void CopyColumn(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, CapacityPolicy dstPolicy, int batchSize = DEFAULT_BATCH_SIZE)
         {
             EnsureRowCapacity(dst, dstCol, rows, dstPolicy);
 
@@ -1337,7 +1390,7 @@ namespace Extend0.Metadata
         /// <exception cref="InvalidOperationException">
         /// Thrown when the source and destination column blocks have different <c>ValueSize</c>.
         /// </exception>
-        private static unsafe bool PerBlockStridedCopy(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, int batchSize)
+        private static bool PerBlockStridedCopy(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, int batchSize)
         {
             // Fast exit when blocks are not available
             if (!src.TryGetColumnBlock(srcCol, out ColumnBlock srcBlk) ||
@@ -1354,6 +1407,13 @@ namespace Extend0.Metadata
             if (MemCopy(rows, srcBlk, dstBlk)) return true;
 
             // ===== STRIDED =====
+            StridedCopy(rows, batchSize, srcBlk, dstBlk, valueSize);
+
+            return true;
+        }
+
+        private static unsafe void StridedCopy(uint rows, int batchSize, ColumnBlock srcBlk, ColumnBlock dstBlk, uint valueSize)
+        {
             var sPitch = (nuint)srcBlk.Stride;
             var dPitch = (nuint)dstBlk.Stride;
             var sStart = srcBlk.GetValuePtr(0);
@@ -1363,8 +1423,6 @@ namespace Extend0.Metadata
             maxBatch = (maxBatch + 3u) & ~3u; // round up to multiple of 4
 
             StridedCopySelector(rows, valueSize, sPitch, dPitch, sStart, dStart, maxBatch);
-
-            return true;
         }
 
         /// <summary>
@@ -1399,7 +1457,7 @@ namespace Extend0.Metadata
             byte* s0 = srcBlk.GetValuePtr(0);
             byte* d0 = dstBlk.GetValuePtr(0);
 
-            long total = checked(rows * srcBlk.ValueSize);
+            long total = rows * srcBlk.ValueSize;
             Buffer.MemoryCopy(s0, d0, total, total);
             return true;
         }
