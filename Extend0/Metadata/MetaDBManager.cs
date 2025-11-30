@@ -44,6 +44,8 @@ namespace Extend0.Metadata
     [SuppressMessage("Reliability", "CA2014", Justification = "SO is controlled and the stack allocations in loops are limited.")]
     public sealed partial class MetaDBManager
     {
+        private const int DEFAULT_BATCH_SIZE = 512;
+
         /// <summary>
         /// Shared <see cref="ActivitySource"/> used to emit OpenTelemetry-compatible activities
         /// for high-level MetaDB operations (e.g. fills, copies, ref-linking, pipelines).
@@ -752,8 +754,6 @@ namespace Extend0.Metadata
             // Verificación post-crecimiento
             table.GetOrCreateCell(column, neededRows - 1);
         }
-
-        private const int DEFAULT_BATCH_SIZE = 512;
 
         /// <summary>
         /// Computes a heuristic batch size for column operations based on the VALUE size.

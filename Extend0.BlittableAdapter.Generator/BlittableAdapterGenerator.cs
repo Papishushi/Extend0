@@ -178,11 +178,8 @@ namespace Extend0.BlittableAdapter.Generator
                     }
                 }
                 sb.AppendLine();
-            }
 
-            // ---- Inline buffers ----
-            if (fields.Length > 0)
-            {
+                // ---- Inline buffers ----
                 sb.AppendLine("        // ---- Inline UTF-8 / binary buffers (fixed capacity) ----");
                 foreach (var field in fields)
                 {
