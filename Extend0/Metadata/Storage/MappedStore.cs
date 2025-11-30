@@ -79,7 +79,7 @@ namespace Extend0.Metadata.Storage
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static ColumnConfiguration FromDesc(in ColumnDesc cd, int index) =>
-            new(Size: MetadataEntrySizeExtensions.PackUnchecked(cd.KeySize, cd.ValueSize), 
+            new(Size: MetadataEntrySizeExtensions.PackUnchecked(cd.KeySize, cd.ValueSize),
                 Name: $"c{index}",
                 ReadOnly: false,
                 InitialCapacity: cd.RowCapacity);

@@ -1027,7 +1027,7 @@ namespace Extend0.Metadata
 
                 int bytes = count * tSize;
                 T[]? rented = null;
-                scoped Span<T> batch = [];
+                scoped Span<T> batch;
 
                 if (bytes <= MaxStackBytes) batch = stackalloc T[count];
                 else
@@ -1075,7 +1075,7 @@ namespace Extend0.Metadata
                 // Decide stack vs pool by bytes, not items
                 int bytes = count * tSize;
                 T[]? rented = null;
-                scoped Span<T> batch = [];
+                scoped Span<T> batch;
 
                 if (bytes <= MaxStackBytes) batch = stackalloc T[count];
                 else
