@@ -33,6 +33,44 @@ namespace Extend0.Metadata
         IUtf8SpanParsable<MetadataCellPointer>
     {
         /// <summary>
+        /// General format specifier used when no explicit format is provided ("G").
+        /// </summary>
+        private const char GENERAL_FORMAT = 'G';
+
+        /// <summary>
+        /// Hexadecimal format specifier ("X") for row/column numeric components.
+        /// </summary>
+        private const char HEX_FORMAT = 'X';
+
+        /// <summary>
+        /// Compact format specifier ("C") that uses a comma separator between row and column.
+        /// </summary>
+        private const char COMPACT_FORMAT = 'C';
+
+        /// <summary>
+        /// Separator used when the compact format (<see cref="COMPACT_FORMAT"/>) is selected.
+        /// </summary>
+        private const char COMMA_SYMBOL = ',';
+
+        /// <summary>
+        /// Default separator used between row and column when no compact format is specified.
+        /// </summary>
+        private const char COLON_SYMBOL = ':';
+
+        /// <summary>
+        /// Worst-case number of characters required when formatting in hexadecimal:
+        /// <c>8 (row) + 1 (separator) + 8 (column)</c>.
+        /// </summary>
+        private const int WORST_CASE_HEX = 17;
+
+        /// <summary>
+        /// Worst-case number of characters required when formatting in non-hex format:
+        /// <c>10 (row) + 1 (separator) + 10 (column)</c>.
+        /// </summary>
+        private const int WORST_CASE_DECIMAL = 21;
+
+
+        /// <summary>
         /// Gets the zero-based row index of the cell.
         /// </summary>
         public readonly uint Row = row;
@@ -75,68 +113,110 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Tries to format this instance into the provided character span.
+        /// Tries to format the current value into the specified character span.
         /// </summary>
-        /// <param name="destination">Target buffer for the formatted characters.</param>
-        /// <param name="charsWritten">On success, receives the number of characters written.</param>
-        /// <param name="format">
-        /// Optional format specifier (see <see cref="ToString(string?, IFormatProvider?)"/> for supported values).
+        /// <param name="destination">
+        /// Target buffer where the formatted representation of this instance will be written.
         /// </param>
-        /// <param name="provider">Optional format provider.</param>
+        /// <param name="charsWritten">
+        /// When this method returns <see langword="true"/>, contains the number of characters
+        /// that were written into <paramref name="destination"/>; otherwise set to <c>0</c>.
+        /// </param>
+        /// <param name="format">
+        /// Optional format specifier that controls how the value is rendered.
+        /// If <see cref="ReadOnlySpan{T}.Length"/> is <c>0</c>, the general format is used.
+        /// Supported values are the same as for <see cref="ToString(string?, IFormatProvider?)"/>.
+        /// </param>
+        /// <param name="provider">
+        /// Optional format provider used to resolve culture-specific formatting for the numeric components.
+        /// May be <see langword="null"/> to use the current culture.
+        /// </param>
         /// <returns>
-        /// <see langword="true"/> if the value was formatted successfully;
-        /// otherwise <see langword="false"/> if the destination buffer was too small.
+        /// <see langword="true"/> if the value was formatted successfully into the provided buffer;
+        /// otherwise, <see langword="false"/> if <paramref name="destination"/> is too small.
         /// </returns>
-        public bool TryFormat(Span<char> destination, out int charsWritten,
-                              ReadOnlySpan<char> format, IFormatProvider? provider)
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
         {
-            char f = (format.Length == 0) ? 'G' : char.ToUpperInvariant(format[0]);
-            char sep = f == 'C' ? ',' : ':';
-            ReadOnlySpan<char> numFmt = f == 'X' ? "X" : [];
-
-            // Capacity pre-check (worst case: decimal 10+1+10; hex 8+1+8)
-            int worst = f == 'X' ? 17 : 21;
-            if (destination.Length < worst)
-            {
-                charsWritten = 0;
+            charsWritten = 0;
+            char f = GetFormat(format);
+            char sep = GetSeparatorType(f);
+            ReadOnlySpan<char> numFmt = GetNumberFormat(f);
+            if (destination.Length < GetWorstCase(f))
                 return false;
-            }
 
             // row
-            if (!Row.TryFormat(destination, out int w1, numFmt, provider)) { charsWritten = 0; return false; }
-            if (w1 >= destination.Length) { charsWritten = 0; return false; }
-            destination[w1] = sep;
+            if (!ProcessRow(destination, ref charsWritten, provider, sep, numFmt, out int w1))
+                return false;
 
             // col
-            var tail = destination[(w1 + 1)..];
-            if (!Column.TryFormat(tail, out int w2, numFmt, provider)) { charsWritten = 0; return false; }
+            if (!ProcessColumn(destination, ref charsWritten, provider, numFmt, w1, out int w2))
+                return false;
 
             charsWritten = w1 + 1 + w2;
             return true;
         }
 
         /// <summary>
-        /// Attempts to parse a pointer from a textual representation.
+        /// Formats the column component into <paramref name="destination"/> starting at
+        /// <paramref name="w1"/> and updates <paramref name="charsWritten"/>.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ProcessColumn(Span<char> destination, ref int charsWritten, IFormatProvider? provider, ReadOnlySpan<char> numFmt, int w1, out int w2)
+        {
+            var tail = destination[(w1 + 1)..];
+            if (!Column.TryFormat(tail, out w2, numFmt, provider)) { charsWritten = 0; return false; }
+            return true;
+        }
+
+
+        /// <summary>
+        /// Formats the row component into <paramref name="destination"/>, writes the separator
+        /// character and updates <paramref name="charsWritten"/>.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ProcessRow(Span<char> destination, ref int charsWritten, IFormatProvider? provider, char sep, ReadOnlySpan<char> numFmt, out int w1)
+        {
+            if (!Row.TryFormat(destination, out w1, numFmt, provider)) { charsWritten = 0; return false; }
+            if (w1 >= destination.Length) { charsWritten = 0; return false; }
+            destination[w1] = sep;
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetWorstCase(char f) => f == HEX_FORMAT ? WORST_CASE_HEX : WORST_CASE_DECIMAL; // Capacity pre-check (worst case: decimal 10+1+10; hex 8+1+8)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static char GetFormat(ReadOnlySpan<char> format) => (format.Length == 0) ? GENERAL_FORMAT : char.ToUpperInvariant(format[0]);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static ReadOnlySpan<char> GetNumberFormat(char f) => f == HEX_FORMAT ? string.Empty+HEX_FORMAT : [];
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static char GetSeparatorType(char f) => f == COMPACT_FORMAT ? COMMA_SYMBOL : COLON_SYMBOL;
+
+        /// <summary>
+        /// Attempts to parse a metadata cell pointer from its textual representation.
         /// </summary>
         /// <param name="s">
         /// Input span containing either <c>"row:col"</c> or <c>"row,col"</c>,
-        /// in decimal or hexadecimal (prefix <c>0x</c> allowed for each part).
+        /// in decimal or hexadecimal (an optional <c>"0x"</c> prefix is allowed for each part).
+        /// Leading and trailing whitespace around each component is ignored.
         /// </param>
         /// <param name="value">
         /// When this method returns <see langword="true"/>, contains the parsed value.
+        /// Otherwise, set to <see langword="default"/>.
         /// </param>
         /// <returns>
-        /// <see langword="true"/> if parsing succeeded; otherwise <see langword="false"/>.
+        /// <see langword="true"/> if parsing succeeded; otherwise, <see langword="false"/>.
         /// </returns>
         public static bool TryParse(ReadOnlySpan<char> s, out MetadataCellPointer value)
             => TryParse(s, CultureInfo.InvariantCulture, out value);
 
         /// <summary>
-        /// Attempts to parse a pointer from a textual representation using a specific format provider.
+        /// Attempts to parse a metadata cell pointer from its textual representation
+        /// using the specified format provider.
         /// </summary>
         /// <param name="s">
         /// Input span containing either <c>"row:col"</c> or <c>"row,col"</c>,
-        /// in decimal or hexadecimal (prefix <c>0x</c> allowed for each part).
+        /// in decimal or hexadecimal (an optional <c>"0x"</c> prefix is allowed for each part).
+        /// Leading and trailing whitespace around the whole input and around each component is ignored.
         /// </param>
         /// <param name="provider">
         /// Format provider used for numeric parsing. When <see langword="null"/>,
@@ -144,28 +224,25 @@ namespace Extend0.Metadata
         /// </param>
         /// <param name="value">
         /// When this method returns <see langword="true"/>, contains the parsed value.
+        /// Otherwise, set to <see langword="default"/>.
         /// </param>
         /// <returns>
-        /// <see langword="true"/> if parsing succeeded; otherwise <see langword="false"/>.
+        /// <see langword="true"/> if parsing succeeded; otherwise, <see langword="false"/>.
         /// </returns>
         public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out MetadataCellPointer value)
         {
             var culture = provider as CultureInfo ?? CultureInfo.InvariantCulture;
 
             s = s.Trim();
-            int i = s.IndexOfAny(':', ',');
-            if (i <= 0 || i >= s.Length - 1) { value = default; return false; }
+            int i = s.IndexOfAny(COLON_SYMBOL, COMMA_SYMBOL);
+            if (i <= 0 || i >= s.Length - 1)
+            {
+                value = default;
+                return false;
+            }
 
             var left = s[..i].Trim();
             var right = s[(i + 1)..].Trim();
-
-            static bool ParseUInt(ReadOnlySpan<char> txt, CultureInfo culture, out uint n)
-            {
-                if (txt.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                    return uint.TryParse(txt[2..], NumberStyles.HexNumber, culture, out n);
-
-                return uint.TryParse(txt, NumberStyles.None, culture, out n);
-            }
 
             if (!ParseUInt(left, culture, out var r) || !ParseUInt(right, culture, out var c))
             {
@@ -177,15 +254,29 @@ namespace Extend0.Metadata
             return true;
         }
 
+        private static bool ParseUInt(ReadOnlySpan<char> txt, CultureInfo culture, out uint n)
+        {
+            if (txt.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                return uint.TryParse(txt[2..], NumberStyles.HexNumber, culture, out n);
+
+            return uint.TryParse(txt, NumberStyles.None, culture, out n);
+        }
+
         /// <summary>
-        /// Parses a pointer from a string representation.
+        /// Parses a metadata cell pointer from its string representation.
         /// </summary>
         /// <param name="s">
         /// Input string in the format <c>"row:col"</c> or <c>"row,col"</c>,
-        /// in decimal or hexadecimal (prefix <c>0x</c> allowed for each part).
+        /// in decimal or hexadecimal (an optional <c>"0x"</c> prefix is allowed for each part).
+        /// Leading and trailing whitespace around each component is ignored.
         /// </param>
-        /// <returns>The parsed <see cref="MetadataCellPointer"/>.</returns>
-        /// <exception cref="FormatException">If the input is not in a valid format.</exception>
+        /// <returns>
+        /// The parsed <see cref="MetadataCellPointer"/>.
+        /// </returns>
+        /// <exception cref="FormatException">
+        /// Thrown when <paramref name="s"/> is not in a valid <c>"row:col"</c> or <c>"row,col"</c> format,
+        /// or when any component cannot be parsed as an unsigned integer.
+        /// </exception>
         public static MetadataCellPointer Parse(string s)
             => TryParse(s.AsSpan(), CultureInfo.InvariantCulture, out var v)
                ? v
@@ -359,8 +450,8 @@ namespace Extend0.Metadata
         public static bool TryParse(ReadOnlySpan<byte> utf8Text, IFormatProvider? provider, out MetadataCellPointer value)
         {
             utf8Text = TrimAscii(utf8Text);
-            int sep = utf8Text.IndexOf((byte)':');
-            if (sep < 0) sep = utf8Text.IndexOf((byte)',');
+            int sep = utf8Text.IndexOf((byte)COLON_SYMBOL);
+            if (sep < 0) sep = utf8Text.IndexOf((byte)COMMA_SYMBOL);
 
             if (sep <= 0 || sep >= utf8Text.Length - 1)
             {
@@ -379,6 +470,23 @@ namespace Extend0.Metadata
 
             value = new MetadataCellPointer(r, c);
             return true;
+        }
+
+        /// <summary>
+        /// Parses a pointer from a UTF-8 encoded representation.
+        /// </summary>
+        /// <param name="utf8Text">
+        /// Input UTF-8 text in the format <c>"row:col"</c> or <c>"row,col"</c>.
+        /// </param>
+        /// <param name="provider">Optional format provider (ignored).</param>
+        /// <returns>The parsed <see cref="MetadataCellPointer"/>.</returns>
+        /// <exception cref="FormatException">If the input is not in a valid format.</exception>
+        public static MetadataCellPointer Parse(ReadOnlySpan<byte> utf8Text, IFormatProvider? provider)
+        {
+            if (TryParse(utf8Text, provider, out var v))
+                return v;
+
+            throw new FormatException("Expected 'row:col' or 'row,col' (UTF-8).");
         }
 
         /// <summary>
@@ -430,7 +538,7 @@ namespace Extend0.Metadata
             if (s.Length == 0) return false;
 
             // Hex with 0x/0X prefix
-            if (s.Length >= 2 && s[0] == (byte)'0' && (s[1] == (byte)'x' || s[1] == (byte)'X'))
+            if (s.Length >= 2 && s[0] == (byte)'0' && (s[1] == (byte)'x' || s[1] == (byte)HEX_FORMAT))
                 return ParseHex(ref s, ref n);
 
             // Decimal
@@ -508,23 +616,6 @@ namespace Extend0.Metadata
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Parses a pointer from a UTF-8 encoded representation.
-        /// </summary>
-        /// <param name="utf8Text">
-        /// Input UTF-8 text in the format <c>"row:col"</c> or <c>"row,col"</c>.
-        /// </param>
-        /// <param name="provider">Optional format provider (ignored).</param>
-        /// <returns>The parsed <see cref="MetadataCellPointer"/>.</returns>
-        /// <exception cref="FormatException">If the input is not in a valid format.</exception>
-        public static MetadataCellPointer Parse(ReadOnlySpan<byte> utf8Text, IFormatProvider? provider)
-        {
-            if (TryParse(utf8Text, provider, out var v))
-                return v;
-
-            throw new FormatException("Expected 'row:col' or 'row,col' (UTF-8).");
         }
     }
 }
