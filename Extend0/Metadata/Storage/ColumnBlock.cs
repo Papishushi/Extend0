@@ -1,4 +1,5 @@
-﻿namespace Extend0.Metadata.Storage
+﻿
+namespace Extend0.Metadata.Storage
 {
     /// <summary>
     /// Describes a contiguous value slice for a single column in a metadata store.
@@ -19,7 +20,7 @@
     /// metadata assembly; callers are responsible for honoring lifetime and bounds.
     /// </para>
     /// </remarks>
-    internal unsafe readonly struct ColumnBlock(byte* @base, int stride, int valueSize, int valueOffset)
+    internal unsafe readonly struct ColumnBlock(byte* @base, int stride, int valueSize, int valueOffset) : IEquatable<ColumnBlock>
     {
         /// <summary>
         /// Base address of the first row in the column (start of the first cell, at offset 0).
@@ -45,6 +46,16 @@
         /// </remarks>
         internal readonly int ValueOffset = valueOffset;
 
+        public override bool Equals(object? obj) => obj is ColumnBlock block&&Equals(block);
+
+        public bool Equals(ColumnBlock other) =>
+            Base == other.Base&&
+            Stride == other.Stride&&
+            ValueSize == other.ValueSize&&
+            ValueOffset == other.ValueOffset;
+
+        public override int GetHashCode() => HashCode.Combine(Stride, ValueSize, ValueOffset);
+
         /// <summary>
         /// Computes a pointer to the <c>VALUE</c> segment for the specified row.
         /// </summary>
@@ -58,5 +69,9 @@
         /// <paramref name="row"/> is within the valid row capacity for the column.
         /// </remarks>
         internal byte* GetValuePtr(uint row) => Base + ValueOffset + Stride * row;
+
+        public static bool operator ==(ColumnBlock left, ColumnBlock right) => left.Equals(right);
+
+        public static bool operator !=(ColumnBlock left, ColumnBlock right) => !left.Equals(right);
     }
 }

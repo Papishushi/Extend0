@@ -23,36 +23,31 @@ namespace Extend0.Metadata.Refs
     /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct MetadataTableRef : IEquatable<MetadataTableRef>
+    public readonly struct MetadataTableRef(Guid tableId, uint column, uint row, ulong reserved) : IEquatable<MetadataTableRef>
     {
         /// <summary>
         /// Globally unique identifier of the referenced metadata table.
         /// </summary>
-        public Guid TableId;   // 16
+        public readonly Guid TableId = tableId;   // 16
 
         /// <summary>
         /// Zero-based column index of the referenced cell within the table.
         /// </summary>
-        public uint Column;    // 4
+        public readonly uint Column = column;    // 4
 
         /// <summary>
         /// Zero-based row index of the referenced cell within the table.
         /// </summary>
-        public uint Row;       // 4
-
-        /// <summary>
+        public readonly uint Row = row;        /// <summary>
         /// Reserved 64-bit field for future extensions (e.g. flags, versioning).
         /// </summary>
-        public ulong Reserved; // 8
+        public readonly ulong Reserved = reserved;  // 8
 
-        public readonly bool Equals(MetadataTableRef other)
-        {
-            var a = TableId == other.TableId;
-            var b = Column == other.Column;
-            var c = Row == other.Row;
-            var d = Reserved == other.Reserved;
-            return a && b && c && d;
-        }
+        public readonly bool Equals(MetadataTableRef other) => 
+                TableId == other.TableId
+             && Column  == other.Column
+             && Row     == other.Row
+             && Reserved == other.Reserved;
 
         /// <inheritdoc/>
         public override readonly bool Equals(object? obj) => obj is MetadataTableRef other && Equals(other);
@@ -61,6 +56,5 @@ namespace Extend0.Metadata.Refs
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override readonly int GetHashCode() => HashCode.Combine(TableId, Column, Row, Reserved);
-
     }
 }

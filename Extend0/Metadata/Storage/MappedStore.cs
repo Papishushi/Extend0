@@ -143,7 +143,7 @@ namespace Extend0.Metadata.Storage
         ///   </description></item>
         /// </list>
         /// </remarks>
-        public unsafe MappedStore(TableSpec spec)
+        public MappedStore(TableSpec spec)
         {
             var columns = spec.Columns;
 
@@ -248,13 +248,13 @@ namespace Extend0.Metadata.Storage
 
                 cursor = AlignUp(cursor);
                 temp[i] = new ColumnDesc
-                {
-                    KeySize     = keySize,
-                    ValueSize   = valueSize,
-                    RowCapacity = c.InitialCapacity,
-                    BaseOffset  = cursor
-                };
-                cursor = cursor + entrySize * c.InitialCapacity;
+                (
+                    keySize     : keySize,
+                    valueSize   : valueSize,
+                    rowCapacity : c.InitialCapacity,
+                    baseOffset  : cursor
+                );
+                cursor += entrySize * c.InitialCapacity;
 
                 // Pre-encode column name as UTF-8 (truncated to keySize - 1)
                 int max = Math.Max(0, keySize - 1);

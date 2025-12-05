@@ -674,12 +674,12 @@ namespace Extend0.Metadata
 
             // Append the reference
             var tref = new MetadataTableRef
-            {
-                TableId  = childTableId,
-                Column   = childCol,
-                Row      = childRow,
-                Reserved = 0
-            };
+            (
+                tableId  : childTableId,
+                column   : childCol,
+                row      : childRow,
+                reserved : 0
+            );
             LinkRef(p.Table, refsCol, parentRow, in tref);
 
             if (_isLogActivated)
