@@ -1,4 +1,3 @@
-# Ignora todo lo que pueda ser binario o artefacto de build
 exclude_paths:
   - ".git/**"
   - "Sandbox/**"
