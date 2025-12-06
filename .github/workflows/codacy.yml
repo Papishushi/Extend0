@@ -46,6 +46,7 @@ jobs:
           # You can also omit the token and run the tools that support default configurations
           project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
           verbose: true
+          upload: true 
           output: results.json
           format: json
           # Adjust severity of non-security issues
