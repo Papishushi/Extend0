@@ -1,4 +1,4 @@
-# Extend0
+# Extend0 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/8cf185b2f8204e80bb3419cbceb7362a)](https://app.codacy.com/gh/Papishushi/Extend0/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
 Extend0 is a small .NET utility library that provides three main building blocks:
 
