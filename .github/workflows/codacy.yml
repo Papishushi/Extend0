@@ -47,8 +47,8 @@ jobs:
           project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
           verbose: true
           upload: true 
-          format: sarif
-          output: /tmp/results.sarif
+          format: json
+          output: /tmp/results.json
           # Adjust severity of non-security issues
           gh-code-scanning-compat: false
           # Force 0 exit code to allow SARIF file generation
