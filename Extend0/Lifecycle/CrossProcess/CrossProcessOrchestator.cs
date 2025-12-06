@@ -169,11 +169,10 @@
         /// </remarks>
         private static CrossProcessHandle<TService> HostBranch(Func<TService> factory, string pipeName, Mutex m)
         {
-            CancellationTokenSource? cts = null;
+            CancellationTokenSource cts = new CancellationTokenSource();
             NamedPipeServer? server = null;
             try
             {
-                cts = new CancellationTokenSource();
                 var impl = factory(); // if this throws, we release the mutex below
 
                 server = new NamedPipeServer(pipeName, impl!, cts.Token);
@@ -190,12 +189,17 @@
             catch
             {
                 // Clean up on failure to host
-                try { server?.Dispose(); } catch { /* swallow: hosting failed anyway */ }
-                try { cts?.Cancel(); cts?.Dispose(); } catch { /* swallow: teardown best-effort */ }
-                try { m.ReleaseMutex(); } catch { /* swallow: just ensure mutex is not held */ }
-                try { m.Dispose(); } catch { /* swallow: OS will reclaim handle */ }
+                TryDisposeState(m, cts, server);
                 throw;
             }
+        }
+
+        private static void TryDisposeState(Mutex m, CancellationTokenSource? cts, NamedPipeServer? server)
+        {
+            try { server?.Dispose(); } catch { /* swallow: hosting failed anyway */ }
+            try { cts?.Cancel(); cts?.Dispose(); } catch { /* swallow: teardown best-effort */ }
+            try { m.ReleaseMutex(); } catch { /* swallow: just ensure mutex is not held */ }
+            try { m.Dispose(); } catch { /* swallow: OS will reclaim handle */ }
         }
     }
 }
