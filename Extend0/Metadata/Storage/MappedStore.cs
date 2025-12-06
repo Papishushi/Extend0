@@ -249,10 +249,10 @@ namespace Extend0.Metadata.Storage
                 cursor = AlignUp(cursor);
                 temp[i] = new ColumnDesc
                 (
-                    keySize     : keySize,
-                    valueSize   : valueSize,
-                    rowCapacity : c.InitialCapacity,
-                    baseOffset  : cursor
+                    keySize: keySize,
+                    valueSize: valueSize,
+                    rowCapacity: c.InitialCapacity,
+                    baseOffset: cursor
                 );
                 cursor += entrySize * c.InitialCapacity;
 
@@ -628,5 +628,10 @@ namespace Extend0.Metadata.Storage
             _view.Flush();
             return true;
         }
+
+        public IEnumerator<CellRowColumnValueEntry> GetEnumerator() => EnumerateCells().GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
     }
 }

@@ -675,10 +675,10 @@ namespace Extend0.Metadata
             // Append the reference
             var tref = new MetadataTableRef
             (
-                tableId  : childTableId,
-                column   : childCol,
-                row      : childRow,
-                reserved : 0
+                tableId: childTableId,
+                column: childCol,
+                row: childRow,
+                reserved: 0
             );
             LinkRef(p.Table, refsCol, parentRow, in tref);
 
@@ -771,6 +771,78 @@ namespace Extend0.Metadata
         /// </exception>
         public async Task RunAsync(string operationName, Func<MetaDBManager, Task> action, object? state = null) =>
             await RunCore(operationName, action, state).ConfigureAwait(false);
+
+        /// <summary>
+        /// Executes a named operation and, upon successful completion, rebuilds
+        /// per-column (and optionally global) indexes for all materialized tables.
+        /// </summary>
+        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
+        /// <param name="action">Operation to execute.</param>
+        /// <param name="includeGlobal">
+        /// <see langword="true"/> to rebuild global indexes in addition to per-column indexes;
+        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// </param>
+        public void RunWithReindexAll(string operationName, Action<MetaDBManager> action, bool includeGlobal = true) =>
+            Run(operationName, mgr =>
+            {
+                action(mgr);
+                mgr.RebuildAllIndexes(includeGlobal);
+            });
+
+        /// <summary>
+        /// Asynchronous version of <see cref="RunWithReindexAll"/> that rebuilds
+        /// indexes for all materialized tables when the operation completes successfully.
+        /// </summary>
+        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
+        /// <param name="action">Async operation to execute.</param>
+        /// <param name="includeGlobal">
+        /// <see langword="true"/> to rebuild global indexes in addition to per-column indexes;
+        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// </param>
+        /// <returns>A task that completes when the operation and reindexing have finished.</returns>
+        public async Task RunWithReindexAllAsync(string operationName, Func<MetaDBManager, Task> action, bool includeGlobal = true) =>
+            await RunCore(operationName, async mgr =>
+            {
+                await action(mgr).ConfigureAwait(false);
+                mgr.RebuildAllIndexes(includeGlobal);
+            }).ConfigureAwait(false);
+
+        /// <summary>
+        /// Executes a named operation and, upon successful completion, rebuilds
+        /// the key indexes for a single target table.
+        /// </summary>
+        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
+        /// <param name="tableId">Identifier of the table whose indexes should be rebuilt.</param>
+        /// <param name="action">Operation to execute.</param>
+        /// <param name="includeGlobal">
+        /// <see langword="true"/> to rebuild the global index for the table as well as per-column indexes;
+        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// </param>
+        public void RunWithReindexTable(string operationName, Guid tableId, Action<MetaDBManager> action, bool includeGlobal = true) =>
+            Run(operationName, mgr =>
+            {
+                action(mgr);
+                mgr.RebuildIndexes(tableId, includeGlobal);
+            });
+
+        /// <summary>
+        /// Asynchronous version of <see cref="RunWithReindexTable"/> that rebuilds
+        /// the key indexes for a single table when the operation completes successfully.
+        /// </summary>
+        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
+        /// <param name="tableId">Identifier of the table whose indexes should be rebuilt.</param>
+        /// <param name="action">Async operation to execute.</param>
+        /// <param name="includeGlobal">
+        /// <see langword="true"/> to rebuild the global index for the table as well as per-column indexes;
+        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// </param>
+        /// <returns>A task that completes when the operation and reindexing have finished.</returns>
+        public async Task RunWithReindexTableAsync(string operationName, Guid tableId, Func<MetaDBManager, Task> action, bool includeGlobal = true) =>
+            await RunCore(operationName, async mgr =>
+            {
+                await action(mgr).ConfigureAwait(false);
+                mgr.RebuildIndexes(tableId, includeGlobal);
+            }).ConfigureAwait(false);
 
         private async Task RunCore(string operationName, Func<MetaDBManager, Task> action, object? state = null)
         {
@@ -1766,5 +1838,60 @@ namespace Extend0.Metadata
             if (!MetadataTableRefVec.TryAdd(buf, in tref, buf.Length))
                 throw new InvalidOperationException("Refs vector is full; increase VALUE size or add an overflow strategy.");
         }
+
+        /// <summary>
+        /// Rebuilds the key indexes of the metadata table identified by the specified <paramref name="tableId"/>.
+        /// </summary>
+        /// <param name="tableId">
+        /// The unique identifier of the table whose indexes should be rebuilt.
+        /// </param>
+        /// <param name="includeGlobal">
+        /// <see langword="true"/> to rebuild both per-column and global key indexes;
+        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// This method retrieves (or materializes on demand) the <see cref="MetadataTable"/>
+        /// associated with <paramref name="tableId"/> and invokes
+        /// <see cref="MetadataTable.RebuildIndexes(bool)"/> on it.
+        /// </para>
+        /// <para>
+        /// Only the target table is affected. To rebuild indexes for all materialized tables,
+        /// use <see cref="RebuildAllIndexes(bool)"/>.
+        /// </para>
+        /// </remarks>
+        public void RebuildIndexes(Guid tableId, bool includeGlobal = true)
+        {
+            var table = GetOrCreate(tableId);
+            table.RebuildIndexes(includeGlobal);
+        }
+
+        /// <summary>
+        /// Rebuilds per-column and global key indexes for all materialized tables
+        /// managed by this <see cref="MetaDBManager"/>.
+        /// </summary>
+        /// <param name="includeGlobal">
+        /// <see langword="true"/> to rebuild global key indexes as well as per-column indexes;
+        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// </param>
+        /// <remarks>
+        /// Only tables whose underlying <see cref="MetadataTable"/> has already been created
+        /// (<c>ManagedTable.IsCreated == true</c>) are processed. Tables that are registered
+        /// but still lazy are skipped.
+        /// </remarks>
+        private void RebuildAllIndexes(bool includeGlobal = true)
+        {
+            // _byId is a ConcurrentDictionary → snapshot enumeration is safe.
+            foreach (var managed in _byId.Values)
+            {
+                if (managed is null || !managed.IsCreated)
+                    continue;
+
+                // For now we rebuild unique per-column + global indexes.
+                // Later, when we add multi-index support, this can call the extended overload.
+                managed.Table.RebuildIndexes(includeGlobal);
+            }
+        }
+
     }
 }

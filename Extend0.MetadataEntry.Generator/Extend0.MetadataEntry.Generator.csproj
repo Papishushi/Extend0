@@ -12,8 +12,8 @@
     <Description>Generates blittable MetadataEntry{Key}x{Value} structs (GC Free).</Description>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <SuppressWarnings>RS1035</SuppressWarnings>
-    <AssemblyVersion>1.0.9470.268</AssemblyVersion>
-    <FileVersion>1.0.9470.268</FileVersion>
+    <AssemblyVersion>1.0.9471.33992</AssemblyVersion>
+    <FileVersion>1.0.9471.33992</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

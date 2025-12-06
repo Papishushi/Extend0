@@ -167,16 +167,30 @@ namespace Extend0.Metadata
         /// <remarks>
         /// <para>
         /// This method performs a full scan over the underlying store via
-        /// <see cref="EnumerateCells"/>. It extracts the key of each cell (when present)
-        /// and populates:
+        /// <see cref="EnumerateCells"/>. For each <see cref="CellRowColumnValueEntry"/> it:
         /// </para>
         /// <list type="bullet">
-        ///   <item><description><see cref="_indexByKeyPerColumn"/>: key → row within one column.</description></item>
-        ///   <item><description><see cref="_globalKeyIndex"/>: key → (column, row) across all columns.</description></item>
+        ///   <item><description>
+        ///   Extracts the cell key (when present) using <see cref="MetadataCell.TryGetKey(out ReadOnlySpan{byte})"/>.
+        ///   </description></item>
+        ///   <item><description>
+        ///   Populates <see cref="_indexByKeyPerColumn"/> so that, for each column,
+        ///   keys map to their row index.
+        ///   </description></item>
+        ///   <item><description>
+        ///   Optionally populates <see cref="_globalKeyIndex"/> so that keys map to a
+        ///   <c>(column, row)</c> pair across all columns.
+        ///   </description></item>
         /// </list>
         /// <para>
+        /// Keys are stored as defensive copies (<see cref="byte"/> arrays) to ensure
+        /// they remain valid beyond the lifetime of any temporary spans used while
+        /// scanning the store.
+        /// </para>
+        /// <para>
         /// When duplicate keys are found within the same column, the last occurrence
-        /// overwrites previous entries.
+        /// overwrites previous entries. If you need to track multiple rows for the
+        /// same key, replace the value type with a multi-map or a list.
         /// </para>
         /// </remarks>
         public void RebuildIndexes(bool includeGlobal = true)
@@ -184,31 +198,33 @@ namespace Extend0.Metadata
             _indexByKeyPerColumn.Clear();
             if (includeGlobal) _globalKeyIndex.Clear();
 
-            foreach (var (ptr, cell) in EnumerateCells())
+            foreach (var entry in EnumerateCells())
             {
-                if (!cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
+                if (!entry.Cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
                     continue;
 
-                // copia defensiva (clave pequeña)
+                // Defensive copy for small keys
                 var keyCopy = k.ToArray();
 
-                if (!_indexByKeyPerColumn.TryGetValue(ptr.Column, out var dict))
+                if (!_indexByKeyPerColumn.TryGetValue(entry.Col, out var dict))
                 {
                     dict = new Dictionary<byte[], uint>(ByteArrayComparer.Ordinal);
-                    _indexByKeyPerColumn[ptr.Column] = dict;
+                    _indexByKeyPerColumn[entry.Col] = dict;
                 }
-                // si hay duplicados en la misma col, el último gana; cambia si quieres multi-map
-                dict[keyCopy] = ptr.Row;
 
-                if (includeGlobal) _globalKeyIndex[keyCopy] = (ptr.Column, ptr.Row);
+                // If there are duplicates in the same column, the last one wins.
+                dict[keyCopy] = entry.Row;
+
+                if (includeGlobal)
+                    _globalKeyIndex[keyCopy] = (entry.Col, entry.Row);
             }
         }
 
         /// <summary>
         /// Tries to find the row index within a column that matches the specified UTF-8 key.
         /// </summary>
-        /// <param name="column">The zero-based column index.</param>
-        /// <param name="keyUtf8">The key bytes, encoded as UTF-8.</param>
+        /// <param name="column">The zero-based column index to search.</param>
+        /// <param name="keyUtf8">The key bytes, encoded as UTF-8, provided as a read-only span.</param>
         /// <param name="row">
         /// When this method returns <see langword="true"/>, contains the row index of
         /// the cell with the given key; otherwise, 0.
@@ -218,18 +234,55 @@ namespace Extend0.Metadata
         /// column; otherwise, <see langword="false"/>.
         /// </returns>
         /// <remarks>
+        /// <para>
         /// The lookup uses the per-column index built by <see cref="RebuildIndexes(bool)"/>.
         /// If the index is stale or has not been built, the result may be incomplete.
+        /// </para>
+        /// <para>
+        /// This overload allocates a new <see cref="byte"/> array per call to match the
+        /// dictionary key type. For hot paths, prefer the <see cref="TryFindRowByKey(uint, byte[], out uint)"/>
+        /// overload, which avoids this allocation.
+        /// </para>
         /// </remarks>
         public bool TryFindRowByKey(uint column, ReadOnlySpan<byte> keyUtf8, out uint row)
         {
             row = 0;
             if (!_indexByKeyPerColumn.TryGetValue(column, out var dict)) return false;
-            // para buscar en dict necesitamos byte[]: evita alloc si puedes mantener clave cacheada
-            // aquí hacemos una copia temporal (puedes usar ArrayPool si es muy frecuente)
-            var tmp = keyUtf8.ToArray();
-            if (dict.TryGetValue(tmp, out row)) return true;
-            return false;
+
+            // We need a byte[] because the dictionary is keyed on byte[].
+            // This allocates once per lookup; if this is hot, consider using the overload.
+            var key = keyUtf8.ToArray();
+            return dict.TryGetValue(key, out row);
+        }
+
+        /// <summary>
+        /// Tries to find the row index within a column that matches the specified UTF-8 key.
+        /// </summary>
+        /// <param name="column">The zero-based column index to search.</param>
+        /// <param name="keyUtf8">The key bytes, encoded as UTF-8, provided as a <see cref="byte"/> array.</param>
+        /// <param name="row">
+        /// When this method returns <see langword="true"/>, contains the row index of
+        /// the cell with the given key; otherwise, 0.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if a row with the specified key was found in the given
+        /// column; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// The lookup uses the per-column index built by <see cref="RebuildIndexes(bool)"/>.
+        /// If the index is stale or has not been built, the result may be incomplete.
+        /// </para>
+        /// <para>
+        /// This overload avoids allocations by using the provided <paramref name="keyUtf8"/>
+        /// array directly as the dictionary key, and is preferred for hot paths where the
+        /// caller already has a <see cref="byte"/> array.
+        /// </para>
+        /// </remarks>
+        public bool TryFindRowByKey(uint column, byte[] keyUtf8, out uint row)
+        {
+            row = 0;
+            return _indexByKeyPerColumn.TryGetValue(column, out var dict) && dict.TryGetValue(keyUtf8, out row);
         }
 
         /// <summary>
@@ -308,9 +361,13 @@ namespace Extend0.Metadata
         /// </returns>
         public bool TryGetCell(string columnName, uint row, out MetadataCell cell)
         {
-            var a = _colIndexByName.TryGetValue(columnName, out var col);
-            var b = _store.TryGetCell(col, row, out cell!);
-            return a && b;
+            if (!_colIndexByName.TryGetValue(columnName, out var col))
+            {
+                cell = default;
+                return false;
+            }
+
+            return _store.TryGetCell(col, row, out cell!);
         }
 
         /// <summary>
@@ -376,14 +433,15 @@ namespace Extend0.Metadata
         /// Enumerates all cells in the table along with their coordinates.
         /// </summary>
         /// <returns>
-        /// An enumerable sequence of tuples containing a <see cref="MetadataCellPointer"/>
-        /// (column and row) and the corresponding <see cref="MetadataCell"/>.
+        /// A <see cref="CellEnumerable"/> that yields <see cref="CellRowColumnValueEntry"/> values,
+        /// each combining a <see cref="MetadataCellPointer"/> (row and column) with the
+        /// corresponding <see cref="MetadataCell"/> instance.
         /// </returns>
-        public IEnumerable<(MetadataCellPointer Ptr, MetadataCell Cell)> EnumerateCells()
-        {
-            foreach (var (c, r, cell) in _store.EnumerateCells())
-                yield return (new MetadataCellPointer(r, c), cell);
-        }
+        /// <remarks>
+        /// The enumeration walks the underlying <see cref="ICellStore"/> in an implementation-defined
+        /// order, typically column by column and row by row. Cells may be materialized lazily.
+        /// </remarks>
+        public CellEnumerable EnumerateCells() => _store.EnumerateCells();
 
         /// <summary>
         /// Returns a formatted string representation of the table contents, limited
@@ -733,5 +791,4 @@ namespace Extend0.Metadata
         /// </summary>
         public void Dispose() => _store.Dispose();
     }
-
 }

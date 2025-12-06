@@ -197,5 +197,9 @@ namespace Extend0.Metadata.Storage
             _rowsPerColumn[column] = minRows;
             return true;
         }
+
+        public IEnumerator<CellRowColumnValueEntry> GetEnumerator() => EnumerateCells().GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

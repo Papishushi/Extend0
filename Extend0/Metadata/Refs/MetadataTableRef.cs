@@ -39,11 +39,11 @@ namespace Extend0.Metadata.Refs
         /// Zero-based row index of the referenced cell within the table.
         /// </summary>
         public readonly uint Row = row;        /// <summary>
-        /// Reserved 64-bit field for future extensions (e.g. flags, versioning).
-        /// </summary>
+                                               /// Reserved 64-bit field for future extensions (e.g. flags, versioning).
+                                               /// </summary>
         public readonly ulong Reserved = reserved;  // 8
 
-        public readonly bool Equals(MetadataTableRef other) => 
+        public readonly bool Equals(MetadataTableRef other) =>
                 TableId == other.TableId
              && Column  == other.Column
              && Row     == other.Row

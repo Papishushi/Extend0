@@ -42,7 +42,7 @@ namespace Extend0.Metadata.Storage.Files
 
         public override bool Equals(object? obj) => obj is ColumnDesc desc&&Equals(desc);
 
-        public bool Equals(ColumnDesc other) => 
+        public bool Equals(ColumnDesc other) =>
                    KeySize==other.KeySize&&
                    ValueSize==other.ValueSize&&
                    RowCapacity==other.RowCapacity&&

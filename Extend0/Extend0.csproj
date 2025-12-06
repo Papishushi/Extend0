@@ -4,8 +4,8 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyVersion>1.0.9470.1020</AssemblyVersion>
-    <FileVersion>1.0.9470.1020</FileVersion>
+    <AssemblyVersion>1.0.9471.33992</AssemblyVersion>
+    <FileVersion>1.0.9471.33992</FileVersion>
 	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 

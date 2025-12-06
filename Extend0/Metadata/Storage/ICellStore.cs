@@ -27,7 +27,7 @@ namespace Extend0.Metadata.Storage
     /// the associated <see cref="MetadataTable"/> is no longer needed.
     /// </para>
     /// </remarks>
-    internal interface ICellStore : IDisposable
+    internal interface ICellStore : IDisposable, IEnumerable<CellRowColumnValueEntry>
     {
         /// <summary>
         /// Attempts to retrieve a low-level view over all values in a column.

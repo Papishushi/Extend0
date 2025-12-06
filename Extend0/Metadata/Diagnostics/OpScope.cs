@@ -29,7 +29,7 @@ namespace Extend0.Metadata.Diagnostics
     /// a <c>RunFail</c> event and marks the associated activity as error.
     /// </para>
     /// </remarks>
-    public struct OpScope : IDisposable
+    public struct OpScope : IDisposable, IEquatable<OpScope>
     {
         private ILogger? _log;
         private string? _name;
@@ -180,6 +180,37 @@ namespace Extend0.Metadata.Diagnostics
             _scope = null;
             _sw = null;
             _activity = null;
+        }
+
+        /// <summary>
+        /// Indicates whether the current <see cref="OpScope"/> is equal to another instance.
+        /// </summary>
+        public readonly bool Equals(OpScope other) =>
+            ReferenceEquals(_log, other._log) &&
+            string.Equals(_name, other._name, StringComparison.Ordinal) &&
+            _enabled == other._enabled &&
+            _disposed == other._disposed;
+
+        /// <inheritdoc/>
+        public override readonly bool Equals(object? obj) =>
+            obj is OpScope other && Equals(other);
+
+        /// <summary>
+        /// Compares two <see cref="OpScope"/> instances for value equality.
+        /// </summary>
+        public static bool operator ==(OpScope left, OpScope right) => left.Equals(right);
+
+        /// <summary>
+        /// Compares two <see cref="OpScope"/> instances for inequality.
+        /// </summary>
+        public static bool operator !=(OpScope left, OpScope right) => !left.Equals(right);
+
+        /// <inheritdoc/>
+        public override readonly int GetHashCode()
+        {
+            int nameHash = _name is null ? 0 : StringComparer.Ordinal.GetHashCode(_name);
+            // Logger se compara por referencia, HashCode.Combine se apaña con null
+            return HashCode.Combine(_log, nameHash, _enabled, _disposed);
         }
     }
 }
