@@ -350,10 +350,11 @@ namespace Extend0.Lifecycle.CrossProcess
         /// Invokes a reflected RPC target and writes the corresponding JSON response.
         /// </summary>
         /// <param name="target">The reflected method to invoke.</param>
-        /// <param name="argsElem">JSON array with the arguments for the invocation.</param>
-        /// <param name="writer">Writer used to emit JSON responses.</param>
+        /// <param name="argsElem">JSON array that contains the arguments for the invocation.</param>
+        /// <param name="writer">The stream writer used to emit JSON responses.</param>
         /// <returns>
-        /// A task that completes when the method has been invoked and an OK or error response has been written.
+        /// A task that completes when the method has been invoked and either a success or error
+        /// response has been written to the output.
         /// </returns>
         private async Task InvokeTargetAsync(MethodInfo target, JsonElement argsElem, StreamWriter writer)
         {
@@ -362,32 +363,7 @@ namespace Extend0.Lifecycle.CrossProcess
 
             try
             {
-                // Materialize arguments from JSON into CLR types.
-                for (int i = 0; i < argVals.Length; i++)
-                {
-                    var pType = pars[i].ParameterType;
-                    argVals[i] = JsonSerializer.Deserialize(argsElem[i].GetRawText(), pType);
-                }
-
-                var retType = target.ReturnType;
-                var callRes = target.Invoke(_impl, argVals);
-
-                if (retType == typeof(Task))
-                {
-                    await (Task)callRes!;
-                    await WriteOk(null, writer).ConfigureAwait(false);
-                }
-                else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
-                {
-                    var t = (Task)callRes!;
-                    await t.ConfigureAwait(false);
-                    var resProp = t.GetType().GetProperty("Result")!;
-                    await WriteOk(resProp.GetValue(t), writer).ConfigureAwait(false);
-                }
-                else
-                {
-                    await WriteOk(callRes, writer).ConfigureAwait(false);
-                }
+                await InvokeTargetAsyncCore(target, argsElem, writer, pars, argVals).ConfigureAwait(false);
             }
             catch (TargetInvocationException tex)
             {
@@ -399,13 +375,98 @@ namespace Extend0.Lifecycle.CrossProcess
             }
         }
 
+        /// <summary>
+        /// Core implementation that deserializes arguments, invokes the reflected target,
+        /// and routes the result to the appropriate response writer.
+        /// </summary>
+        /// <param name="target">The reflected method to invoke.</param>
+        /// <param name="argsElem">JSON array that contains the arguments for the invocation.</param>
+        /// <param name="writer">The stream writer used to emit JSON responses.</param>
+        /// <param name="pars">The parameter metadata for the reflected method.</param>
+        /// <param name="argVals">
+        /// The array that will be populated with deserialized argument values to pass to the method.
+        /// </param>
+        /// <returns>
+        /// A task that completes when the target has been invoked and the result has been written.
+        /// </returns>
+        private async Task InvokeTargetAsyncCore(MethodInfo target, JsonElement argsElem, StreamWriter writer, ParameterInfo[] pars, object?[] argVals)
+        {
+            // Materialize arguments from JSON into CLR types.
+            for (int i = 0; i < argVals.Length; i++)
+            {
+                var pType = pars[i].ParameterType;
+                argVals[i] = JsonSerializer.Deserialize(argsElem[i].GetRawText(), pType);
+            }
 
+            var retType = target.ReturnType;
+            var callRes = target.Invoke(_impl, argVals) as Task;
+
+            if (retType == typeof(Task))
+                await InvokeTargetTask(writer, callRes).ConfigureAwait(false);
+            else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
+                await InvokeTargetGenericTask(writer, callRes).ConfigureAwait(false);
+            else 
+                await WriteOk(callRes, writer).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Awaits a generic <see cref="Task{TResult}"/> returned by the target and writes
+        /// its result as a successful JSON response.
+        /// </summary>
+        /// <param name="writer">The stream writer used to emit the JSON response.</param>
+        /// <param name="callRes">
+        /// The task returned by the target invocation. It is expected to be a <see cref="Task{TResult}"/>.
+        /// </param>
+        /// <returns>
+        /// A task that completes when the underlying task has finished and the result has been written.
+        /// </returns>
+        private static async Task InvokeTargetGenericTask(StreamWriter writer, Task? callRes)
+        {
+            var t = callRes!;
+            await t.ConfigureAwait(false);
+            var resProp = t.GetType().GetProperty("Result")!;
+            await WriteOk(resProp.GetValue(t), writer).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Awaits a non-generic <see cref="Task"/> returned by the target and writes a
+        /// successful JSON response with a <c>null</c> result.
+        /// </summary>
+        /// <param name="writer">The stream writer used to emit the JSON response.</param>
+        /// <param name="callRes">
+        /// The task returned by the target invocation. It is expected to be a non-generic <see cref="Task"/>.
+        /// </param>
+        /// <returns>
+        /// A task that completes when the underlying task has finished and the response has been written.
+        /// </returns>
+        private static async Task InvokeTargetTask(StreamWriter writer, Task? callRes)
+        {
+            await callRes!;
+            await WriteOk(null, writer).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Writes a JSON error response with the specified message.
+        /// </summary>
+        /// <param name="e">The error message to include in the response.</param>
+        /// <param name="writer">The stream writer used to emit the JSON response.</param>
+        /// <returns>
+        /// A task that completes when the error payload has been written.
+        /// </returns>
         private static async Task WriteErr(string e, StreamWriter writer)
         {
             var payload = JsonSerializer.Serialize(new { ok = false, e });
             await writer.WriteLineAsync(payload).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Writes a JSON success response with the specified result value.
+        /// </summary>
+        /// <param name="r">The result value to include in the response, or <c>null</c> if there is none.</param>
+        /// <param name="writer">The stream writer used to emit the JSON response.</param>
+        /// <returns>
+        /// A task that completes when the success payload has been written.
+        /// </returns>
         private static async Task WriteOk(object? r, StreamWriter writer)
         {
             var payload = JsonSerializer.Serialize(new { ok = true, r });
