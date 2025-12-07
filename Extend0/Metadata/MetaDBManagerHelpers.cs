@@ -8,10 +8,29 @@ using System.Runtime.InteropServices;
 
 namespace Extend0.Metadata
 {
+    /// <summary>
+    /// Collection of low-level helper routines used by <see cref="MetaDBManager"/> to
+    /// manipulate column data in <see cref="MetadataTable"/> instances.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This type centralizes high-performance operations such as:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>Linking reference vectors between parent/child tables.</description></item>
+    ///   <item><description>Block-based and strided column copies using <see cref="ColumnBlock"/>.</description></item>
+    ///   <item><description>Per-cell fallbacks when block access is not available.</description></item>
+    ///   <item><description>Heuristic batch-size computation for cache-friendly loops.</description></item>
+    ///   <item><description>Batch-oriented column fills (per-cell, strided and contiguous fast paths).</description></item>
+    /// </list>
+    /// <para>
+    /// Most methods are <see langword="internal"/> and <see langword="unsafe"/>, and are intended
+    /// to be used only by the metadata storage infrastructure rather than by external callers.
+    /// </para>
+    /// </remarks>
     [SuppressMessage("Reliability", "CA2014", Justification = "SO is controlled and the stack allocations in loops are limited.")]
     internal static class MetaDBManagerHelpers
     {
-
         /// <summary>
         /// Inserts a reference into the parent's refs vector at
         /// (<paramref name="refsCol"/>, <paramref name="parentRow"/>).
@@ -105,6 +124,34 @@ namespace Extend0.Metadata
             return true;
         }
 
+        /// <summary>
+        /// Prepares and executes a strided column copy between two fixed-size
+        /// <see cref="ColumnBlock"/> instances.
+        /// </summary>
+        /// <param name="rows">
+        /// Total number of rows to copy.
+        /// </param>
+        /// <param name="batchSize">
+        /// Requested maximum number of rows to process per batch. The effective value is
+        /// clamped to at least 1 and rounded up to the next multiple of 4 to match the
+        /// unrolled inner loops.
+        /// </param>
+        /// <param name="srcBlk">
+        /// Source <see cref="ColumnBlock"/> describing the VALUE layout in the origin column.
+        /// </param>
+        /// <param name="dstBlk">
+        /// Destination <see cref="ColumnBlock"/> describing the VALUE layout in the target column.
+        /// </param>
+        /// <param name="valueSize">
+        /// Size in bytes of each VALUE payload. This is used by
+        /// <see cref="StridedCopySelector(uint, uint, nuint, nuint, byte*, byte*, uint)"/>
+        /// to select the appropriate specialized worker.
+        /// </param>
+        /// <remarks>
+        /// This helper normalizes the pitches and starting pointers for source and destination
+        /// and then delegates to <see cref="StridedCopySelector(uint, uint, nuint, nuint, byte*, byte*, uint)"/>
+        /// to perform the actual batched, strided copy.
+        /// </remarks>
         private static unsafe void StridedCopy(uint rows, int batchSize, ColumnBlock srcBlk, ColumnBlock dstBlk, uint valueSize)
         {
             var sPitch = (nuint)srcBlk.Stride;
@@ -112,10 +159,7 @@ namespace Extend0.Metadata
             var sStart = srcBlk.GetValuePtr(0);
             var dStart = dstBlk.GetValuePtr(0);
 
-            uint maxBatch = (uint)Math.Max(1, batchSize);
-            maxBatch = (maxBatch + 3u) & ~3u; // round up to multiple of 4
-
-            StridedCopySelector(rows, valueSize, sPitch, dPitch, sStart, dStart, maxBatch);
+            StridedCopySelector(rows, valueSize, sPitch, dPitch, sStart, dStart, AlignBatchTo4(batchSize));
         }
 
         /// <summary>
@@ -186,7 +230,7 @@ namespace Extend0.Metadata
         /// delegates to specialized unrolled workers; for other sizes it uses a generic
         /// strided copy implementation.
         /// </remarks>
-        private static unsafe void StridedCopySelector(uint rows, uint valueSize, nuint sPitch, nuint dPitch, byte* sStart, byte* dStart, uint maxBatch)
+        private static unsafe void StridedCopySelector(uint rows, uint valueSize, nuint sPitch, nuint dPitch, byte* sStart, byte* dStart, int maxBatch)
         {
             switch (valueSize)
             {
@@ -222,15 +266,12 @@ namespace Extend0.Metadata
         /// Function pointer that performs the actual strided copy for a given batch
         /// and VALUE size (e.g., <see cref="StridedCopy64"/>, <see cref="StridedCopy128"/>).
         /// </param>
-        private static unsafe void CopyStridedBatched(uint rows, uint maxBatch, byte* dStart, byte* sStart, nuint dPitch, nuint sPitch, delegate*<byte*, byte*, nuint, nuint, uint, void> worker)
+        private static unsafe void CopyStridedBatched(uint rows, int maxBatch, byte* dStart, byte* sStart, nuint dPitch, nuint sPitch, delegate*<byte*, byte*, nuint, nuint, uint, void> worker)
         {
-            uint done = 0;
-            while (done < rows)
+            ForEachRowBatch(rows, maxBatch, (start, count) =>
             {
-                var take = Math.Min(rows - done, maxBatch);
-                worker(dStart + dPitch * done, sStart + sPitch * done, dPitch, sPitch, take);
-                done += take;
-            }
+                worker(dStart + dPitch * start, sStart + sPitch * start, dPitch, sPitch, (uint)count);
+            });
         }
 
         /// <summary>
@@ -247,19 +288,15 @@ namespace Extend0.Metadata
         /// <param name="dPitch">Destination stride in bytes between consecutive rows.</param>
         /// <param name="sPitch">Source stride in bytes between consecutive rows.</param>
         /// <param name="valueSize">Size in bytes of each VALUE payload to copy.</param>
-        private static unsafe void CopyStridedGenericBatched(uint rows, uint maxBatch, byte* dStart, byte* sStart, nuint dPitch, nuint sPitch, uint valueSize)
+        private static unsafe void CopyStridedGenericBatched(uint rows, int maxBatch, byte* dStart, byte* sStart, nuint dPitch, nuint sPitch, uint valueSize)
         {
-            uint done = 0;
-            while (done < rows)
+            ForEachRowBatch(rows, maxBatch, (start, count) =>
             {
-                var take = Math.Min(rows - done, maxBatch);
-                var aPitch = dStart + dPitch * done;
-                var bPitch = sStart + sPitch * done;
-                StridedCopyGeneric(aPitch, bPitch, dPitch, sPitch, valueSize, take);
-                done += take;
-            }
+                var d = dStart + dPitch * start;
+                var s = sStart + sPitch * start;
+                StridedCopyGeneric(d, s, dPitch, sPitch, valueSize, (uint)count);
+            });
         }
-
 
         /// <summary>
         /// Copies values row-by-row from a source column to a destination column,
@@ -437,7 +474,7 @@ namespace Extend0.Metadata
             int perRow = (int)(valueSize * 2u);              // read + write
             int b = Math.Clamp(targetBytes / Math.Max(1, perRow), minBatch, maxBatch);
             // align to 4 for unrolled loops
-            return (b + 3) & ~3;
+            return AlignBatchTo4(b);
         }
 
         /// <summary>
@@ -507,38 +544,20 @@ namespace Extend0.Metadata
         /// </remarks>
         internal static unsafe void PerCellFill<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes) where T : unmanaged
         {
-            for (uint start = 0; start < rows; start += (uint)batchSize)
+            ForEachBatch(rows, factory, batchSize, tSize, MaxStackBytes, (start, batch) =>
             {
-                int count = (int)Math.Min((uint)batchSize, rows - start);
-
-                int bytes = count * tSize;
-                T[]? rented = null;
-                scoped Span<T> batch;
-
-                if (bytes <= MaxStackBytes) batch = stackalloc T[count];
-                else
-                {
-                    rented = ArrayPool<T>.Shared.Rent(count);
-                    batch = rented.AsSpan(0, count);
-                }
-
-                for (int i = 0; i < count; i++)
-                    batch[i] = factory(start + (uint)i);
-
-                for (int i = 0; i < count; i++)
+                for (int i = 0; i < batch.Length; i++)
                 {
                     uint row = start + (uint)i;
                     var cell = table.GetOrCreateCell(column, row);
+
                     if (cell.ValueSize < tSize)
                         throw new InvalidOperationException(
                             $"[{table}] col={column} row={row}: VALUE {cell.ValueSize} < sizeof({typeof(T).Name})={tSize}");
 
                     Unsafe.WriteUnaligned(cell.GetValuePointer(), batch[i]);
                 }
-
-                if (rented is not null)
-                    ArrayPool<T>.Shared.Return(rented);
-            }
+            });
         }
 
         /// <summary>Fills a fixed-size VALUE column using strided writes over a <see cref="ColumnBlock"/>, batching allocations and using stack or pooled buffers based on byte size.</summary>
@@ -554,37 +573,16 @@ namespace Extend0.Metadata
             byte* colBase = blk.Base + blk.ValueOffset;
             nuint pitch = (nuint)blk.Stride;
 
-            for (uint start = 0; start < rows; start += (uint)batchSize)
+            ForEachBatch(rows, factory, batchSize, tSize, MaxStackBytes, (start, batch) =>
             {
-                int count = (int)Math.Min((uint)batchSize, rows - start);
-
-                // Decide stack vs pool by bytes, not items
-                int bytes = count * tSize;
-                T[]? rented = null;
-                scoped Span<T> batch;
-
-                if (bytes <= MaxStackBytes) batch = stackalloc T[count];
-                else
-                {
-                    rented = ArrayPool<T>.Shared.Rent(count);
-                    batch = rented.AsSpan(0, count);
-                }
-
-                // Produce values
-                for (int i = 0; i < count; i++)
-                    batch[i] = factory(start + (uint)i);
-
-                // Store values strided with native-sized pointer math
                 byte* p = colBase + pitch * (nuint)start;
-                for (int i = 0; i < count; i++)
+
+                for (int i = 0; i < batch.Length; i++)
                 {
                     Unsafe.WriteUnaligned(p, batch[i]);
                     p += pitch;
                 }
-
-                if (rented is not null)
-                    ArrayPool<T>.Shared.Return(rented);
-            }
+            });
         }
 
         /// <summary>Attempts a contiguous fast-path column fill over a <see cref="ColumnBlock"/> when VALUEs are tightly packed and match <typeparamref name="T"/> in size.</summary>
@@ -599,39 +597,153 @@ namespace Extend0.Metadata
         internal static unsafe bool TryContiguousFill<T>(uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes, ColumnBlock blk) where T : unmanaged
         {
             // Only when truly contiguous AND sizes match exactly.
-            if (blk.Stride == blk.ValueSize && tSize == blk.ValueSize)
+            if (blk.Stride != blk.ValueSize || tSize != blk.ValueSize) return false;
+            byte* basePtr = blk.GetValuePtr(0);
+
+            ForEachBatch(rows, factory, batchSize, tSize, MaxStackBytes, (start, batch) =>
             {
-                byte* dst = blk.GetValuePtr(0);
-                for (uint start = 0; start < rows; start += (uint)batchSize)
+                var srcBytes = MemoryMarshal.AsBytes(batch);
+
+                fixed (byte* srcPtr = &MemoryMarshal.GetReference(srcBytes))
                 {
-                    int count = (int)Math.Min((uint)batchSize, rows - start);
-                    int bytes = count * tSize;
-                    T[]? rented = null;
-                    scoped Span<T> batch;
-                    if (bytes <= MaxStackBytes) batch = stackalloc T[count];
-                    else
-                    {
-                        rented = ArrayPool<T>.Shared.Rent(count);
-                        batch = rented.AsSpan(0, count);
-                    }
+                    nuint offset = (nuint)start * (nuint)blk.ValueSize;
+                    byte* dest = basePtr + offset;
 
-                    for (int i = 0; i < count; i++)
-                        batch[i] = factory(start + (uint)i);
-
-                    // Bulk copy the bytes
-                    var srcBytes = MemoryMarshal.AsBytes(batch);
-                    fixed (byte* srcPtr = &MemoryMarshal.GetReference(srcBytes))
-                    {
-                        nuint offset = (nuint)start * (nuint)blk.ValueSize;
-                        byte* dest = dst + offset;
-                        Buffer.MemoryCopy(srcPtr, dest, srcBytes.Length, srcBytes.Length);
-                    }
-
-                    if (rented is not null) ArrayPool<T>.Shared.Return(rented);
+                    Buffer.MemoryCopy(srcPtr, dest, srcBytes.Length, srcBytes.Length);
                 }
-                return true;
+            });
+
+            return true;
+        }
+
+        /// <summary>
+        /// Iterates over the specified row range in batches, materializing values into a temporary
+        /// buffer and delegating the write logic for each batch to the provided <paramref name="action"/>.
+        /// </summary>
+        /// <typeparam name="T">
+        /// Unmanaged value type produced by <paramref name="factory"/> and stored in the batch buffer.
+        /// </typeparam>
+        /// <param name="rows">
+        /// Total number of rows to process, starting from row index 0 up to <c>rows - 1</c>.
+        /// </param>
+        /// <param name="factory">
+        /// Factory function that produces a value for a given row index. It is invoked once per row
+        /// in each batch to populate the temporary buffer.
+        /// </param>
+        /// <param name="batchSize">
+        /// Maximum number of rows processed per batch. Larger values reduce per-call overhead but
+        /// increase the size of the temporary buffer.
+        /// </param>
+        /// <param name="tSize">
+        /// Size in bytes of <typeparamref name="T"/>. Used together with <paramref name="batchSize"/>
+        /// to compute the total byte size of each batch.
+        /// </param>
+        /// <param name="maxStackBytes">
+        /// Maximum total number of bytes allowed on the stack for a single batch. When
+        /// <c>batchSize * tSize</c> exceeds this threshold, the method rents a buffer from
+        /// <see cref="ArrayPool{T}.Shared"/> instead of using <c>stackalloc</c>.
+        /// </param>
+        /// <param name="action">
+        /// Callback that receives the starting row index of the batch and the span containing the
+        /// generated values. It is responsible for writing the batch to the underlying storage.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// This method centralizes the logic for:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><description>Batching rows into chunks.</description></item>
+        ///  <item><description>Choosing between stack allocation and pooled arrays based on byte size.</description></item>
+        ///   <item><description>Invoking the per-row <paramref name="factory"/> to populate a batch.</description></item>
+        ///   <item><description>Returning rented buffers to the shared pool.</description></item>
+        /// </list>
+        /// Callers provide the write strategy via <paramref name="action"/> so that different
+        /// filling patterns (per-cell, strided, contiguous, etc.) can share the same batching logic.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ForEachBatch<T>(uint rows, Func<uint, T> factory, int batchSize, int tSize, int maxStackBytes, Action<uint, Span<T>> action) where T : unmanaged
+        {
+            var castedSize = (uint)batchSize;
+            for (uint start = 0; start < rows; start += castedSize)
+            {
+                int count = GetCount(rows, castedSize, start);
+
+                int bytes = count * tSize;
+                T[]? rented = null;
+                scoped Span<T> batch;
+
+                if (bytes <= maxStackBytes) batch = stackalloc T[count];
+                else
+                {
+                    rented = ArrayPool<T>.Shared.Rent(count);
+                    batch = rented.AsSpan(0, count);
+                }
+
+                // Produce values
+                for (int i = 0; i < count; i++)
+                    batch[i] = factory(start + (uint)i);
+
+                // Consumer decides how to write them
+                action(start, batch);
+
+                if (rented is not null) ArrayPool<T>.Shared.Return(rented);
             }
-            return false;
+        }
+
+        /// <summary>
+        /// Computes the number of remaining items available from a given starting index,
+        /// clamped to a maximum batch size.
+        /// </summary>
+        /// <param name="rows">
+        /// Total number of rows available.
+        /// </param>
+        /// <param name="castedSize">
+        /// Maximum number of items allowed in this batch (already cast to <see cref="uint"/>).
+        /// </param>
+        /// <param name="start">
+        /// Starting row index for the current batch.
+        /// </param>
+        /// <returns>
+        /// The number of items to process in the batch, guaranteed to be between
+        /// <c>0</c> and <paramref name="castedSize"/>, and never exceeding the remaining rows.
+        /// </returns>
+        /// <remarks>
+        /// This helper is used to safely compute batch counts without overflowing or
+        /// producing negative values when nearing the end of the row range.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetCount(uint rows, uint castedSize, uint start) => (int)Math.Min(castedSize, rows - start);
+
+        /// <summary>
+        /// Iterates over a row range in fixed-size batches and invokes the provided callback
+        /// for each batch.
+        /// </summary>
+        /// <param name="rows">
+        /// Total number of rows to process, starting from row index 0 up to <c>rows - 1</c>.
+        /// </param>
+        /// <param name="batchSize">
+        /// Maximum number of rows to include in each batch. The last batch may contain fewer
+        /// rows if <paramref name="rows"/> is not an exact multiple of <paramref name="batchSize"/>.
+        /// </param>
+        /// <param name="action">
+        /// Callback invoked once per batch, receiving the starting row index of the batch
+        /// and the number of rows in that batch.
+        /// </param>
+        /// <remarks>
+        /// This helper only performs batch segmentation and delegates the actual work
+        /// to <paramref name="action"/>. It is intended to be used by higher-level
+        /// routines that need to iterate over rows in chunks (e.g. for cache-friendly
+        /// processing or to keep inner loops small and predictable).
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ForEachRowBatch(uint rows, int batchSize, Action<uint, int> action)
+        {
+            var castedSize = (uint)batchSize;
+            for (uint start = 0; start < rows; start += castedSize)
+            {
+                var count = GetCount(rows, castedSize, start);
+                action(start, count);
+            }
         }
 
         /// <summary>
@@ -675,17 +787,15 @@ namespace Extend0.Metadata
             nuint pitch = (nuint)blk.Stride;
 
             // Batching keeps the hot loop short and branch-free
-            for (uint start = 0; start < rows; start += (uint)batchSize)
+            ForEachRowBatch(rows, batchSize, (start, count) =>
             {
-                int count = (int)Math.Min((uint)batchSize, rows - start);
-
                 byte* p = valueBase + pitch * (nuint)start;
                 for (int i = 0; i < count; i++)
                 {
                     writer(start + (uint)i, (IntPtr)p, vsize);
                     p += pitch;
                 }
-            }
+            });
 
             return true;
         }
@@ -718,17 +828,32 @@ namespace Extend0.Metadata
         /// </remarks>
         internal static unsafe void PerCellFillRaw(MetadataTable table, uint column, uint rows, Action<uint, nint, uint> writer, int batchSize)
         {
-            for (uint start = 0; start < rows; start += (uint)batchSize)
+            ForEachRowBatch(rows, batchSize, (start, count) =>
             {
-                int count = (int)Math.Min((uint)batchSize, rows - start);
-
                 for (int i = 0; i < count; i++)
                 {
                     uint row = start + (uint)i;
                     var cell = table.GetOrCreateCell(column, row);
                     writer(row, (IntPtr)cell.GetValuePointer(), (uint)cell.ValueSize);
                 }
-            }
+            });
+        }
+
+        /// <summary>
+        /// Aligns a batch size to the next multiple of 4.
+        /// </summary>
+        /// <param name="batch">Unaligned batch size; must be strictly positive.</param>
+        /// <returns>
+        /// The smallest multiple of 4 greater than or equal to <paramref name="batch"/>.
+        /// </returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when <paramref name="batch"/> is less than or equal to zero.
+        /// </exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int AlignBatchTo4(int batch)
+        {
+            if (batch <= 0) throw new InvalidOperationException("Batch size must be a strictly positive number.");
+            return (batch + 3) & ~3;
         }
     }
 }
