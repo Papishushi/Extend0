@@ -302,38 +302,23 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
     {
         var returnType = targetMethod.ReturnType;
 
-        _ioLock.Wait(_ct);
-        try
+        return RunWithUpgradeRetry(() =>
         {
-            // First attempt
-            using var doc = _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, returnType, _ct)
-                .GetAwaiter().GetResult();
+            _ioLock.Wait(_ct);
+            try
+            {
+                using var doc = _transport
+                    .CallAsync(shape.Name, args, shape.ParamTypes, returnType, _ct)
+                    .GetAwaiter().GetResult();
 
-            var root = ThrowIfError(doc);
-            return JsonSerializer.Deserialize(root.GetProperty("r").GetRawText(), returnType)!;
-        }
-        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
-        {
-            throw;
-        }
-        catch (RemoteInvocationException rEx)
-        {
-            if (!TryHandleUpgrade(rEx))
-                throw;
-
-            // Single retry
-            using var doc2 = _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, returnType, _ct)
-                .GetAwaiter().GetResult();
-
-            var root2 = ThrowIfError(doc2);
-            return JsonSerializer.Deserialize(root2.GetProperty("r").GetRawText(), returnType)!;
-        }
-        finally
-        {
-            _ioLock.Release();
-        }
+                var root = ThrowIfError(doc);
+                return JsonSerializer.Deserialize(root.GetProperty("r").GetRawText(), returnType)!;
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+        });
     }
 
     /// <summary>
@@ -370,38 +355,23 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
     /// </remarks>
     private object? InvokeVoid(object?[] args, MethodShape shape)
     {
-        _ioLock.Wait(_ct);
-        try
+        return RunWithUpgradeRetry<object?>(() =>
         {
-            // First attempt
-            using var doc = _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(void), _ct)
-                .GetAwaiter().GetResult();
+            _ioLock.Wait(_ct);
+            try
+            {
+                using var doc = _transport
+                    .CallAsync(shape.Name, args, shape.ParamTypes, typeof(void), _ct)
+                    .GetAwaiter().GetResult();
 
-            ThrowIfError(doc);
-            return null;
-        }
-        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
-        {
-            throw;
-        }
-        catch (RemoteInvocationException rEx)
-        {
-            if (!TryHandleUpgrade(rEx))
-                throw;
-
-            // Single retry
-            using var doc2 = _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(void), _ct)
-                .GetAwaiter().GetResult();
-
-            ThrowIfError(doc2);
-            return null;
-        }
-        finally
-        {
-            _ioLock.Release();
-        }
+                ThrowIfError(doc);
+                return null;
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+        });
     }
 
     /// <summary>
@@ -519,40 +489,26 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
     /// <param name="args">Argument values.</param>
     /// <returns>A task that completes when the remote call has been acknowledged.</returns>
     /// <exception cref="RemoteInvocationException">The remote endpoint returned an error envelope.</exception>
-    private async Task CallTaskAsync(MethodShape shape, object?[] args)
+    private Task CallTaskAsync(MethodShape shape, object?[] args)
     {
-        await _ioLock.WaitAsync(_ct).ConfigureAwait(false);
-        try
+        return RunWithUpgradeRetryAsync<object?>(async ct =>
         {
-            using var doc = await _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(Task), _ct)
-                .ConfigureAwait(false);
+            await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                using var doc = await _transport
+                    .CallAsync(shape.Name, args, shape.ParamTypes, typeof(Task), ct)
+                    .ConfigureAwait(false);
 
-            ThrowIfError(doc);
-        }
-        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
-        {
-            throw;
-        }
-        catch (RemoteInvocationException rEx)
-        {
-            var handled = await TryHandleUpgradeAsync(rEx).ConfigureAwait(false);
-            if (!handled)
-                throw;
-
-            // Single retry after successful upgrade
-            using var doc2 = await _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(Task), _ct)
-                .ConfigureAwait(false);
-
-            ThrowIfError(doc2);
-        }
-        finally
-        {
-            _ioLock.Release();
-        }
+                ThrowIfError(doc);
+                return null;
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+        });
     }
-
 
     /// <summary>
     /// Performs an async RPC for a method that returns <see cref="Task{TRes}"/>.
@@ -562,37 +518,25 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
     /// <param name="args">Argument values.</param>
     /// <returns>A task producing the deserialized result value.</returns>
     /// <exception cref="RemoteInvocationException">The remote endpoint returned an error envelope.</exception>
-    private async Task<TRes?> CallTaskTAsync<TRes>(MethodShape shape, object?[] args)
+    private Task<TRes?> CallTaskTAsync<TRes>(MethodShape shape, object?[] args)
     {
-        await _ioLock.WaitAsync(_ct).ConfigureAwait(false);
-        try
+        return RunWithUpgradeRetryAsync<TRes?>(async ct =>
         {
-            // First attempt
-            using var doc = await _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(TRes), _ct)
-                .ConfigureAwait(false);
+            await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                using var doc = await _transport
+                    .CallAsync(shape.Name, args, shape.ParamTypes, typeof(TRes), ct)
+                    .ConfigureAwait(false);
 
-            var root = ThrowIfError(doc);
-            return JsonSerializer.Deserialize<TRes>(root.GetProperty("r").GetRawText())!;
-        }
-        catch (RemoteInvocationException rEx) when (rEx.HResult == 426)
-        {
-            var handled = await TryHandleUpgradeAsync(rEx).ConfigureAwait(false);
-            if (!handled)
-                throw;
-
-            // Single retry after successful upgrade
-            using var doc2 = await _transport
-                .CallAsync(shape.Name, args, shape.ParamTypes, typeof(TRes), _ct)
-                .ConfigureAwait(false);
-
-            var root2 = ThrowIfError(doc2);
-            return JsonSerializer.Deserialize<TRes>(root2.GetProperty("r").GetRawText())!;
-        }
-        finally
-        {
-            _ioLock.Release();
-        }
+                var root = ThrowIfError(doc);
+                return JsonSerializer.Deserialize<TRes>(root.GetProperty("r").GetRawText())!;
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+        });
     }
 
     /// <summary>
@@ -625,4 +569,55 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
         return root;
     }
 
+    /// <summary>
+    /// Core sync helper that executes a single RPC attempt with upgrade-aware retry.
+    /// </summary>
+    private static TOut RunWithUpgradeRetry<TOut>(Func<TOut> attempt)
+    {
+        try
+        {
+            // First attempt
+            return attempt();
+        }
+        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+        {
+            // Not an upgrade case → propagate
+            throw;
+        }
+        catch (RemoteInvocationException rEx)
+        {
+            // Upgrade path (426-ish)
+            if (!TryHandleUpgrade(rEx))
+                throw;
+
+            // Single retry after successful upgrade
+            return attempt();
+        }
+    }
+
+    /// <summary>
+    /// Core async helper that executes a single RPC attempt with upgrade-aware retry.
+    /// </summary>
+    private async Task<TOut> RunWithUpgradeRetryAsync<TOut>(Func<CancellationToken, Task<TOut>> attempt)
+    {
+        try
+        {
+            // First attempt
+            return await attempt(_ct).ConfigureAwait(false);
+        }
+        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+        {
+            // Not an upgrade case → propagate
+            throw;
+        }
+        catch (RemoteInvocationException rEx)
+        {
+            var handled = await TryHandleUpgradeAsync(rEx).ConfigureAwait(false);
+            if (!handled)
+                throw;
+
+            // Single retry after successful upgrade
+            return await attempt(_ct).ConfigureAwait(false);
+        }
+    }
 }
