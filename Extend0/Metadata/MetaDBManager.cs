@@ -491,17 +491,19 @@ namespace Extend0.Metadata
         /// </param>
         public void FillColumn<T>(Guid tableId, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy = CapacityPolicy.None) where T : unmanaged
         {
-            var m = Require(tableId);
-            Stopwatch? sw = _isLogActivated ? Stopwatch.StartNew() : null;
-            var effectivePolicy = policy == CapacityPolicy.None ? _capacityPolicy : policy;
-            uint valueSize = MetaDBManagerHelpers.GetColumnValueSize(m.Table, column);
+            var (m, sw, effectivePolicy, batchSize) = PrepareFill(tableId, column, rows, policy);
 
-            if (_isLogActivated) Log.FillColumnStart(_log!, m.Name ?? string.Empty, column, rows, typeof(T).Name, effectivePolicy);
+            var tableName = m.Name ?? string.Empty;
+            var typeName = typeof(T).Name;
+
+            if (_isLogActivated)
+                Log.FillColumnStart(_log!, tableName, column, rows, typeName, effectivePolicy);
 
             // Size validation and actual write are delegated to the static helper
-            FillColumn(m.Table, column, rows, factory, effectivePolicy, MetaDBManagerHelpers.ComputeBatchFromValueSize(valueSize));
+            FillColumn(m.Table, column, rows, factory, effectivePolicy, batchSize);
 
-            if (_isLogActivated) Log.FillColumnEnd(_log!, m.Name ?? string.Empty, typeof(T).Name, sw!.Elapsed.TotalMilliseconds);
+            if (_isLogActivated)
+                Log.FillColumnEnd(_log!, tableName, typeName, sw!.Elapsed.TotalMilliseconds);
         }
 
         /// <summary>
@@ -519,16 +521,52 @@ namespace Extend0.Metadata
         /// </param>
         public void FillColumn(Guid tableId, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy = CapacityPolicy.None)
         {
+            var (m, sw, effectivePolicy, batchSize) = PrepareFill(tableId, column, rows, policy);
+
+            var tableName = m.Name ?? string.Empty;
+
+            if (_isLogActivated)
+                Log.FillRawStart(_log!, tableName, column, rows, effectivePolicy);
+
+            FillColumn(m.Table, column, rows, writer, effectivePolicy, batchSize);
+
+            if (_isLogActivated)
+                Log.FillRawEnd(_log!, tableName, sw!.Elapsed.TotalMilliseconds);
+        }
+
+        /// <summary>
+        /// Prepares common state for column fill operations: resolves the managed table,
+        /// computes the effective capacity policy, derives a batch size heuristic and
+        /// optionally starts a stopwatch for logging.
+        /// </summary>
+        /// <param name="tableId">Target table identifier.</param>
+        /// <param name="column">Zero-based column index.</param>
+        /// <param name="rows">Number of rows to fill.</param>
+        /// <param name="policyOverride">
+        /// Per-call capacity policy. When <see cref="CapacityPolicy.None"/>, the manager-wide
+        /// default policy is used.
+        /// </param>
+        /// <param name="tableName">
+        /// Outputs the resolved table name (never <see langword="null"/>, empty if missing).
+        /// </param>
+        /// <returns>
+        /// A tuple containing the resolved <see cref="ManagedTable"/>, the optional
+        /// <see cref="Stopwatch"/> (only when logging is enabled), the effective capacity
+        /// policy and the computed batch size in rows.
+        /// </returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private PrepareFillReturnValue PrepareFill(Guid tableId, uint column, uint rows, CapacityPolicy policyOverride)
+        {
             var m = Require(tableId);
-            Stopwatch? sw = _isLogActivated ? Stopwatch.StartNew() : null;
-            var effectivePolicy = policy == CapacityPolicy.None ? _capacityPolicy : policy;
+
+            var effectivePolicy = policyOverride == CapacityPolicy.None ? _capacityPolicy : policyOverride;
+
             uint valueSize = MetaDBManagerHelpers.GetColumnValueSize(m.Table, column);
+            int batchSize = MetaDBManagerHelpers.ComputeBatchFromValueSize(valueSize);
 
-            if (_isLogActivated) Log.FillRawStart(_log!, m.Name ?? string.Empty, column, rows, effectivePolicy);
+            var sw = _isLogActivated ? Stopwatch.StartNew() : null;
 
-            FillColumn(m.Table, column, rows, writer, effectivePolicy, MetaDBManagerHelpers.ComputeBatchFromValueSize(valueSize));
-
-            if (_isLogActivated) Log.FillRawEnd(_log!, m.Name ?? string.Empty, sw!.Elapsed.TotalMilliseconds);
+            return (m, sw, effectivePolicy, batchSize);
         }
 
         /// <summary>
@@ -693,13 +731,15 @@ namespace Extend0.Metadata
         {
             var p = Require(parentTableId);
 
+            var tableName = p.Name ?? string.Empty;
+
             // reuse if already assigned for this row
             var byRow = _childIndex.GetOrAdd(parentTableId, s_ChildMapFactory);
             if (byRow.TryGetValue(parentRow, out var existingChildId))
             {
                 // idempotently ensure link (also ensures ref vec)
                 LinkRef(parentTableId, refsCol, parentRow, existingChildId, childCol, childRow);
-                if (_isLogActivated) Log.ChildReused(_log!, p.Name ?? string.Empty, parentRow, existingChildId);
+                if (_isLogActivated) Log.ChildReused(_log!, tableName, parentRow, existingChildId);
                 return existingChildId;
             }
 
@@ -709,7 +749,7 @@ namespace Extend0.Metadata
 
             // link and cache (LinkRef ensures ref vec)
             LinkRef(parentTableId, refsCol, parentRow, childId, childCol, childRow);
-            if (_isLogActivated) Log.ChildCreatedLinked(_log!, p.Name ?? string.Empty, parentRow, spec.Name, childId);
+            if (_isLogActivated) Log.ChildCreatedLinked(_log!, tableName, parentRow, spec.Name, childId);
             byRow[parentRow] = childId;
 
             return childId;
@@ -1169,5 +1209,48 @@ namespace Extend0.Metadata
                 managed.Table.RebuildIndexes(includeGlobal);
             }
         }
+
+        /// <summary>
+        /// Lightweight value container returned by the <c>PrepareFill</c> helper,
+        /// bundling the resolved managed table, an optional stopwatch, the effective
+        /// capacity policy and the computed batch size for column operations.
+        /// </summary>
+        /// <param name="ManagedTable">
+        /// The resolved <see cref="ManagedTable"/> instance targeted by the fill operation.
+        /// </param>
+        /// <param name="StopWatch">
+        /// Optional <see cref="Stopwatch"/> used to measure elapsed time when logging is enabled;
+        /// <see langword="null"/> when timing is not active.
+        /// </param>
+        /// <param name="Policy">
+        /// Effective <see cref="CapacityPolicy"/> to apply for the current operation, after
+        /// normalizing any per-call override against the manager-wide default.
+        /// </param>
+        /// <param name="BatchSize">
+        /// Batch size in rows computed from the column VALUE size and used to drive
+        /// cache-friendly inner loops in the fill helpers.
+        /// </param>
+        private record struct PrepareFillReturnValue(ManagedTable ManagedTable, Stopwatch? StopWatch, CapacityPolicy Policy, int BatchSize) : IEquatable<PrepareFillReturnValue>
+        {
+            /// <summary>
+            /// Implicitly converts a <see cref="PrepareFillReturnValue"/> into a tuple
+            /// compatible with deconstruction patterns used by the caller.
+            /// </summary>
+            public static implicit operator (ManagedTable m, Stopwatch? sw, CapacityPolicy policy, int batchSize)(PrepareFillReturnValue value)
+            {
+                return (value.ManagedTable, value.StopWatch, value.Policy, value.BatchSize);
+            }
+
+            /// <summary>
+            /// Implicitly converts a tuple produced by <c>PrepareFill</c> into a
+            /// <see cref="PrepareFillReturnValue"/> instance, allowing symmetric usage
+            /// between tuple and record forms.
+            /// </summary>
+            public static implicit operator PrepareFillReturnValue((ManagedTable m, Stopwatch? sw, CapacityPolicy policy, int batchSize) value)
+            {
+                return new PrepareFillReturnValue(value.m, value.sw, value.policy, value.batchSize);
+            }
+        }
+
     }
 }
