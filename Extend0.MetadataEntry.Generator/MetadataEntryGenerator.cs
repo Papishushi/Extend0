@@ -45,7 +45,7 @@ namespace Extend0.MetadataEntry.Generator
             });
 
             // Capture [assembly: GenerateMetadataEntry(key, value)] usages
-            IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<(int key, int val)>> attrPairs =
+            IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<KeyValuePair<int,int>>> attrPairs =
                 CaptureGenerateMetadataEntryAttributes(context);
 
             context.RegisterSourceOutput(
@@ -69,10 +69,10 @@ namespace Extend0.MetadataEntry.Generator
         /// </param>
         private static void RegisterSourceOutputAction(
             SourceProductionContext spc,
-            System.Collections.Immutable.ImmutableArray<(int key, int val)> entries,
+            System.Collections.Immutable.ImmutableArray<KeyValuePair<int,int>> entries,
             string generatorVersion)
         {
-            var uniq = entries.Distinct().OrderBy(x => x.key).ThenBy(x => x.val).ToArray();
+            var uniq = entries.Distinct().OrderBy(x => x.Key).ThenBy(x => x.Value).ToArray();
             if (uniq.Length == 0) return;
 
             // 0) Emit the enum and extension methods based on detected variants
@@ -80,8 +80,10 @@ namespace Extend0.MetadataEntry.Generator
             spc.AddSource("MetadataEntrySize.g.cs", SourceText.From(enumAndExt, Encoding.UTF8));
 
             // 1) Emit each MetadataEntry{K}x{V} struct
-            foreach (var (key, value) in uniq)
+            foreach (var pair in uniq)
             {
+                var key = pair.Key;
+                var value = pair.Value;
                 var code = EmitVariant(key, value, generatorVersion);
                 spc.AddSource($"MetadataEntry_{key}x{value}.g.cs", SourceText.From(code, Encoding.UTF8));
             }
@@ -101,7 +103,7 @@ namespace Extend0.MetadataEntry.Generator
         /// An <see cref="IncrementalValueProvider{T}"/> that yields an immutable array of
         /// (keySize, valueSize) pairs to be consumed at source output time.
         /// </returns>
-        private static IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<(int key, int val)>> CaptureGenerateMetadataEntryAttributes(
+        private static IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<KeyValuePair<int,int>>> CaptureGenerateMetadataEntryAttributes(
             IncrementalGeneratorInitializationContext context)
         {
             var attrPairs = context.SyntaxProvider
@@ -123,21 +125,19 @@ namespace Extend0.MetadataEntry.Generator
         /// <param name="ctx">
         /// The generator syntax context for the current <see cref="AttributeSyntax"/> node.
         /// </param>
-        /// <param name="_">Cancellation token (unused).</param>
+        /// <param name="_">
+        /// Cancellation token (currently unused).
+        /// </param>
         /// <returns>
-        /// A tuple (keySize, valueSize) when the attribute is a valid
-        /// <c>GenerateMetadataEntryAttribute</c> with constant arguments; otherwise <c>null</c>.
+        /// A tuple <c>(keySize, valueSize)</c> when the attribute is a valid
+        /// <c>GenerateMetadataEntryAttribute</c> with constant arguments; otherwise <see langword="null"/>.
         /// </returns>
-        private static (int key, int val)? CaptureGenerateMetadataEntryAttributesTransform(
-            GeneratorSyntaxContext ctx,
-            CancellationToken _)
+        private static KeyValuePair<int, int>? CaptureGenerateMetadataEntryAttributesTransform(GeneratorSyntaxContext ctx, CancellationToken _)
         {
             var attr = (AttributeSyntax)ctx.Node;
 
             // We only care about the GenerateMetadataEntryAttribute constructor
-            var sym = ctx.SemanticModel.GetSymbolInfo(attr).Symbol as IMethodSymbol;
-            if (sym?.ContainingType?.ToDisplayString() != AttrFullName)
-                return null;
+            if (!SkipNonRelevantSymbols(ctx, attr)) return null;
 
             var args = attr.ArgumentList?.Arguments;
             if (args is null || args.Value.Count < 2)
@@ -148,9 +148,28 @@ namespace Extend0.MetadataEntry.Generator
             if (!keyConst.HasValue || !valConst.HasValue)
                 return null;
 
-            return ((int)keyConst.Value!, (int)valConst.Value!);
+            return new((int)keyConst.Value!, (int)valConst.Value!);
         }
 
+        /// <summary>
+        /// Filters out attribute nodes whose symbol does not correspond to
+        /// <c>GenerateMetadataEntryAttribute</c>.
+        /// </summary>
+        /// <param name="ctx">
+        /// The generator syntax context providing the semantic model.
+        /// </param>
+        /// <param name="attr">
+        /// The <see cref="AttributeSyntax"/> node being inspected.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the attribute resolves to the
+        /// <c>GenerateMetadataEntryAttribute</c> constructor; otherwise <see langword="false"/>.
+        /// </returns>
+        private static bool SkipNonRelevantSymbols(GeneratorSyntaxContext ctx, AttributeSyntax attr)
+        {
+            var sym = ctx.SemanticModel.GetSymbolInfo(attr).Symbol as IMethodSymbol;
+            return sym?.ContainingType?.ToDisplayString() == AttrFullName;
+        }
 
         // ─────────────────────────────────────────────────────────────
         // VARIANT STRUCT
@@ -345,7 +364,7 @@ namespace Extend0.Metadata.CodeGen
         /// </summary>
         /// <param name="uniq">Set of unique (keySize, valueSize) pairs backing the supported variants.</param>
         /// <param name="generatorVersion">Generator assembly version string.</param>
-        private static string EmitMetadataCell((int key, int val)[] uniq, string generatorVersion)
+        private static string EmitMetadataCell(KeyValuePair<int,int>[] uniq, string generatorVersion)
         {
             var arms = BuildMetadataCellSwitchArms(uniq);
 
@@ -602,11 +621,13 @@ namespace Extend0.Metadata.CodeGen
 """;
         }
 
-        private static string BuildMetadataCellSwitchArms((int key, int val)[] uniq)
+        private static string BuildMetadataCellSwitchArms(KeyValuePair<int,int>[] uniq)
         {
             var sb = new StringBuilder();
-            foreach (var (k, v) in uniq)
+            foreach (var pair in uniq)
             {
+                var k = pair.Key;
+                var v = pair.Value;
                 sb.AppendLine(
                     $"                MetadataEntrySize.Entry{k}x{v} => NativeMemory.AllocZeroed(1, (nuint)sizeof(MetadataEntry{k}x{v})),");
 
@@ -676,10 +697,10 @@ namespace Extend0.Metadata.CodeGen
         /// <returns>
         /// C# source code that defines the enum and its helpers.
         /// </returns>
-        private static string EmitEnumAndExtensions((int key, int val)[] uniq, string generatorVersion)
+        private static string EmitEnumAndExtensions(KeyValuePair<int,int>[] uniq, string generatorVersion)
         {
             var enumMembers = BuildEnumMembers(uniq);
-            var packed = uniq.Select(p => (p.key << 16) | p.val).OrderBy(x => x).ToArray();
+            var packed = uniq.Select(p => (p.Key << 16) | p.Value).OrderBy(x => x).ToArray();
             var packedLiterals = string.Join(", ", packed.Select(x => $"0x{x:X8}"));
 
             var enumSource = $$"""
@@ -801,11 +822,13 @@ namespace Extend0.Metadata.CodeGen
             return enumSource + extSource + "\n";
         }
 
-        private static string BuildEnumMembers((int key, int val)[] uniq)
+        private static string BuildEnumMembers(KeyValuePair<int,int>[] uniq)
         {
             var sb = new StringBuilder();
-            foreach (var (k, v) in uniq)
+            foreach (var pair in uniq)
             {
+                var k = pair.Key;
+                var v = pair.Value;
                 var packed = (k << 16) | v;
                 sb.AppendLine($"        Entry{k}x{v} = 0x{packed:X8},");
             }
