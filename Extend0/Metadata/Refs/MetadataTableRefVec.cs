@@ -139,41 +139,45 @@ namespace Extend0.Metadata.Refs
         // ---- Items view (trimmed to actual available bytes) ----------------
 
         /// <summary>
-        /// Returns a writable span over the entry region, trimmed so it does not exceed the bytes
-        /// that actually fit in the buffer.
-        /// </summary>
-        /// <param name="buf">Writable VALUE buffer.</param>
-        /// <param name="count">Outputs the stored count from the header (even if truncated).</param>
-        /// <returns>
-        /// A span over the entries region. Its length is <= <paramref name="count"/> if the buffer
-        /// is shorter than the declared capacity.
-        /// </returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Span<MetadataTableRef> Items(Span<byte> buf, out ushort count)
-        {
-            count = GetCount(buf);
-            int availEntries = Math.Max(0, (buf.Length - HeaderSize) / EntrySize);
-            int take = Math.Min(count, (ushort)availEntries);
-            var data = buf.Slice(HeaderSize, take * EntrySize);
-            return MemoryMarshal.Cast<byte, MetadataTableRef>(data);
-        }
-
-        /// <summary>
         /// Read-only version of <see cref="Items(Span{byte}, out ushort)"/> for VALUE buffers.
         /// </summary>
-        /// <param name="buf">Read-only VALUE buffer.</param>
+        /// <param name="readOnlyBuf">Read-only VALUE buffer.</param>
         /// <param name="count">Outputs the stored count from the header (even if truncated).</param>
         /// <returns>
         /// A read-only span over the entries region. Its length is <= <paramref name="count"/> if
         /// the buffer is shorter than the declared capacity.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ReadOnlySpan<MetadataTableRef> Items(ReadOnlySpan<byte> buf, out ushort count)
+        public static ReadOnlySpan<MetadataTableRef> Items(ReadOnlySpan<byte> readOnlyBuf, out ushort count)
         {
-            count = GetCount(buf);
-            int availEntries = Math.Max(0, (buf.Length - HeaderSize) / EntrySize);
+            count = GetCount(readOnlyBuf);
+            int availEntries = Math.Max(0, (readOnlyBuf.Length - HeaderSize) / EntrySize);
             int take = Math.Min(count, (ushort)availEntries);
-            var data = buf.Slice(HeaderSize, take * EntrySize);
+            var data = readOnlyBuf.Slice(HeaderSize, take * EntrySize);
+            return MemoryMarshal.Cast<byte, MetadataTableRef>(data);
+        }
+
+        /// <summary>
+        /// Returns a writable span over the entry region, trimmed so that it does not exceed
+        /// the bytes that actually fit in the buffer.
+        /// </summary>
+        /// <param name="buf">Writable VALUE buffer.</param>
+        /// <param name="count">
+        /// Outputs the stored count from the header (even if the buffer is truncated).
+        /// </param>
+        /// <returns>
+        /// A span over the entries region. Its length is less than or equal to
+        /// <paramref name="count"/> if the buffer is shorter than the declared capacity.
+        /// </returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Span<MetadataTableRef> Items(Span<byte> buf, out ushort count)
+        {
+            // Reuse the read-only overload to compute count and effective length.
+            ReadOnlySpan<byte> roBuf = buf;
+            ReadOnlySpan<MetadataTableRef> roItems = Items(roBuf, out count);
+
+            // Slice the original writable buffer using the same effective length.
+            var data = buf.Slice(HeaderSize, roItems.Length * EntrySize);
             return MemoryMarshal.Cast<byte, MetadataTableRef>(data);
         }
 
