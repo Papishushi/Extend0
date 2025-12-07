@@ -120,43 +120,102 @@ namespace Extend0.BlittableAdapter.Generator
         /// </remarks>
         private static List<FieldModel> ParseFields(string json)
         {
-            var result = new List<FieldModel>();
+            ParseFieldCheckReturnValue checkReturnValue = ParseFieldCheck(json);
+            if (!checkReturnValue.Completed) return [];
 
-            int idx = json.IndexOf("\"fields\"", StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) return result;
+            string arraySlice = json.Substring(checkReturnValue.StartArray, checkReturnValue.Length + 1);
+            return AddMatches(arraySlice);
+        }
 
-            int startArray = json.IndexOf('[', idx);
-            if (startArray < 0) return result;
-
-            int endArray = FindMatchingBracket(json, startArray, '[', ']');
-            if (endArray < 0) return result;
-
-            string arraySlice = json.Substring(startArray, endArray - startArray + 1);
-
+        /// <summary>
+        /// Extracts all field objects from the JSON array slice and converts them
+        /// into <see cref="FieldModel"/> instances.
+        /// </summary>
+        /// <param name="arraySlice">
+        /// A string containing only the JSON array segment that holds the field definitions.
+        /// </param>
+        /// <returns>
+        /// A list of <see cref="FieldModel"/> objects parsed from the array slice.
+        /// </returns>
+        private static List<FieldModel> AddMatches(string arraySlice)
+        {
+            List<FieldModel> result = [];
             foreach (Match objMatch in FieldObjectRx.Matches(arraySlice))
-            {
-                string obj = objMatch.Value;
-
-                string? name = GetSingle(NameRx, obj);
-                if (string.IsNullOrWhiteSpace(name))
-                    continue;
-
-                string? kind = GetSingle(KindRx, obj) ?? "binary";
-                int? maxBytes = null;
-
-                var maxMatch = MaxBytesRx.Match(obj);
-                if (maxMatch.Success && int.TryParse(maxMatch.Groups["v"].Value, out var parsed))
-                    maxBytes = parsed;
-
-                result.Add(new FieldModel
-                {
-                    Name = name!,
-                    Kind = kind!,
-                    MaxBytes = maxBytes
-                });
-            }
-
+                AddMatch(result, objMatch);
             return result;
+        }
+
+        /// <summary>
+        /// Locates the <c>"fields"</c> array within the JSON text and returns its
+        /// start and end indices.
+        /// </summary>
+        /// <param name="json">The full JSON definition text.</param>
+        /// <returns>
+        /// A <see cref="ParseFieldCheckReturnValue"/> indicating whether the array
+        /// was found (<see cref="ParseFieldCheckReturnValue.Completed"/>) and, if so,
+        /// the start and end indices of the array brackets.
+        /// </returns>
+        /// <remarks>
+        /// The method searches for the <c>"fields"</c> property name, then looks for
+        /// the opening <c>'['</c> bracket and its matching closing <c>']'</c>.
+        /// If any of these steps fail, the returned value has
+        /// <see cref="ParseFieldCheckReturnValue.Completed"/> set to <c>false</c>.
+        /// </remarks>
+        private static ParseFieldCheckReturnValue ParseFieldCheck(string json)
+        {
+            int idx = json.IndexOf("\"fields\"", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return (false, 0, 0);
+
+            var startArray = json.IndexOf('[', idx);
+            if (startArray < 0) return (false, startArray, 0);
+
+            var endArray = FindMatchingBracket(json, startArray, '[', ']');
+            if (endArray < 0) return (false, startArray, endArray);
+
+            return (true, startArray, endArray);
+        }
+
+        /// <summary>
+        /// Parses a single JSON object match and, if valid, adds a corresponding
+        /// <see cref="FieldModel"/> instance to the result list.
+        /// </summary>
+        /// <param name="result">
+        /// The list that will receive the new <see cref="FieldModel"/> instance.
+        /// </param>
+        /// <param name="objMatch">
+        /// A regular expression match representing a single JSON object within the fields array.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// The method attempts to extract:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><description><c>name</c> (required; entry is skipped if missing or empty)</description></item>
+        ///   <item><description><c>kind</c> (optional; defaults to <c>"binary"</c>)</description></item>
+        ///   <item><description><c>maxBytes</c> (optional; parsed as an <see cref="int"/> if present)</description></item>
+        /// </list>
+        /// Unknown properties are ignored.
+        /// </remarks>
+        private static void AddMatch(List<FieldModel> result, Match objMatch)
+        {
+            string obj = objMatch.Value;
+
+            string? name = GetSingle(NameRx, obj);
+            if (string.IsNullOrWhiteSpace(name)) return;
+
+            string? kind = GetSingle(KindRx, obj) ?? "binary";
+            int? maxBytes = null;
+
+            var maxMatch = MaxBytesRx.Match(obj);
+            if (maxMatch.Success && int.TryParse(maxMatch.Groups["v"].Value, out var parsed))
+                maxBytes = parsed;
+
+            result.Add(new FieldModel
+            {
+                Name = name!,
+                Kind = kind!,
+                MaxBytes = maxBytes
+            });
         }
 
         /// <summary>
@@ -193,5 +252,56 @@ namespace Extend0.BlittableAdapter.Generator
             }
             return -1;
         }
+
+        /// <summary>
+        /// Represents the result of checking a parsed field within an array segment.
+        /// </summary>
+        /// <param name="Completed">
+        /// Indicates whether the parsing/check operation for the field has completed successfully.
+        /// </param>
+        /// <param name="StartArray">
+        /// Zero-based index in the source array where the field segment begins (inclusive).
+        /// </param>
+        /// <param name="EndArray">
+        /// Zero-based index in the source array where the field segment ends (exclusive).
+        /// </param>
+        private record struct ParseFieldCheckReturnValue(bool Completed, int StartArray, int EndArray)
+            : IEquatable<ParseFieldCheckReturnValue>
+        {
+            /// <summary>
+            /// Gets the length of the array segment covered by this result.
+            /// </summary>
+            /// <remarks>
+            /// Computed as <c>EndArray - StartArray</c>.
+            /// </remarks>
+            public readonly int Length => EndArray - StartArray;
+
+            /// <summary>
+            /// Implicitly converts a <see cref="ParseFieldCheckReturnValue"/> instance to a tuple
+            /// containing the completion flag and the array bounds.
+            /// </summary>
+            /// <param name="value">
+            /// The <see cref="ParseFieldCheckReturnValue"/> to convert.
+            /// </param>
+            /// <returns>
+            /// A tuple in the form <c>(completed, startArray, endArray)</c>.
+            /// </returns>
+            public static implicit operator (bool completed, int startArray, int endArray)(ParseFieldCheckReturnValue value)
+                => (value.Completed, value.StartArray, value.EndArray);
+
+            /// <summary>
+            /// Implicitly converts a tuple containing a completion flag and array bounds
+            /// into a new <see cref="ParseFieldCheckReturnValue"/> instance.
+            /// </summary>
+            /// <param name="value">
+            /// The tuple in the form <c>(completed, startArray, endArray)</c> to convert.
+            /// </param>
+            /// <returns>
+            /// A new <see cref="ParseFieldCheckReturnValue"/> instance populated from the tuple.
+            /// </returns>
+            public static implicit operator ParseFieldCheckReturnValue((bool completed, int startArray, int endArray) value)
+                => new(value.completed, value.startArray, value.endArray);
+        }
+
     }
 }

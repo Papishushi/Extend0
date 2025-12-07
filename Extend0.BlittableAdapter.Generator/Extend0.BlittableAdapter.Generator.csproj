@@ -12,8 +12,8 @@
 		<Description>Generates blittable object structs (GC Free) from a definition file '.blit.json' .</Description>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<SuppressWarnings>RS1035</SuppressWarnings>
-		<AssemblyVersion>1.0.9471.38007</AssemblyVersion>
-		<FileVersion>1.0.9471.38007</FileVersion>
+		<AssemblyVersion>1.0.9471.42339</AssemblyVersion>
+		<FileVersion>1.0.9471.42339</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
