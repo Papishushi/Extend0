@@ -1,6 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using System;
 using System.Text;
 
 namespace Extend0.MetadataEntry.Generator
@@ -20,9 +21,12 @@ namespace Extend0.MetadataEntry.Generator
 
         /// <summary>
         /// Configures the incremental source generation pipeline:
-        /// injects the attribute definition, collects all attribute usages, and
-        /// produces the enum, entry structs and <c>MetadataCell</c> wrapper.
+        /// injects the attribute definition, collects all<c>[GenerateMetadataEntry]</c> usages,
+        /// and produces the enum, entry structs and <c>MetadataCell</c> wrapper.
         /// </summary>
+        /// <param name="context">
+        /// The incremental generator initialization context used to register inputs and outputs.
+        /// </param>
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             // Generator assembly version (e.g. 1.0.0.0)
@@ -41,54 +45,112 @@ namespace Extend0.MetadataEntry.Generator
             });
 
             // Capture [assembly: GenerateMetadataEntry(key, value)] usages
+            IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<(int key, int val)>> attrPairs =
+                CaptureGenerateMetadataEntryAttributes(context);
+
+            context.RegisterSourceOutput(
+                attrPairs,
+                (spc, entries) => RegisterSourceOutputAction(spc, entries, generatorVersion));
+        }
+
+        /// <summary>
+        /// Handles the final source emission step for the generator:
+        /// given the collected (keySize, valueSize) pairs, emits the
+        /// <c>MetadataEntrySize</c> enum + extensions, the concrete
+        /// <c>MetadataEntry&lt;KxV&gt;</c> structs, and the <c>MetadataCell</c> wrapper.
+        /// </summary>
+        /// <param name="spc">The source production context provided by Roslyn.</param>
+        /// <param name="entries">
+        /// The collected list of (keySize, valueSize) pairs obtained from
+        /// <c>[GenerateMetadataEntry]</c> attributes.
+        /// </param>
+        /// <param name="generatorVersion">
+        /// Version string of the generator assembly used to annotate generated files.
+        /// </param>
+        private static void RegisterSourceOutputAction(
+            SourceProductionContext spc,
+            System.Collections.Immutable.ImmutableArray<(int key, int val)> entries,
+            string generatorVersion)
+        {
+            var uniq = entries.Distinct().OrderBy(x => x.key).ThenBy(x => x.val).ToArray();
+            if (uniq.Length == 0) return;
+
+            // 0) Emit the enum and extension methods based on detected variants
+            var enumAndExt = EmitEnumAndExtensions(uniq, generatorVersion);
+            spc.AddSource("MetadataEntrySize.g.cs", SourceText.From(enumAndExt, Encoding.UTF8));
+
+            // 1) Emit each MetadataEntry{K}x{V} struct
+            foreach (var (key, value) in uniq)
+            {
+                var code = EmitVariant(key, value, generatorVersion);
+                spc.AddSource($"MetadataEntry_{key}x{value}.g.cs", SourceText.From(code, Encoding.UTF8));
+            }
+
+            // 2) Emit MetadataCell with a switch covering only generated variants
+            var cell = EmitMetadataCell(uniq, generatorVersion);
+            spc.AddSource("MetadataCell.g.cs", SourceText.From(cell, Encoding.UTF8));
+        }
+
+        /// <summary>
+        /// Configures the incremental pipeline that discovers all
+        /// <c>[GenerateMetadataEntry]</c> attribute usages at the assembly level
+        /// and collects their (keySize, valueSize) arguments.
+        /// </summary>
+        /// <param name="context">The incremental generator initialization context.</param>
+        /// <returns>
+        /// An <see cref="IncrementalValueProvider{T}"/> that yields an immutable array of
+        /// (keySize, valueSize) pairs to be consumed at source output time.
+        /// </returns>
+        private static IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<(int key, int val)>> CaptureGenerateMetadataEntryAttributes(
+            IncrementalGeneratorInitializationContext context)
+        {
             var attrPairs = context.SyntaxProvider
                 .CreateSyntaxProvider(
                     predicate: static (node, _) => node is AttributeSyntax,
-                    transform: static (ctx, _) =>
-                    {
-                        var attr = (AttributeSyntax)ctx.Node;
-
-                        // We only care about the GenerateMetadataEntryAttribute constructor
-                        var sym = ctx.SemanticModel.GetSymbolInfo(attr).Symbol as IMethodSymbol;
-                        if (sym?.ContainingType?.ToDisplayString() != AttrFullName)
-                            return ((int key, int val)?)null;
-
-                        var args = attr.ArgumentList?.Arguments;
-                        if (args is null || args.Value.Count < 2)
-                            return null;
-
-                        var keyConst = ctx.SemanticModel.GetConstantValue(args.Value[0].Expression);
-                        var valConst = ctx.SemanticModel.GetConstantValue(args.Value[1].Expression);
-                        if (!keyConst.HasValue || !valConst.HasValue)
-                            return null;
-
-                        return ((int)keyConst.Value!, (int)valConst.Value!);
-                    })
+                    transform: CaptureGenerateMetadataEntryAttributesTransform)
                 .Where(static x => x.HasValue)
                 .Select(static (x, _) => x!.Value)
                 .Collect();
 
-            context.RegisterSourceOutput(attrPairs, (spc, entries) =>
-            {
-                var uniq = entries.Distinct().OrderBy(x => x.key).ThenBy(x => x.val).ToArray();
-                if (uniq.Length == 0) return;
-
-                // 0) Emit the enum and extension methods based on detected variants
-                var enumAndExt = EmitEnumAndExtensions(uniq, generatorVersion);
-                spc.AddSource("MetadataEntrySize.g.cs", SourceText.From(enumAndExt, Encoding.UTF8));
-
-                // 1) Emit each MetadataEntry{K}x{V} struct
-                foreach (var (key, value) in uniq)
-                {
-                    var code = EmitVariant(key, value, generatorVersion);
-                    spc.AddSource($"MetadataEntry_{key}x{value}.g.cs", SourceText.From(code, Encoding.UTF8));
-                }
-
-                // 2) Emit MetadataCell with a switch covering only generated variants
-                var cell = EmitMetadataCell(uniq, generatorVersion);
-                spc.AddSource("MetadataCell.g.cs", SourceText.From(cell, Encoding.UTF8));
-            });
+            return attrPairs;
         }
+
+        /// <summary>
+        /// Per-attribute transform used by the syntax provider to extract
+        /// the constant (keySize, valueSize) arguments from
+        /// <c>[GenerateMetadataEntry]</c> attribute applications.
+        /// </summary>
+        /// <param name="ctx">
+        /// The generator syntax context for the current <see cref="AttributeSyntax"/> node.
+        /// </param>
+        /// <param name="_">Cancellation token (unused).</param>
+        /// <returns>
+        /// A tuple (keySize, valueSize) when the attribute is a valid
+        /// <c>GenerateMetadataEntryAttribute</c> with constant arguments; otherwise <c>null</c>.
+        /// </returns>
+        private static (int key, int val)? CaptureGenerateMetadataEntryAttributesTransform(
+            GeneratorSyntaxContext ctx,
+            CancellationToken _)
+        {
+            var attr = (AttributeSyntax)ctx.Node;
+
+            // We only care about the GenerateMetadataEntryAttribute constructor
+            var sym = ctx.SemanticModel.GetSymbolInfo(attr).Symbol as IMethodSymbol;
+            if (sym?.ContainingType?.ToDisplayString() != AttrFullName)
+                return null;
+
+            var args = attr.ArgumentList?.Arguments;
+            if (args is null || args.Value.Count < 2)
+                return null;
+
+            var keyConst = ctx.SemanticModel.GetConstantValue(args.Value[0].Expression);
+            var valConst = ctx.SemanticModel.GetConstantValue(args.Value[1].Expression);
+            if (!keyConst.HasValue || !valConst.HasValue)
+                return null;
+
+            return ((int)keyConst.Value!, (int)valConst.Value!);
+        }
+
 
         // ─────────────────────────────────────────────────────────────
         // VARIANT STRUCT
