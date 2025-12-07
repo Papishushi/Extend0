@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections;
 
 namespace Extend0.Metadata.Diagnostics
@@ -195,10 +196,10 @@ namespace Extend0.Metadata.Diagnostics
         /// Struct-based enumerator over the key–value pairs of an <see cref="OpScopeState"/>.
         /// </summary>
         /// <remarks>
-        /// This enumerator is allocation-free and designed for use by logging infrastructure
-        /// when consuming scope state for structured logging.
+        /// This is a <c>record struct</c>, so value equality and hash code are generated
+        /// automatically from its fields (<see cref="State"/> and <see cref="Index"/>).
         /// </remarks>
-        public struct Enumerator(OpScopeState s) : IEnumerator<KeyValuePair<string, object?>>, IEquatable<Enumerator>
+        public record struct Enumerator(OpScopeState State) : IEquatable<Enumerator>, IEnumerator<KeyValuePair<string, object?>>
         {
             private int _i = -1;
 
@@ -208,103 +209,28 @@ namespace Extend0.Metadata.Diagnostics
             public readonly int Index => _i;
 
             /// <summary>
-            /// Gets the underlying <see cref="OpScopeState"/> this enumerator iterates over.
-            /// </summary>
-            public readonly OpScopeState State => s;
-
-            /// <summary>
             /// Gets the key–value pair at the current position of the enumerator.
             /// </summary>
-            public readonly KeyValuePair<string, object?> Current => s[_i];
+            public KeyValuePair<string, object?> Current => State[_i];
 
-            /// <summary>
-            /// Gets the current element in the collection.
-            /// </summary>
-            /// <returns>The current element as an <see cref="object"/>.</returns>
-            readonly object IEnumerator.Current => Current;
+            /// <inheritdoc />
+            object IEnumerator.Current => Current;
 
-            /// <summary>
-            /// Advances the enumerator to the next element of the collection.
-            /// </summary>
-            /// <returns>
-            /// <see langword="true"/> if the enumerator was successfully advanced
-            /// to the next element; <see langword="false"/> if the enumerator has
-            /// passed the end of the collection.
-            /// </returns>
+            /// <inheritdoc />
             public bool MoveNext()
             {
                 _i++;
-                return _i < s.Count;
+                return _i < State.Count;
             }
 
-            /// <summary>
-            /// Sets the enumerator to its initial position, which is before
-            /// the first element in the collection.
-            /// </summary>
+            /// <inheritdoc />
             public void Reset() => _i = -1;
 
-            /// <summary>
-            /// Performs application-defined tasks associated with freeing,
-            /// releasing, or resetting unmanaged resources.
-            /// </summary>
-            /// <remarks>
-            /// This enumerator does not hold unmanaged resources, so this method
-            /// is a no-op.
-            /// </remarks>
-            public readonly void Dispose() { /* Nothing to do here */ }
-
-            /// <summary>
-            /// Indicates whether the current enumerator instance is equal to another
-            /// <see cref="Enumerator"/> instance.
-            /// </summary>
-            /// <param name="other">The other enumerator to compare with.</param>
-            /// <returns>
-            /// <see langword="true"/> if both enumerators reference the same underlying
-            /// <see cref="OpScopeState"/> and have the same position; otherwise,
-            /// <see langword="false"/>.
-            /// </returns>
-            public readonly bool Equals(Enumerator other) => _i == other._i && State.Equals(other.State);
-
-            /// <summary>
-            /// Determines whether the specified object is equal to the current enumerator.
-            /// </summary>
-            /// <param name="obj">The object to compare with the current enumerator.</param>
-            /// <returns>
-            /// <see langword="true"/> if <paramref name="obj"/> is an <see cref="Enumerator"/>
-            /// and is equal to this instance; otherwise, <see langword="false"/>.
-            /// </returns>
-            public override readonly bool Equals(object? obj) => obj is Enumerator enumerator && Equals(enumerator);
-
-            /// <summary>
-            /// Compares two <see cref="Enumerator"/> instances for equality.
-            /// </summary>
-            /// <param name="left">The first enumerator to compare.</param>
-            /// <param name="right">The second enumerator to compare.</param>
-            /// <returns>
-            /// <see langword="true"/> if both enumerators are equal; otherwise,
-            /// <see langword="false"/>.
-            /// </returns>
-            public static bool operator ==(Enumerator left, Enumerator right) => left.Equals(right);
-
-            /// <summary>
-            /// Compares two <see cref="Enumerator"/> instances for inequality.
-            /// </summary>
-            /// <param name="left">The first enumerator to compare.</param>
-            /// <param name="right">The second enumerator to compare.</param>
-            /// <returns>
-            /// <see langword="true"/> if the enumerators are not equal; otherwise,
-            /// <see langword="false"/>.
-            /// </returns>
-            public static bool operator !=(Enumerator left, Enumerator right) => !left.Equals(right);
-
-            /// <summary>
-            /// Returns a hash code for this enumerator instance.
-            /// </summary>
-            /// <returns>
-            /// A 32-bit signed integer hash code combining the underlying scope state
-            /// and the current position.
-            /// </returns>
-            public override readonly int GetHashCode() => HashCode.Combine(State, _i);
+            /// <inheritdoc />
+            public readonly void Dispose()
+            {
+                // No unmanaged resources to release.
+            }
         }
     }
 }

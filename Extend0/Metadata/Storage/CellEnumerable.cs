@@ -151,15 +151,14 @@ namespace Extend0.Metadata.Storage
             }
         }
 
-
         /// <summary>
         /// Struct-based enumerator over metadata cells.
         /// </summary>
         /// <remarks>
-        /// The enumerator supports both in-memory and memory-mapped stores and
-        /// yields the current cell as <c>(Col, Row, Cell)</c>.
+        /// This is a <c>record struct</c>, so value equality and hash code are generated
+        /// automatically from its fields (column/row position, column count and backing store).
         /// </remarks>
-        public struct Enumerator : IEquatable<Enumerator>, IEnumerator<CellRowColumnValueEntry>
+        public record struct Enumerator : IEquatable<Enumerator>, IEnumerator<CellRowColumnValueEntry>
         {
             // shared state
             private uint _c, _r;
@@ -179,10 +178,6 @@ namespace Extend0.Metadata.Storage
             /// <summary>
             /// Creates an enumerator bound to an in-memory store.
             /// </summary>
-            /// <param name="s">The <see cref="InMemoryStore"/> to iterate.</param>
-            /// <returns>
-            /// A new <see cref="Enumerator"/> that will enumerate all cells in <paramref name="s"/>.
-            /// </returns>
             internal static Enumerator ForMemory(InMemoryStore s) => new()
             {
                 _mem = s,
@@ -195,10 +190,6 @@ namespace Extend0.Metadata.Storage
             /// <summary>
             /// Creates an enumerator bound to a memory-mapped store.
             /// </summary>
-            /// <param name="s">The <see cref="MappedStore"/> to iterate.</param>
-            /// <returns>
-            /// A new <see cref="Enumerator"/> that will enumerate all cells in <paramref name="s"/>.
-            /// </returns>
             internal static Enumerator ForMapped(MappedStore s) => new()
             {
                 _mem = null,
@@ -208,13 +199,7 @@ namespace Extend0.Metadata.Storage
                 _colCount = s.ColumnCount
             };
 
-            /// <summary>
-            /// Advances the enumerator to the next cell, if any.
-            /// </summary>
-            /// <returns>
-            /// <see langword="true"/> if a new cell is available in <see cref="Current"/>;
-            /// otherwise, <see langword="false"/> when the enumeration is complete.
-            /// </returns>
+            /// <inheritdoc />
             public bool MoveNext()
             {
                 if (_mapped is not null) return MoveNextMapped();
@@ -222,21 +207,9 @@ namespace Extend0.Metadata.Storage
                 return false; // default enumerator with no store
             }
 
-            /// <summary>
-            /// Advances the enumerator for an <see cref="InMemoryStore"/>.
-            /// </summary>
-            /// <remarks>
-            /// Iterates all columns and rows using <see cref="InMemoryStore.MetaAt(uint)"/> and
-            /// <see cref="InMemoryStore.GetOrCreateCell(uint,uint,in ColumnConfiguration)"/>.
-            /// </remarks>
-            /// <returns>
-            /// <see langword="true"/> if a new cell is available in <see cref="Current"/>;
-            /// otherwise, <see langword="false"/> when the enumeration is complete.
-            /// </returns>
             private bool MoveNextMem()
             {
                 var s = _mem!;
-                // first advance
                 if (_r == uint.MaxValue)
                 {
                     if (_colCount == 0) return false;
@@ -247,7 +220,6 @@ namespace Extend0.Metadata.Storage
                     _r++;
                 }
 
-                // carry rows/cols
                 while (_c < _colCount && _r >= s.MetaAt(_c).InitialCapacity)
                 {
                     _c++;
@@ -262,18 +234,6 @@ namespace Extend0.Metadata.Storage
                 return true;
             }
 
-            /// <summary>
-            /// Advances the enumerator for a <see cref="MappedStore"/>.
-            /// </summary>
-            /// <remarks>
-            /// Iterates all columns and rows using <see cref="MappedStore.GetRowCapacity(uint)"/>,
-            /// <see cref="MappedStore.GetColumnConfiguration(uint)"/> and
-            /// <see cref="MappedStore.GetOrCreateCell(uint,uint,in ColumnConfiguration)"/>.
-            /// </remarks>
-            /// <returns>
-            /// <see langword="true"/> if a new cell is available in <see cref="Current"/>;
-            /// otherwise, <see langword="false"/> when the enumeration is complete.
-            /// </returns>
             private bool MoveNextMapped()
             {
                 var s = _mapped!;
@@ -301,116 +261,7 @@ namespace Extend0.Metadata.Storage
                 return true;
             }
 
-            /// <summary>
-            /// Determines whether this enumerator instance is equal to another
-            /// <see cref="Enumerator"/> by comparing position and underlying store.
-            /// </summary>
-            /// <param name="other">The other enumerator to compare with.</param>
-            /// <returns>
-            /// <see langword="true"/> if both enumerators point to the same position
-            /// over the same underlying store; otherwise, <see langword="false"/>.
-            /// </returns>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public readonly bool Equals(Enumerator other)
-            {
-                if (_c == other._c &&
-                    _r == other._r &&
-                    _colCount == other._colCount)
-                {
-                    if (_mem is not null && other._mem is not null)
-                        return ReferenceEquals(_mem, other._mem);
-                    else if (_mapped is not null && other._mapped is not null)
-                        return ReferenceEquals(_mapped, other._mapped);
-                    else if (_mem is null && other._mem is null &&
-                             _mapped is null && other._mapped is null)
-                        return true;
-                }
-                return false;
-            }
-
-            /// <summary>
-            /// Determines whether the specified object is equal to the current enumerator.
-            /// </summary>
-            /// <param name="obj">The object to compare with this enumerator.</param>
-            /// <returns>
-            /// <see langword="true"/> if <paramref name="obj"/> is an <see cref="Enumerator"/>
-            /// with the same position and underlying store; otherwise, <see langword="false"/>.
-            /// </returns>
-            public override readonly bool Equals(object? obj) =>
-                obj is Enumerator enumerator && Equals(enumerator);
-
-            /// <summary>
-            /// Determines whether two enumerators are equal.
-            /// </summary>
-            /// <param name="left">The first enumerator to compare.</param>
-            /// <param name="right">The second enumerator to compare.</param>
-            /// <returns>
-            /// <see langword="true"/> if both enumerators are equal according to
-            /// <see cref="Equals(Enumerator)"/>; otherwise, <see langword="false"/>.
-            /// </returns>
-            public static bool operator ==(Enumerator left, Enumerator right) => left.Equals(right);
-
-            /// <summary>
-            /// Determines whether two enumerators are not equal.
-            /// </summary>
-            /// <param name="left">The first enumerator to compare.</param>
-            /// <param name="right">The second enumerator to compare.</param>
-            /// <returns>
-            /// <see langword="true"/> if the enumerators are not equal; otherwise,
-            /// <see langword="false"/>.
-            /// </returns>
-            public static bool operator !=(Enumerator left, Enumerator right) => !(left == right);
-
-            /// <summary>
-            /// Returns a hash code for this enumerator.
-            /// </summary>
-            /// <returns>
-            /// A hash code that combines the current position (column, row), 
-            /// the store shape (column count) and the identity
-            /// of the underlying store instance (in-memory or mapped).
-            /// </returns>
-            /// <remarks>
-            /// Two <see cref="Enumerator"/> instances that are considered equal by
-            /// <see cref="Equals(Enumerator)"/> are guaranteed to produce the same
-            /// hash code. The hash code is not guaranteed to be unique and different
-            /// enumerators may still collide, as is typical for hash functions.
-            /// </remarks>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public override readonly int GetHashCode()
-            {
-                unchecked
-                {
-                    int hash = 17;
-
-                    hash = (hash * 31) + (int)_c;
-                    hash = (hash * 31) + (int)_r;
-                    hash = (hash * 31) + (int)_colCount;
-
-                    // Encode which backing store is used and its identity,
-                    // mirroring the logic in Equals(Enumerator).
-                    if (_mem is not null)
-                    {
-                        hash = (hash * 31) + 1; // mode marker: memory
-                        hash = (hash * 31) + RuntimeHelpers.GetHashCode(_mem);
-                    }
-                    else if (_mapped is not null)
-                    {
-                        hash = (hash * 31) + 2; // mode marker: mapped
-                        hash = (hash * 31) + RuntimeHelpers.GetHashCode(_mapped);
-                    }
-                    else
-                    {
-                        hash = (hash * 31) + 0; // mode marker: none
-                    }
-
-                    return hash;
-                }
-            }
-
-            /// <summary>
-            /// Resets the enumerator to its initial position, which is
-            /// before the first cell in the underlying store.
-            /// </summary>
+            /// <inheritdoc />
             public void Reset()
             {
                 _c = 0;
@@ -418,23 +269,7 @@ namespace Extend0.Metadata.Storage
                 Current = default;
             }
 
-            /// <summary>
-            /// Releases resources held by this enumerator.
-            /// </summary>
-            /// <remarks>
-            /// <para>
-            /// The enumerator is a lightweight view over an existing
-            /// <see cref="InMemoryStore"/> or <see cref="MappedStore"/> and
-            /// does not own the underlying store.
-            /// Calling <see cref="Dispose"/> does <b>not</b> dispose the store;
-            /// that remains the responsibility of the owner (e.g. <see cref="MetadataTable"/>).
-            /// </para>
-            /// <para>
-            /// This implementation simply drops references to the backing store so the
-            /// GC can collect it once no other references remain. The iteration state
-            /// (<c>_c</c>, <c>_r</c>, <see cref="Current"/>) is left intact.
-            /// </para>
-            /// </remarks>
+            /// <inheritdoc />
             public void Dispose()
             {
                 // Do not dispose the underlying store: we don't own it.
