@@ -4,8 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyVersion>1.0.9473.2372</AssemblyVersion>
-		<FileVersion>1.0.9473.2372</FileVersion>
+		<AssemblyVersion>1.0.9473.2671</AssemblyVersion>
+		<FileVersion>1.0.9473.2671</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
 		<PackageId>Extend0</PackageId>
@@ -17,7 +17,7 @@
 		<PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;</PackageTags>
+		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;rcp-cross-process-singleton;singleton;fire-forget;</PackageTags>
 		<NeutralLanguage>en-001</NeutralLanguage>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageReleaseNotes>
@@ -33,6 +33,7 @@
 
 			The library is designed for services that need a single owner across multiple processes while still allowing simple in-process use when IPC is unnecessary, and for tools that need predictable, allocation-free metadata persistence.
 		</PackageReleaseNotes>
+		<Version>1.0.9473.2545</Version>
 	</PropertyGroup>
 
 	<ItemGroup>

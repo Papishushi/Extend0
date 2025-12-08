@@ -14,8 +14,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9473.2372</AssemblyVersion>
-		<FileVersion>1.0.9473.2372</FileVersion>
+		<AssemblyVersion>1.0.9473.2671</AssemblyVersion>
+		<FileVersion>1.0.9473.2671</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -41,6 +41,7 @@
 			- Minimal reflection, no runtime cost.
 			- Integrates seamlessly into build pipeline via Roslyn incremental generation.
 		</PackageReleaseNotes>
+		<Version>1.0.9473.2372</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
