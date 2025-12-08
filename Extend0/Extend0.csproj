@@ -4,8 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyVersion>1.0.9473.2671</AssemblyVersion>
-		<FileVersion>1.0.9473.2671</FileVersion>
+		<AssemblyVersion>1.0.9473.21413</AssemblyVersion>
+		<FileVersion>1.0.9473.21413</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
 		<PackageId>Extend0</PackageId>
@@ -23,8 +23,6 @@
 		<PackageReleaseNotes>
 			# Extend0
 
-			[![NuGet](https://img.shields.io/nuget/v/Extend0.svg)](https://www.nuget.org/packages/Extend0)
-
 			Extend0 is a small .NET utility library that provides three main building blocks:
 
 			- **Lifecycle primitives** for in-process and cross-process singletons, backed by named pipes and a lightweight RPC proxy.
@@ -33,7 +31,7 @@
 
 			The library is designed for services that need a single owner across multiple processes while still allowing simple in-process use when IPC is unnecessary, and for tools that need predictable, allocation-free metadata persistence.
 		</PackageReleaseNotes>
-		<Version>1.0.9473.2545</Version>
+		<Version>1.0.9473</Version>
 	</PropertyGroup>
 
 	<ItemGroup>

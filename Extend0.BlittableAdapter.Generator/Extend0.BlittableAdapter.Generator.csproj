@@ -14,8 +14,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9473.2671</AssemblyVersion>
-		<FileVersion>1.0.9473.2671</FileVersion>
+		<AssemblyVersion>1.0.9473.21912</AssemblyVersion>
+		<FileVersion>1.0.9473.21912</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -56,6 +56,7 @@
 			<Pack>True</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 	</ItemGroup>
 
 	<ItemGroup>

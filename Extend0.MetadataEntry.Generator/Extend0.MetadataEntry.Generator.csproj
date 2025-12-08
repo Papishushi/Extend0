@@ -14,8 +14,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9473.2671</AssemblyVersion>
-		<FileVersion>1.0.9473.2671</FileVersion>
+		<AssemblyVersion>1.0.9473.21413</AssemblyVersion>
+		<FileVersion>1.0.9473.21413</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -29,8 +29,6 @@
 		<PackageReleaseNotes>
 			# Extend0.MetadataEntry.Generator
 
-			[![NuGet](https://img.shields.io/nuget/v/Extend0.MetadataEntry.Generator.svg)](https://www.nuget.org/packages/Extend0.MetadataEntry.Generator)
-
 			A high-performance C# source generator that produces compact metadata entry structures used by Extend0 metadata framework at compile-time using `[assembly: GenerateMetadataEntry(key, value)]` attributes.
 
 			## Features
@@ -41,7 +39,7 @@
 			- Minimal reflection, no runtime cost.
 			- Integrates seamlessly into build pipeline via Roslyn incremental generation.
 		</PackageReleaseNotes>
-		<Version>1.0.9473.2372</Version>
+		<Version>1.0.9473</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -57,6 +55,7 @@
 			<Pack>True</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 	</ItemGroup>
 
 	<ItemGroup>
