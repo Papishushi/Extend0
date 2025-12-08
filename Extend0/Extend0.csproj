@@ -4,8 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyVersion>1.0.9473.21413</AssemblyVersion>
-		<FileVersion>1.0.9473.21413</FileVersion>
+		<AssemblyVersion>1.0.9473.22378</AssemblyVersion>
+		<FileVersion>1.0.9473.22378</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
 		<PackageId>Extend0</PackageId>
@@ -51,10 +51,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-  </ItemGroup>
-	
-  <ItemGroup>
-  	<ProjectReference Include="..\Extend0.MetadataEntry.Generator\Extend0.MetadataEntry.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	<PackageReference Include="Extend0.MetadataEntry.Generator" Version="1.0.9473" />
   </ItemGroup>
 
 </Project>
