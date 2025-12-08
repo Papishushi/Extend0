@@ -1,13 +1,54 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <AssemblyVersion>1.0.9472.43035</AssemblyVersion>
-    <FileVersion>1.0.9472.43035</FileVersion>
-	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net9.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AssemblyVersion>1.0.9473.2372</AssemblyVersion>
+		<FileVersion>1.0.9473.2372</FileVersion>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<AssemblyName>Extend0</AssemblyName>
+		<PackageId>Extend0</PackageId>
+		<Authors>Papishushi</Authors>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<PackageIcon>Extend0.png</PackageIcon>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<Copyright>MIT License</Copyright>
+		<PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;</PackageTags>
+		<NeutralLanguage>en-001</NeutralLanguage>
+		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+		<PackageReleaseNotes>
+			# Extend0
+
+			[![NuGet](https://img.shields.io/nuget/v/Extend0.svg)](https://www.nuget.org/packages/Extend0)
+
+			Extend0 is a small .NET utility library that provides three main building blocks:
+
+			- **Lifecycle primitives** for in-process and cross-process singletons, backed by named pipes and a lightweight RPC proxy.
+			- **Task utilities** that make it safer to run fire-and-forget asynchronous work.
+			- **Metadata storage and generators** for packing fixed-layout key/value pairs and blittable payloads into mapped tables without allocations.
+
+			The library is designed for services that need a single owner across multiple processes while still allowing simple in-process use when IPC is unnecessary, and for tools that need predictable, allocation-free metadata persistence.
+		</PackageReleaseNotes>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\Extend0.png">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\LICENSE.txt">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />

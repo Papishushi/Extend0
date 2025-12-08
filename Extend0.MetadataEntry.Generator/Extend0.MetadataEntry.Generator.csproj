@@ -1,24 +1,66 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-	<TargetFramework>netstandard2.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <IncludeBuildOutput>false</IncludeBuildOutput>
-    <AssemblyName>Extend0.MetadataEntry.Generator</AssemblyName>
-    <PackageId>Extend0.MetadataEntry.Generator</PackageId>
-    <Authors>Extend0</Authors>
-    <Description>Generates blittable MetadataEntry{Key}x{Value} structs (GC Free).</Description>
-    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-    <SuppressWarnings>RS1035</SuppressWarnings>
-    <AssemblyVersion>1.0.9472.43035</AssemblyVersion>
-    <FileVersion>1.0.9472.43035</FileVersion>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<AssemblyName>Extend0.MetadataEntry.Generator</AssemblyName>
+		<PackageId>Extend0.MetadataEntry.Generator</PackageId>
+		<Authors>Papishushi</Authors>
+		<Description>Generates blittable MetadataEntry{Key}x{Value} structs (GC Free).</Description>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<SuppressWarnings>RS1035</SuppressWarnings>
+		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
+		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
+		<AssemblyVersion>1.0.9473.2372</AssemblyVersion>
+		<FileVersion>1.0.9473.2372</FileVersion>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<PackageIcon>Extend0.png</PackageIcon>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<Copyright>MIT License</Copyright>
+		<PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;</PackageTags>
+		<NeutralLanguage>en-001</NeutralLanguage>
+		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+		<PackageReleaseNotes>
+			# Extend0.MetadataEntry.Generator
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
-  </ItemGroup>
+			[![NuGet](https://img.shields.io/nuget/v/Extend0.MetadataEntry.Generator.svg)](https://www.nuget.org/packages/Extend0.MetadataEntry.Generator)
+
+			A high-performance C# source generator that produces compact metadata entry structures used by Extend0 metadata framework at compile-time using `[assembly: GenerateMetadataEntry(key, value)]` attributes.
+
+			## Features
+
+			- Generates efficient value-type structs (`MetadataEntry{K}x{V}`) for (key, value) pairs at compile-time.
+			- Emits an optimized enum of variants with extension helpers.
+			- Produces a centralized `MetadataCell` wrapper for efficient dispatching.
+			- Minimal reflection, no runtime cost.
+			- Integrates seamlessly into build pipeline via Roslyn incremental generation.
+		</PackageReleaseNotes>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\Extend0.png">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\LICENSE.txt">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
+	</ItemGroup>
 
 </Project>

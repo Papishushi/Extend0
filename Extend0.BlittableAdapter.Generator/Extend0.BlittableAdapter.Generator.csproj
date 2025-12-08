@@ -8,13 +8,54 @@
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<AssemblyName>Extend0.BlittableAdapter.Generator</AssemblyName>
 		<PackageId>Extend0.BlittableAdapter.Generator</PackageId>
-		<Authors>Extend0</Authors>
+		<Authors>Papishushi</Authors>
 		<Description>Generates blittable object structs (GC Free) from a definition file '.blit.json' .</Description>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<SuppressWarnings>RS1035</SuppressWarnings>
-		<AssemblyVersion>1.0.9472.36434</AssemblyVersion>
-		<FileVersion>1.0.9472.36434</FileVersion>
+		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
+		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
+		<AssemblyVersion>1.0.9473.2358</AssemblyVersion>
+		<FileVersion>1.0.9473.2358</FileVersion>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<PackageIcon>Extend0.png</PackageIcon>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<Copyright>MIT License</Copyright>
+		<PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;</PackageTags>
+		<NeutralLanguage>en-001</NeutralLanguage>
+		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+		<PackageReleaseNotes>
+			# Extend0.BlittableAdapter.Generator
+
+			[![NuGet](https://img.shields.io/nuget/v/Extend0.BlittableAdapter.Generator.svg)](https://www.nuget.org/packages/Extend0.BlittableAdapter.Generator)
+
+			A source generator that produces blittable interop adapters for structs, enabling zero-cost projection between managed and native-compatible layouts.
+
+			## Features
+
+			- Emits efficient `ref struct` adapters for blittable data structures.
+			- Preserves layout and alignment for use with `Span&lt;T&gt;`, `MemoryMarshal`, and native interop.
+			- Enforces compile-time validation of blittability constraints.
+			- Supports auto-wrapping of internal fields and projected reinterpretation.
+		</PackageReleaseNotes>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\Extend0.png">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\LICENSE.txt">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
