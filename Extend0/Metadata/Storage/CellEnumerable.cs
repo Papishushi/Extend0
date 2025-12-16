@@ -1,5 +1,4 @@
 ﻿using Extend0.Metadata.CodeGen;
-using Extend0.Metadata.Schema;
 using System.Collections;
 using System.Runtime.CompilerServices;
 

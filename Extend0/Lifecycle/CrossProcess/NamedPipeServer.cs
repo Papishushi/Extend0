@@ -405,7 +405,7 @@ namespace Extend0.Lifecycle.CrossProcess
                 await InvokeTargetTask(writer, callRes).ConfigureAwait(false);
             else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
                 await InvokeTargetGenericTask(writer, callRes).ConfigureAwait(false);
-            else 
+            else
                 await WriteOk(callRes, writer).ConfigureAwait(false);
         }
 

@@ -2,7 +2,7 @@
 
 namespace Extend0.Metadata
 {
-public sealed partial class MetaDBManager
+    public sealed partial class MetaDBManager
     {
         /// <summary>
         /// Lightweight value container returned by the <c>PrepareFill</c> helper,

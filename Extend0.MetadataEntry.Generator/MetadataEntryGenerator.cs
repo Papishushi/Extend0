@@ -1,7 +1,6 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using System;
 using System.Text;
 
 namespace Extend0.MetadataEntry.Generator
@@ -45,7 +44,7 @@ namespace Extend0.MetadataEntry.Generator
             });
 
             // Capture [assembly: GenerateMetadataEntry(key, value)] usages
-            IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<KeyValuePair<int,int>>> attrPairs =
+            IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<KeyValuePair<int, int>>> attrPairs =
                 CaptureGenerateMetadataEntryAttributes(context);
 
             context.RegisterSourceOutput(
@@ -69,7 +68,7 @@ namespace Extend0.MetadataEntry.Generator
         /// </param>
         private static void RegisterSourceOutputAction(
             SourceProductionContext spc,
-            System.Collections.Immutable.ImmutableArray<KeyValuePair<int,int>> entries,
+            System.Collections.Immutable.ImmutableArray<KeyValuePair<int, int>> entries,
             string generatorVersion)
         {
             var uniq = entries.Distinct().OrderBy(x => x.Key).ThenBy(x => x.Value).ToArray();
@@ -103,7 +102,7 @@ namespace Extend0.MetadataEntry.Generator
         /// An <see cref="IncrementalValueProvider{T}"/> that yields an immutable array of
         /// (keySize, valueSize) pairs to be consumed at source output time.
         /// </returns>
-        private static IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<KeyValuePair<int,int>>> CaptureGenerateMetadataEntryAttributes(
+        private static IncrementalValueProvider<System.Collections.Immutable.ImmutableArray<KeyValuePair<int, int>>> CaptureGenerateMetadataEntryAttributes(
             IncrementalGeneratorInitializationContext context)
         {
             var attrPairs = context.SyntaxProvider
@@ -364,7 +363,7 @@ namespace Extend0.Metadata.CodeGen
         /// </summary>
         /// <param name="uniq">Set of unique (keySize, valueSize) pairs backing the supported variants.</param>
         /// <param name="generatorVersion">Generator assembly version string.</param>
-        private static string EmitMetadataCell(KeyValuePair<int,int>[] uniq, string generatorVersion)
+        private static string EmitMetadataCell(KeyValuePair<int, int>[] uniq, string generatorVersion)
         {
             var arms = BuildMetadataCellSwitchArms(uniq);
 
@@ -621,7 +620,7 @@ namespace Extend0.Metadata.CodeGen
 """;
         }
 
-        private static string BuildMetadataCellSwitchArms(KeyValuePair<int,int>[] uniq)
+        private static string BuildMetadataCellSwitchArms(KeyValuePair<int, int>[] uniq)
         {
             var sb = new StringBuilder();
             foreach (var pair in uniq)
@@ -697,7 +696,7 @@ namespace Extend0.Metadata.CodeGen
         /// <returns>
         /// C# source code that defines the enum and its helpers.
         /// </returns>
-        private static string EmitEnumAndExtensions(KeyValuePair<int,int>[] uniq, string generatorVersion)
+        private static string EmitEnumAndExtensions(KeyValuePair<int, int>[] uniq, string generatorVersion)
         {
             var enumMembers = BuildEnumMembers(uniq);
             var packed = uniq.Select(p => (p.Key << 16) | p.Value).OrderBy(x => x).ToArray();
@@ -822,7 +821,7 @@ namespace Extend0.Metadata.CodeGen
             return enumSource + extSource + "\n";
         }
 
-        private static string BuildEnumMembers(KeyValuePair<int,int>[] uniq)
+        private static string BuildEnumMembers(KeyValuePair<int, int>[] uniq)
         {
             var sb = new StringBuilder();
             foreach (var pair in uniq)
