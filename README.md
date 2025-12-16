@@ -183,6 +183,8 @@ Extend0’s metadata layer provides fixed-size, allocation-free key/value storag
 
 This workflow keeps your on-disk layout deterministic while letting Roslyn generate the unsafe structs needed to interact with the metadata store safely.
 
+> **Concurrency and Access Failures:** MetaDB prevents concurrent writers by opening metadata files with `FileShare.Read`, which blocks other processes from writing to the same file simultaneously. When a second writer attempts to register or open a table that’s already mapped elsewhere, an `IOException` will be thrown. This is expected and must be handled by the caller. Public APIs like `RegisterTable`, `Open`, or any operation that triggers mapping (e.g., `createNow: true`) may surface these exceptions. Consumers should implement retry logic with backoff to wait for exclusive access. If multiple processes need to write to the same file, they should follow an **ephemeral access pattern** — acquire the table, perform the operation, and explicitly call `.Dispose()` on the `MetadataTable` when done. This releases the memory-mapped file and allows other writers to proceed. While disposed tables remain tracked internally, this has no side effects unless registration is done repeatedly with varying schemas or identifiers. In the future, I plan to provide a `CloseTable` method to fully unregister and dispose a table, clearing it from internal indexes for long-lived scenarios with dynamic table lifecycles.
+
 ## MetaDB – Performance notes
 
 This section documents the current micro-benchmarks for `MetaDBManager` and its columnar storage engine.  
