@@ -14,8 +14,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9473.22057</AssemblyVersion>
-		<FileVersion>1.0.9473.22057</FileVersion>
+		<AssemblyVersion>1.0.9473.40769</AssemblyVersion>
+		<FileVersion>1.0.9473.40769</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>

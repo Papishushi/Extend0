@@ -19,7 +19,7 @@ namespace Extend0.Metadata.Storage
     /// row-based auto-growth policies such as <see cref="CapacityPolicy.AutoGrowZeroInit"/>.
     /// </para>
     /// </remarks>
-    internal sealed class InMemoryStore : ICellStore, ITryGrowableStore
+    internal sealed class InMemoryStore : ITryGrowableStore
     {
         private readonly Dictionary<ulong, MetadataCell> _cells;
         private readonly ColumnConfiguration[] _columns;
@@ -195,6 +195,24 @@ namespace Extend0.Metadata.Storage
             }
 
             _rowsPerColumn[column] = minRows;
+            return true;
+        }
+
+        /// <inheritdoc/>
+        public bool TryGetColumnCapacity(uint column, out uint rowCapacity)
+        {
+            // InMemoryStore tracks how many rows have been "materialized" per column.
+            // If a column has never been touched, its effective capacity is 0
+            // (alternatively, this could default to InitialCapacity).
+            if (column >= (uint)_columns.Length)
+            {
+                rowCapacity = 0;
+                return false;
+            }
+
+            // If you want the base capacity to be InitialCapacity even when no rows
+            // have been materialized yet, replace 0u with _columns[(int)column].InitialCapacity.
+            rowCapacity = _rowsPerColumn.TryGetValue(column, out var cap) ? cap : 0u;
             return true;
         }
 

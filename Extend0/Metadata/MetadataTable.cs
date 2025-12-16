@@ -1,6 +1,7 @@
 ﻿using Extend0.Metadata.CodeGen;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
+using System.Runtime.CompilerServices;
 
 namespace Extend0.Metadata
 {
@@ -419,6 +420,162 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
+        /// Computes the logical row count of the table based on non-empty cells,
+        /// instead of the raw capacity configured for each column.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A row is considered <em>logically present</em> if at least one column in that row
+        /// contains data:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><description>
+        ///   For <c>value-only</c> columns (<c>KeySize == 0</c>), the row is non-empty if
+        ///   any byte in the VALUE segment is non-zero.
+        ///   </description></item>
+        ///   <item><description>
+        ///   For <c>key/value</c> columns (<c>KeySize &gt; 0</c>), the row is non-empty if
+        ///   the stored key is not empty.
+        ///   </description></item>
+        /// </list>
+        /// <para>
+        /// The logical row count is defined as <c>lastNonEmptyRowIndex + 1</c>, where
+        /// <c>lastNonEmptyRowIndex</c> is the highest zero-based row index that has data
+        /// in at least one column. If all rows are empty, the method returns 0.
+        /// </para>
+        /// <para>
+        /// This method scans up to the maximum configured capacity among all columns.
+        /// It is intended for diagnostics and metadata inspection rather than hot paths.
+        /// </para>
+        /// </remarks>
+        /// <returns>
+        /// The number of logical rows that contain data in at least one column.
+        /// </returns>
+        public unsafe int GetLogicalRowCount()
+        {
+            if (_columns.Count == 0)
+                return 0;
+
+            int colCount = _columns.Count;
+            int maxCapacity = (int)_columns.Max(c => (long)c.InitialCapacity);
+            int logical = 0;
+
+            for (int r = 0; r < maxCapacity; r++)
+            {
+                bool anyNonEmpty = RowHasAnyData(colCount, r);
+                if (anyNonEmpty)
+                    logical = r + 1;  // last non-empty row (0-based) + 1
+            }
+
+            return logical;
+        }
+
+        /// <summary>
+        /// Determines whether the specified row has any non-empty cell
+        /// across all columns of the table.
+        /// </summary>
+        /// <param name="colCount">
+        /// Total number of columns defined in the table.
+        /// </param>
+        /// <param name="r">
+        /// Zero-based row index to inspect.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if at least one column in the row contains data;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// The notion of “non-empty” depends on the column layout:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><description>
+        ///     For value-only columns:
+        ///     <list type="number">
+        ///       <item><description>
+        ///         If valueSize is 1, 2, 4 or 8, the VALUE segment is interpreted as a
+        ///         primitive-like payload (bool/char/int/float/double/long, etc.) and the
+        ///         row is non-empty when the raw value != 0.
+        ///       </description></item>
+        ///       <item><description>
+        ///         For larger payloads, the row is non-empty when any byte in the VALUE
+        ///         segment is non-zero.
+        ///       </description></item>
+        ///     </list>
+        ///   </description></item>
+        ///   <item><description>
+        ///   For <c>key/value</c> columns (<c>KeySize &gt; 0</c>), the row is considered
+        ///   non-empty if the stored key is not empty.
+        ///   </description></item>
+        /// </list>
+        /// <para>
+        /// This method is used as a building block for computing the logical row count
+        /// of the table and is not intended for ultra hot paths.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private unsafe bool RowHasAnyData(int colCount, int r)
+        {
+            for (int c = 0; c < colCount; c++)
+            {
+                if (!_store.TryGetCell((uint)c, (uint)r, out var cell))
+                    continue;
+
+                var meta = _columns[c];
+                int keySize = meta.Size.GetKeySize();
+                int valueSize = meta.Size.GetValueSize();
+
+                if (keySize == 0)
+                {
+                    // VALUE-ONLY: interpret common primitive sizes directly, fallback to byte scan.
+                    byte* valuePtr = cell.GetValuePointer();
+
+                    switch (valueSize)
+                    {
+                        case 1:
+                            if (*(byte*)valuePtr != 0)
+                                return true;
+                            break;
+
+                        case 2:
+                            if (*(ushort*)valuePtr != 0)
+                                return true;
+                            break;
+
+                        case 4:
+                            if (*(uint*)valuePtr != 0)
+                                return true;
+                            break;
+
+                        case 8:
+                            if (*(ulong*)valuePtr != 0)
+                                return true;
+                            break;
+
+                        default:
+                            {
+                                var raw = new ReadOnlySpan<byte>(valuePtr, valueSize);
+                                foreach (var b in raw)
+                                {
+                                    if (b != 0)
+                                        return true;
+                                }
+                                break;
+                            }
+                    }
+                }
+                else
+                {
+                    // KEY-VALUE: non-empty if key is non-empty
+                    if (cell.TryGetKey(out ReadOnlySpan<byte> k) && k.Length != 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Returns the logical names of all columns in this table.
         /// </summary>
         /// <returns>
@@ -476,7 +633,7 @@ namespace Extend0.Metadata
             int colCount = _columns.Count;
             if (colCount == 0) return "MetadataTable { Columns=0 }\n";
 
-            int totalRows = (int)_columns.Min(c => (long)c.InitialCapacity);
+            int totalRows = _columns.Min(c => GetLogicalRowCount());
             int rowsToShow = Math.Clamp(maxRows, 0, totalRows);
 
             const int MAX_COL_WIDTH = 48;
@@ -524,7 +681,7 @@ namespace Extend0.Metadata
         /// Each cell is retrieved from the underlying store and rendered using <see cref="Preview(ReadOnlySpan{byte}, int)"/>.
         /// Missing or unreadable cells are rendered as empty strings.
         /// </remarks>
-        private void WriteRows(System.Text.StringBuilder sb, int colCount, int rowsToShow, int[] widths)
+        private unsafe void WriteRows(System.Text.StringBuilder sb, int colCount, int rowsToShow, int[] widths)
         {
             for (int r = 0; r < rowsToShow; r++)
             {
@@ -532,13 +689,43 @@ namespace Extend0.Metadata
                 for (int c = 0; c < colCount; c++)
                 {
                     string cellText = "";
-                    if (_store.TryGetCell((uint)c, (uint)r, out var cell) &&
-                        cell.TryGetKey(out ReadOnlySpan<byte> k) &&
-                        cell.TryGetValue(k, out ReadOnlySpan<byte> v))
+
+                    if (_store.TryGetCell((uint)c, (uint)r, out var cell))
                     {
-                        // Use final column width for preview
-                        cellText = Preview(v, widths[c + 1]);
+                        var meta = _columns[c];
+                        int keySize = meta.Size.GetKeySize();
+                        int valueSize = meta.Size.GetValueSize();
+
+                        ReadOnlySpan<byte> v = default;
+
+                        if (keySize == 0)
+                        {
+                            // VALUE-ONLY: leer directamente el segmento de valor
+                            var raw = new ReadOnlySpan<byte>(cell.GetValuePointer(), valueSize);
+
+                            bool allZero = true;
+                            foreach (var b in raw)
+                            {
+                                if (b != 0) { allZero = false; break; }
+                            }
+
+                            if (!allZero)
+                                v = raw;
+                        }
+                        else if (cell.TryGetKey(out ReadOnlySpan<byte> k) &&
+                                 cell.TryGetValue(k, out ReadOnlySpan<byte> vv))
+                        {
+                            // KEY-VALUE: camino clásico
+                            v = vv;
+                        }
+
+                        if (!v.IsEmpty)
+                        {
+                            // Usar ancho final de columna para el preview
+                            cellText = Preview(v, widths[c + 1]);
+                        }
                     }
+
                     sb.Append("| ").Append(Pad(cellText, widths[c + 1])).Append(' ');
                 }
                 sb.Append("|\n");
@@ -559,15 +746,43 @@ namespace Extend0.Metadata
         /// Uses <see cref="Preview(ReadOnlySpan{byte}, int)"/> with <paramref name="MAX_COL_WIDTH"/>
         /// to estimate a reasonable width for each column, capped at the specified maximum.
         /// </remarks>
-        private void ObtainWidths(int colCount, int rowsToShow, int MAX_COL_WIDTH, int[] widths)
+        private unsafe void ObtainWidths(int colCount, int rowsToShow, int MAX_COL_WIDTH, int[] widths)
         {
             for (int r = 0; r < rowsToShow; r++)
             {
                 for (int c = 0; c < colCount; c++)
                 {
-                    if (_store.TryGetCell((uint)c, (uint)r, out var cell) &&
-                        cell.TryGetKey(out ReadOnlySpan<byte> k) &&
-                        cell.TryGetValue(k, out ReadOnlySpan<byte> v))
+                    if (!_store.TryGetCell((uint)c, (uint)r, out var cell))
+                        continue;
+
+                    var meta = _columns[c];
+                    int keySize = meta.Size.GetKeySize();
+                    int valueSize = meta.Size.GetValueSize();
+
+                    ReadOnlySpan<byte> v = default;
+
+                    if (keySize == 0)
+                    {
+                        // VALUE-ONLY: leer directamente el segmento de valor
+                        var raw = new ReadOnlySpan<byte>(cell.GetValuePointer(), valueSize);
+
+                        bool allZero = true;
+                        foreach (var b in raw)
+                        {
+                            if (b != 0) { allZero = false; break; }
+                        }
+
+                        if (!allZero)
+                            v = raw;
+                    }
+                    else if (cell.TryGetKey(out ReadOnlySpan<byte> k) &&
+                             cell.TryGetValue(k, out ReadOnlySpan<byte> vv))
+                    {
+                        // KEY-VALUE
+                        v = vv;
+                    }
+
+                    if (!v.IsEmpty)
                     {
                         var prev = Preview(v, MAX_COL_WIDTH);
                         widths[c + 1] = Math.Min(MAX_COL_WIDTH, Math.Max(widths[c + 1], prev.Length));
@@ -783,6 +998,25 @@ namespace Extend0.Metadata
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Tries to retrieve the row capacity for the given column from the underlying store,
+        /// when the store supports capacity reporting (e.g. <see cref="ITryGrowableStore"/>).
+        /// </summary>
+        /// <param name="column">Zero-based column index.</param>
+        /// <param name="rowCapacity">When true, receives the current row capacity.</param>
+        /// <returns>
+        /// <see langword="true"/> if capacity is available and was returned; otherwise <see langword="false"/>.
+        /// </returns>
+        /// <exception cref="ObjectDisposedException">Propagated if the underlying store is disposed.</exception>
+        public bool TryGetColumnCapacity(uint column, out uint rowCapacity)
+        {
+            if (_store is ITryGrowableStore growable)
+                return growable.TryGetColumnCapacity(column, out rowCapacity);
+
+            rowCapacity = 0;
+            return false;
         }
 
         /// <summary>

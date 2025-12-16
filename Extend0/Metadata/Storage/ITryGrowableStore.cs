@@ -18,7 +18,7 @@ namespace Extend0.Metadata.Storage
     /// newly added value regions.
     /// </para>
     /// </remarks>
-    internal interface ITryGrowableStore
+    internal interface ITryGrowableStore : ICellStore
     {
         /// <summary>
         /// Attempts to grow the specified column so that it can hold at least
@@ -42,5 +42,37 @@ namespace Extend0.Metadata.Storage
         /// otherwise, <see langword="false"/>.
         /// </returns>
         bool TryGrowColumnTo(uint column, uint minRows, in ColumnConfiguration meta, bool zeroInit);
+
+        /// <summary>
+        /// Attempts to retrieve the current physical row capacity of the specified column.
+        /// </summary>
+        /// <param name="column">
+        /// Zero-based column index whose capacity is being queried.
+        /// </param>
+        /// <param name="rowCapacity">
+        /// When this method returns <see langword="true"/>, contains the number of rows
+        /// physically allocated for the column (i.e. the maximum valid row index is
+        /// <c>rowCapacity - 1</c>). When it returns <see langword="false"/>, the value is undefined.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the column index is valid and the capacity could be
+        /// determined; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// The returned capacity represents the <em>physical</em> size of the column as
+        /// allocated by the underlying store, not the logical row count of the table.
+        /// </para>
+        /// <para>
+        /// This value is stable until the column is grown via
+        /// <see cref="TryGrowColumnTo(uint, uint, in ColumnConfiguration, bool)"/>.
+        /// </para>
+        /// <para>
+        /// For stores that do not support dynamic growth, this method typically reports
+        /// the initial fixed capacity configured at creation time.
+        /// </para>
+        /// </remarks>
+        bool TryGetColumnCapacity(uint column, out uint rowCapacity);
+
     }
 }

@@ -211,10 +211,10 @@ namespace Extend0.Metadata.Diagnostics
             /// <summary>
             /// Gets the key–value pair at the current position of the enumerator.
             /// </summary>
-            public KeyValuePair<string, object?> Current => State[_i];
+            public readonly KeyValuePair<string, object?> Current => State[_i];
 
             /// <inheritdoc />
-            object IEnumerator.Current => Current;
+            readonly object IEnumerator.Current => Current;
 
             /// <inheritdoc />
             public bool MoveNext()

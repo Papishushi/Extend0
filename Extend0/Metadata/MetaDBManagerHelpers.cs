@@ -29,6 +29,7 @@ namespace Extend0.Metadata
     /// </para>
     /// </remarks>
     [SuppressMessage("Reliability", "CA2014", Justification = "SO is controlled and the stack allocations in loops are limited.")]
+    [SuppressMessage("CodeQuality", "IDE0079", Justification = "False positive.")]
     internal static class MetaDBManagerHelpers
     {
         /// <summary>
@@ -54,6 +55,55 @@ namespace Extend0.Metadata
 
             if (!MetadataTableRefVec.TryAdd(buf, in tref, buf.Length))
                 throw new InvalidOperationException("Refs vector is full; increase VALUE size or add an overflow strategy.");
+        }
+
+        /// <summary>
+        /// Attempts to determine whether the parent's refs vector already contains the specified reference.
+        /// </summary>
+        /// <param name="table">The parent <see cref="MetadataTable"/> that owns the refs column.</param>
+        /// <param name="refsCol">Zero-based index of the refs column inside <paramref name="table"/>.</param>
+        /// <param name="parentRow">Zero-based row index in <paramref name="table"/> whose refs vector is inspected.</param>
+        /// <param name="tref">
+        /// The reference to search for. A match is performed against the triple
+        /// (<see cref="MetadataTableRef.TableId"/>, <see cref="MetadataTableRef.Column"/>, <see cref="MetadataTableRef.Row"/>).
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the refs vector is initialized and an entry matching <paramref name="tref"/> is found;
+        /// otherwise <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a hot-path helper used to avoid inserting duplicate references.
+        /// It reads the VALUE buffer of the cell (<paramref name="refsCol"/>, <paramref name="parentRow"/>) and performs a
+        /// linear search using <see cref="MetadataTableRefVec.Find"/>.
+        /// </para>
+        /// <para>
+        /// If the refs vector is not initialized (see <see cref="MetadataTableRefVec.IsInitialized(ReadOnlySpan{byte})"/>),
+        /// the method returns <see langword="false"/> without allocating or throwing. Callers are expected to have ensured
+        /// initialization via an <c>EnsureRefVec</c>-style routine when required.
+        /// </para>
+        /// <para>
+        /// This method uses unsafe pointer access to avoid copying. The <see cref="MetadataTable"/> must remain alive and
+        /// the underlying cell buffer must not be reallocated while the returned span is in use.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="refsCol"/> or <paramref name="parentRow"/> is outside the table bounds.
+        /// </exception>
+        /// <exception cref="ObjectDisposedException">
+        /// Thrown if <paramref name="table"/> has been disposed.
+        /// </exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static unsafe bool TryHasRef(MetadataTable table, uint refsCol, uint parentRow, in MetadataTableRef tref)
+        {
+            var cell = table.GetOrCreateCell(refsCol, parentRow);
+            var buf = new ReadOnlySpan<byte>(cell.GetValuePointer(), cell.ValueSize);
+
+            // If not initialized, there are no refs (EnsureRefVec initializes it beforehand).
+            if (!MetadataTableRefVec.IsInitialized(buf))
+                return false;
+
+            return MetadataTableRefVec.Find(buf, tref.TableId, tref.Column, tref.Row) >= 0;
         }
 
         /// <summary>
@@ -854,6 +904,499 @@ namespace Extend0.Metadata
         {
             if (batch <= 0) throw new InvalidOperationException("Batch size must be a strictly positive number.");
             return (batch + 3) & ~3;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void EnsureDirForFile(string filePath)
+        {
+            var dir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+        }
+
+        /// <summary>
+        /// Attempts to delete a file at <paramref name="path"/>, retrying a small number of times to tolerate transient I/O and locking conditions.
+        /// </summary>
+        /// <param name="path">File path to delete.</param>
+        /// <param name="attempts">Maximum number of delete attempts. Each retry uses a small increasing backoff.</param>
+        /// <returns><see langword="true"/> if the file was deleted or did not exist; otherwise <see langword="false"/>.</returns>
+        /// <remarks>
+        /// <para>This helper treats "file missing" as success.</para>
+        /// <para>It retries only for common transient cases: <see cref="IOException"/> and <see cref="UnauthorizedAccessException"/> (the latter is often returned when a file is temporarily read-only or locked by another process).</para>
+        /// <para>After exhausting retries, it returns <c>!File.Exists(path)</c> to handle races where the file was deleted by another actor between attempts.</para>
+        /// </remarks>
+        internal static async Task<bool> TryDeleteWithRetries(string path, int attempts = 8)
+        {
+            for (int i = 0; i < attempts; i++)
+            {
+                try { File.Delete(path); return true; }
+                catch (FileNotFoundException) { return true; }
+                catch (DirectoryNotFoundException) { return true; }
+                catch (IOException) when (i < attempts - 1) { await Task.Delay(10 * (i + 1)); }
+                catch (UnauthorizedAccessException) when (i < attempts - 1) { await Task.Delay(10 * (i + 1)); }
+            }
+
+            // Last try
+            try { File.Delete(path); return true; }
+            catch (FileNotFoundException) { return true; }
+            catch (DirectoryNotFoundException) { return true; }
+            catch { return !File.Exists(path); }
+        }
+
+        /// <summary>
+        /// Attempts to rename an existing file to a unique "move-aside" name to enable eventual deletion.
+        /// </summary>
+        /// <param name="path">Original file path.</param>
+        /// <returns>
+        /// The moved file path when the file existed and was moved; otherwise <see langword="null"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// The moved name is generated by appending <c>.deleting.&lt;guid&gt;</c> to the original path.
+        /// </para>
+        /// <para>
+        /// This method does not catch exceptions: callers typically wrap it to decide whether to log,
+        /// retry, or enqueue cleanup when the move fails (e.g., due to OS sharing locks).
+        /// </para>
+        /// </remarks>
+        internal static string? TryMoveAside(string path)
+        {
+            if (!File.Exists(path)) return null;
+            var moved = path + ".deleting." + Guid.NewGuid().ToString("N");
+            File.Move(path, moved);
+            return moved;
+        }
+
+        /// <summary>
+        /// Computes the maximum deletion work to attempt in a single cycle, scaling with backlog size.
+        /// </summary>
+        /// <param name="backlog">Current pending deletion count.</param>
+        /// <param name="baseDeletes">Baseline maximum deletions per cycle.</param>
+        /// <param name="baseAttempts">Baseline maximum attempts per cycle.</param>
+        /// <param name="maxDeletesPerCycle">Result: max successful deletions before stopping the cycle.</param>
+        /// <param name="maxAttemptsPerCycle">Result: max delete attempts before stopping the cycle.</param>
+        /// <remarks>
+        /// Scaling ensures that when the queue is large, the worker can apply more pressure,
+        /// but remains bounded to avoid starving the process.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void ComputeCycleBudget(int backlog, int baseDeletes, int baseAttempts, out int maxDeletesPerCycle, out int maxAttemptsPerCycle)
+        {
+            maxDeletesPerCycle = baseDeletes;
+            maxAttemptsPerCycle = baseAttempts;
+
+            // Simple tiering. Adjust thresholds freely.
+            if (backlog >= 10_000) { maxDeletesPerCycle *= 8; maxAttemptsPerCycle *= 8; }
+            else if (backlog >= 1_000) { maxDeletesPerCycle *= 4; maxAttemptsPerCycle *= 4; }
+            else if (backlog >= 256) { maxDeletesPerCycle *= 2; maxAttemptsPerCycle *= 2; }
+        }
+
+        /// <summary>
+        /// Estimates the number of new items enqueued while a deletion cycle was running.
+        /// </summary>
+        /// <param name="backlogBefore">Backlog size at cycle start.</param>
+        /// <param name="backlogAfter">Backlog size at cycle end.</param>
+        /// <param name="deletedThisCycle">Number of deletions that succeeded during the cycle.</param>
+        /// <returns>Estimated new enqueued items (never negative).</returns>
+        /// <remarks>
+        /// Based on:
+        /// <code>
+        /// backlogAfter ≈ backlogBefore - deleted + arrivals  => arrivals ≈ backlogAfter - (backlogBefore - deleted)
+        /// </code>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static int EstimateArrivals(int backlogBefore, int backlogAfter, int deletedThisCycle)
+        {
+            int arrivals = backlogAfter - (backlogBefore - deletedThisCycle);
+            return arrivals > 0 ? arrivals : 0;
+        }
+
+        /// <summary>
+        /// Determines whether the worker is under “storm” conditions where compaction should be avoided.
+        /// </summary>
+        /// <param name="backlogBefore">Backlog size at cycle start.</param>
+        /// <param name="backlogAfter">Backlog size at cycle end.</param>
+        /// <param name="deletedThisCycle">Successful deletions in the cycle.</param>
+        /// <param name="arrivalsThisCycle">Estimated new enqueued items during the cycle.</param>
+        /// <returns><see langword="true"/> if storm conditions are detected; otherwise <see langword="false"/>.</returns>
+        /// <remarks>
+        /// Storm conditions typically mean:
+        /// <list type="bullet">
+        ///   <item><description>Backlog is not shrinking (trend ≥ 0)</description></item>
+        ///   <item><description>Arrivals keep up with or exceed deletes</description></item>
+        ///   <item><description>Backlog is large enough that compaction churn is undesirable</description></item>
+        /// </list>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static bool IsStorm(int backlogBefore, int backlogAfter, int deletedThisCycle, int arrivalsThisCycle)
+        {
+            int trend = backlogAfter - backlogBefore;
+            if (trend >= 0) return true;
+            if (arrivalsThisCycle >= deletedThisCycle) return true;
+
+            // Conservative: treat big backlogs as storm by default.
+            if (backlogAfter >= 1_000) return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Updates the compaction cooldown based on storm vs drain mode to throttle disk rewrites.
+        /// </summary>
+        /// <param name="storm">Whether storm conditions are active.</param>
+        /// <param name="stormScore">
+        /// Storm persistence score used to avoid jitter: increases with sustained storm, decreases when draining.
+        /// </param>
+        /// <param name="compactCooldownMs">Current cooldown in milliseconds (updated in place).</param>
+        /// <param name="minCooldownMs">Minimum allowed cooldown.</param>
+        /// <param name="maxCooldownMs">Maximum allowed cooldown.</param>
+        /// <remarks>
+        /// In storm mode the cooldown grows quickly (fewer compactions).
+        /// In drain mode the cooldown shrinks (more compactions) to compact the append-only log.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void UpdateCompactionCooldown(bool storm, ref int stormScore, ref int compactCooldownMs, int minCooldownMs, int maxCooldownMs)
+        {
+            if (storm)
+            {
+                stormScore = Math.Min(10, stormScore + 1);
+
+                int mult = 2 + (stormScore / 3); // ~2..5
+                long next = (long)compactCooldownMs * mult;
+                compactCooldownMs = (int)Math.Min(maxCooldownMs, next);
+            }
+            else
+            {
+                stormScore = Math.Max(0, stormScore - 2);
+                compactCooldownMs = Math.Max(minCooldownMs, compactCooldownMs / 2);
+            }
+        }
+
+        /// <summary>
+        /// Computes the delay before the next cycle based on progress and contention signals.
+        /// </summary>
+        /// <param name="stats">Cycle stats.</param>
+        /// <param name="busyDelayMs">Delay used when work is being done.</param>
+        /// <param name="idleDelayMs">Delay used when no progress is made.</param>
+        /// <returns>Delay in milliseconds.</returns>
+        /// <remarks>
+        /// If no deletions succeeded and success rate is very low, the worker backs off more aggressively
+        /// to avoid burning CPU while files remain locked.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static int ComputeNextDelayMs(in MetaDBManager.DeleteCycleStats stats, int busyDelayMs, int idleDelayMs)
+        {
+            if (stats.Deleted > 0)
+                return busyDelayMs;
+
+            // If essentially everything is locked, don't spin.
+            if (stats.SuccessRate < 0.05)
+                return idleDelayMs;
+
+            return idleDelayMs / 2;
+        }
+
+        /// <summary>
+        /// Awaits a delay while tolerating cancellation without throwing out of the worker loop.
+        /// </summary>
+        /// <param name="ms">Delay in milliseconds.</param>
+        /// <param name="ct">Cancellation token.</param>
+        internal static async Task DelaySafe(int ms, CancellationToken ct)
+        {
+            try { await Task.Delay(ms, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+
+        /// <summary>
+        /// Ensures that the specified <paramref name="column"/> in <paramref name="table"/> can hold at least
+        /// <paramref name="neededRows"/> rows, applying the requested <paramref name="policy"/>.
+        /// </summary>
+        /// <param name="table">Target metadata table.</param>
+        /// <param name="column">Zero-based column index.</param>
+        /// <param name="neededRows">Minimum required row count (capacity) for the column.</param>
+        /// <param name="policy">
+        /// Capacity policy to apply:
+        /// <list type="bullet">
+        ///   <item>
+        ///     <description>
+        ///     <see cref="CapacityPolicy.Throw"/> – do not grow; fail if the current capacity is insufficient.
+        ///     </description>
+        ///   </item>
+        ///   <item>
+        ///     <description>
+        ///     <see cref="CapacityPolicy.AutoGrowZeroInit"/> – attempt to grow the column to
+        ///     <paramref name="neededRows"/> (zero-initializing new rows when supported) and verify.
+        ///     </description>
+        ///   </item>
+        /// </list>
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// This method prefers a deterministic capacity check when the table/store can report capacity via
+        /// <c>TryGetColumnCapacity</c>. If that information is not available, it falls back to “probe” semantics:
+        /// touching the last required row using <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/> to infer
+        /// whether the requested index is within bounds.
+        /// </para>
+        /// <para>
+        /// When <paramref name="policy"/> is <see cref="CapacityPolicy.Throw"/>, the method does not attempt to grow
+        /// and will rethrow range/disposal-related exceptions originating from the table/store.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="column"/> is outside the table's column range.
+        /// </exception>
+        /// <exception cref="ObjectDisposedException">
+        /// Propagated if the underlying table/store has been disposed and cannot serve the request.
+        /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the capacity is insufficient under <see cref="CapacityPolicy.Throw"/>, or when growth is requested
+        /// but fails, or when growth reports success but the resulting capacity is still insufficient.
+        /// </exception>
+        private static void EnsureRowCapacity(MetadataTable table, uint column, uint neededRows, CapacityPolicy policy)
+        {
+            if (neededRows == 0) return;
+
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(column, (uint)table.ColumnCount);
+
+            // Deterministic check when available
+            if (table.TryGetColumnCapacity(column, out var cap))
+            {
+                if (cap >= neededRows) return;
+
+                if (policy == CapacityPolicy.Throw)
+                    throw new InvalidOperationException(
+                        $"Column {column}: insufficient row capacity ({cap}) for {neededRows} rows.");
+
+                if (!table.TryGrowColumnTo(column, neededRows, zeroInit: true))
+                    throw new InvalidOperationException(
+                        $"GrowColumnTo could not grow column {column} to {neededRows} rows.");
+
+                if (!table.TryGetColumnCapacity(column, out cap) || cap < neededRows)
+                    throw new InvalidOperationException(
+                        $"GrowColumnTo reported success but capacity is still {cap} < {neededRows} (col={column}, table={table.Spec.Name}).");
+
+                return;
+            }
+
+            // No capacity info: fallback to probe semantics
+            if (policy == CapacityPolicy.Throw)
+            {
+                table.GetOrCreateCell(column, neededRows - 1); // rethrows exact
+                return;
+            }
+
+            if (!table.TryGrowColumnTo(column, neededRows, zeroInit: true))
+                throw new InvalidOperationException(
+                    $"GrowColumnTo could not grow column {column} to {neededRows} rows.");
+
+            table.GetOrCreateCell(column, neededRows - 1);
+        }
+
+        /// <summary>
+        /// Core implementation for filling a blittable column using a per-row factory,
+        /// with support for column-block fast paths, batching and per-cell fallback.
+        /// </summary>
+        /// <typeparam name="T">Unmanaged value type written into each row.</typeparam>
+        /// <param name="table">Target table.</param>
+        /// <param name="column">Zero-based column index to fill.</param>
+        /// <param name="rows">Number of rows to fill (starting at 0).</param>
+        /// <param name="factory">Factory that produces a value for a given row index.</param>
+        /// <param name="policy">
+        /// Capacity policy controlling how to react when the current row capacity is insufficient.
+        /// </param>
+        /// <param name="batchSize">
+        /// Optional batch size override. When not provided, a heuristic based on VALUE size is used.
+        /// </param>
+        /// <remarks>
+        /// The method tries, in order:
+        /// <list type="number">
+        ///   <item><description>
+        ///   A contiguous <see cref="ColumnBlock"/> fast path where VALUEs are back-to-back
+        ///   and <typeparamref name="T"/> matches the VALUE size.
+        ///   </description></item>
+        ///   <item><description>
+        ///   A strided write fast path using pointer arithmetic.
+        ///   </description></item>
+        ///   <item><description>
+        ///   A per-cell fallback using <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>.
+        ///   </description></item>
+        /// </list>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        internal static void FillColumn<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE) where T : unmanaged
+        {
+            if (rows == 0) return;
+
+            MetaDBManagerHelpers.EnsureRowCapacity(table, column, rows, policy);
+
+            int tSize = Unsafe.SizeOf<T>();
+
+            // Hard cap for stackalloc usage to avoid SO (tune: 8–32 KB)
+            const int MaxStackBytes = 16 * 1024;
+
+            // ── FAST PATH: via column block (MMF / flat buffer) ────────────────────
+            if (table.TryGetColumnBlock(column, out var blk))
+            {
+                // Variable-size values cannot use the block fast path; fall back.
+                if (blk.ValueSize == 0)
+                {
+                    MetaDBManagerHelpers.PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
+                    return;
+                }
+
+                if (tSize > blk.ValueSize)
+                    throw new InvalidOperationException(
+                        $"[{table}] col={column}: VALUE {blk.ValueSize} < sizeof({typeof(T).Name})={tSize}");
+
+                if (MetaDBManagerHelpers.TryContiguousFill(rows, factory, batchSize, tSize, MaxStackBytes, blk)) return;
+                MetaDBManagerHelpers.StridedFill(rows, factory, batchSize, tSize, MaxStackBytes, blk);
+                return;
+            }
+
+            // ── SLOW PATH: per-cell (compat) — still batch the factory ─────────────
+            MetaDBManagerHelpers.PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
+        }
+
+        /// <summary>
+        /// Core implementation for filling a column using a raw writer callback that
+        /// receives a pointer to the VALUE buffer per row.
+        /// </summary>
+        /// <param name="table">Target table whose column will be written.</param>
+        /// <param name="column">Zero-based column index to fill.</param>
+        /// <param name="rows">Number of logical rows to fill (starting at 0).</param>
+        /// <param name="writer">
+        /// Callback invoked once per row with:
+        /// <list type="bullet">
+        ///   <item><description>The zero-based row index.</description></item>
+        ///   <item><description>A pointer to the row VALUE buffer.</description></item>
+        ///   <item><description>The VALUE buffer size in bytes.</description></item>
+        /// </list>
+        /// The callback is responsible for writing exactly the intended payload
+        /// into the provided buffer.
+        /// </param>
+        /// <param name="policy">
+        /// Capacity policy controlling how to react when the current row capacity
+        /// is insufficient (e.g. <see cref="CapacityPolicy.Throw"/> or
+        /// <see cref="CapacityPolicy.AutoGrowZeroInit"/>).
+        /// </param>
+        /// <param name="batchSize">
+        /// Optional batch size for the column-block fast path. When a
+        /// <see cref="ColumnBlock"/> is not available, it is only used to chunk
+        /// the per-cell loop.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// When a fixed-size <see cref="ColumnBlock"/> is available for the target
+        /// column, the method uses a strided pointer-based loop over the underlying
+        /// memory-mapped buffer to minimize per-row overhead.
+        /// </para>
+        /// <para>
+        /// If no suitable column block exists (or the VALUE size is variable),
+        /// the method falls back to per-cell access using
+        /// <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        internal static void FillColumn(MetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
+        {
+            if (rows == 0) return;
+
+            MetaDBManagerHelpers.EnsureRowCapacity(table, column, rows, policy);
+
+            // ── FAST PATH: via column block (MMF / flat buffer) ────────────────────
+            if (MetaDBManagerHelpers.TryContiguousFillRaw(table, column, rows, writer, batchSize)) return;
+            MetaDBManagerHelpers.PerCellFillRaw(table, column, rows, writer, batchSize);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // COPY
+        // ─────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Core implementation that copies VALUE payloads row-by-row from a source column
+        /// to a destination column, possibly across different tables.
+        /// </summary>
+        /// <param name="src">Source table.</param>
+        /// <param name="srcCol">Source column index.</param>
+        /// <param name="dst">Destination table.</param>
+        /// <param name="dstCol">Destination column index.</param>
+        /// <param name="rows">Number of rows to copy (starting at 0).</param>
+        /// <param name="dstPolicy">
+        /// Capacity policy for the destination column.
+        /// </param>
+        /// <param name="batchSize">
+        /// Batch size for the block-based fast paths. Used to chunk strided copies.
+        /// </param>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when VALUE sizes differ between source and destination, when source rows
+        /// are missing, or when destination capacity cannot be ensured under the selected policy.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// Fast paths use <see cref="ColumnBlock"/>s for both source and destination:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><description>
+        ///   Contiguous→contiguous copy (single bulk <see cref="Buffer.MemoryCopy"/>).
+        ///   </description></item>
+        ///   <item><description>
+        ///   Strided copy specialized for VALUE sizes of 64, 128 or 256 bytes.
+        ///   </description></item>
+        ///   <item><description>
+        ///   A generic strided copy for other VALUE sizes.
+        ///   </description></item>
+        /// </list>
+        /// If no column blocks are available, the method falls back to per-cell copying.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        internal static void CopyColumn(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, CapacityPolicy dstPolicy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
+        {
+            MetaDBManagerHelpers.EnsureRowCapacity(dst, dstCol, rows, dstPolicy);
+
+            bool done = MetaDBManagerHelpers.PerBlockStridedCopy(src, srcCol, dst, dstCol, rows, batchSize);
+            if (done) return;
+
+            // ===== Fallback: API por celda =====
+            MetaDBManagerHelpers.PerCellCopy(src, srcCol, dst, dstCol, rows);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // REFS (parent → child links)
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Ensures the ref vector for (<paramref name="refsCol"/>, <paramref name="parentRow"/>) exists and is ready.
+        /// Returns <c>true</c> if it performed first-time initialization on this call.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if VALUE is too small to hold at least one entry (needs at least
+        /// <c>HeaderSize + EntrySize</c> bytes), or if growth is required but disallowed/misconfigured.
+        /// </exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static unsafe bool EnsureRefVec(MetadataTable table, uint refsCol, uint parentRow, CapacityPolicy policy)
+        {
+            // 1) Ensure row capacity (may grow)
+            MetaDBManagerHelpers.EnsureRowCapacity(table, refsCol, parentRow + 1, policy);
+
+            // 2) Get VALUE buffer
+            var cell = table.GetOrCreateCell(refsCol, parentRow);
+            int valueSize = cell.ValueSize;
+            var buf = new Span<byte>(cell.GetValuePointer(), valueSize);
+
+            // 3) Validate minimum size for 1 entry
+            int minBytes = MetadataTableRefVec.HeaderSize + MetadataTableRefVec.EntrySize;
+            if (valueSize < minBytes)
+                throw new InvalidOperationException(
+                    $"REFS: cell VALUE={valueSize} is insufficient; needs ≥ {minBytes} " +
+                    $"({MetadataTableRefVec.HeaderSize}-byte header + {MetadataTableRefVec.EntrySize}-byte entry).");
+
+            // 4) Initialize once (distinguish 'fresh' from 'empty but inited')
+            if (!MetadataTableRefVec.IsInitialized(buf))
+            {
+                MetadataTableRefVec.Init(buf);
+                return true; // did init just now
+            }
+
+            return false; // already initialized (maybe empty)
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace Extend0.Metadata.Diagnostics
 {
@@ -29,8 +30,20 @@ namespace Extend0.Metadata.Diagnostics
     /// a <c>RunFail</c> event and marks the associated activity as error.
     /// </para>
     /// </remarks>
-    public struct OpScope : IDisposable, IEquatable<OpScope>
+    public sealed class OpScope : IDisposable
     {
+        /// <summary>
+        /// The name of this library for use in logging and tracing.
+        /// </summary>
+        public const string LIBRARY_NAME = "Extend0.MetaDB";
+        public static string LibraryVersion => s_LibraryVersion;
+        private static readonly string s_LibraryVersion =
+            typeof(OpScope).Assembly
+                .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                is object[] { Length: > 0 } attrs
+                    ? ((System.Reflection.AssemblyInformationalVersionAttribute)attrs[0]).InformationalVersion
+                    : (typeof(OpScope).Assembly.GetName().Version?.ToString() ?? "unknown");
+
         private ILogger? _log;
         private string? _name;
         private IDisposable? _scope;
@@ -112,14 +125,15 @@ namespace Extend0.Metadata.Diagnostics
         /// <param name="activityKind">Kind of the activity (internal, server, client, etc.).</param>
         private void ConfigureOpenTelemetry(string name, object? state, ActivitySource? activitySource, ActivityKind activityKind)
         {
+            const string dbSystemTag = "db.system";
+            const string dbOperationTag = "db.operation";
+
             // Activity opcional (OpenTelemetry)
             var src = activitySource ?? MetaDBManager.ActivitySrc;
             _activity = src.StartActivity(name, activityKind);
-            if (state is not null)
-            {
-                _activity?.SetTag("op", name);
-                _activity?.SetTag("state", state);
-            }
+            if (_activity is null) return;
+            _activity.SetTag(dbSystemTag, "metadb");
+            _activity.SetTag(dbOperationTag, name);
         }
 
         /// <summary>
@@ -139,13 +153,14 @@ namespace Extend0.Metadata.Diagnostics
         /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public readonly void Fail(Exception ex)
+        public void Fail(Exception ex)
         {
             if (_disposed) return;
             if (_log is null) return;
             var ms = _sw?.Elapsed.TotalMilliseconds ?? 0d;
             Log.RunFail(_log, _name!, ms, ex);
             _activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            _activity?.AddException(ex);
         }
 
         /// <summary>
@@ -180,37 +195,6 @@ namespace Extend0.Metadata.Diagnostics
             _scope = null;
             _sw = null;
             _activity = null;
-        }
-
-        /// <summary>
-        /// Indicates whether the current <see cref="OpScope"/> is equal to another instance.
-        /// </summary>
-        public readonly bool Equals(OpScope other) =>
-            ReferenceEquals(_log, other._log) &&
-            string.Equals(_name, other._name, StringComparison.Ordinal) &&
-            _enabled == other._enabled &&
-            _disposed == other._disposed;
-
-        /// <inheritdoc/>
-        public override readonly bool Equals(object? obj) =>
-            obj is OpScope other && Equals(other);
-
-        /// <summary>
-        /// Compares two <see cref="OpScope"/> instances for value equality.
-        /// </summary>
-        public static bool operator ==(OpScope left, OpScope right) => left.Equals(right);
-
-        /// <summary>
-        /// Compares two <see cref="OpScope"/> instances for inequality.
-        /// </summary>
-        public static bool operator !=(OpScope left, OpScope right) => !left.Equals(right);
-
-        /// <inheritdoc/>
-        public override readonly int GetHashCode()
-        {
-            int nameHash = _name is null ? 0 : StringComparer.Ordinal.GetHashCode(_name);
-            // Logger se compara por referencia, HashCode.Combine se apaña con null
-            return HashCode.Combine(_log, nameHash, _enabled, _disposed);
         }
     }
 }

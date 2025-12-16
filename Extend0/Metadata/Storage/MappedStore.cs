@@ -37,7 +37,7 @@ namespace Extend0.Metadata.Storage
     /// end of the file and extended, updating the corresponding <see cref="ColumnDesc"/>.
     /// </para>
     /// </remarks>
-    internal sealed unsafe class MappedStore : ICellStore, ITryGrowableStore
+    internal sealed unsafe class MappedStore : ITryGrowableStore
     {
         private MemoryMappedFile _mmf;
         private MemoryMappedViewAccessor _view;
@@ -626,6 +626,19 @@ namespace Extend0.Metadata.Storage
 
             // Persist metadata update
             _view.Flush();
+            return true;
+        }
+
+        /// <inheritdoc/>
+        bool ITryGrowableStore.TryGetColumnCapacity(uint column, out uint rowCapacity)
+        {
+            if (column >= _hdr->ColumnCount)
+            {
+                rowCapacity = 0;
+                return false;
+            }
+
+            rowCapacity = _cols[column].RowCapacity;
             return true;
         }
 
