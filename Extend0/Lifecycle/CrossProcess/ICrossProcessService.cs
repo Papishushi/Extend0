@@ -54,15 +54,6 @@
         Task<ServiceInfo> GetServiceInfoAsync();
 
         /// <summary>
-        /// Stops hosting this service instance over its named pipe and releases
-        /// all associated server-side resources.
-        /// </summary>
-        /// <remarks>
-        /// Implementations should be idempotent so that multiple calls are safe.
-        /// </remarks>
-        void StopHosting();
-
-        /// <summary>
         /// Probes the configured named pipe to determine whether a server is
         /// currently listening for connections.
         /// </summary>
