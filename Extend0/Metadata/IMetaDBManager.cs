@@ -17,7 +17,7 @@ namespace Extend0.Metadata
     /// <list type="bullet">
     ///   <item><description><b>Registration</b>: define tables and their schema (<see cref="RegisterTable(string, string, ColumnConfiguration[])"/>, <see cref="RegisterTable(TableSpec, bool)"/>).</description></item>
     ///   <item><description><b>Resolution</b>: obtain an active table instance by id or name (<see cref="GetOrCreate(Guid)"/>, <see cref="TryGetManaged(Guid, out MetadataTable?)"/>, <see cref="TryGetTableIfCreated(string, out MetadataTable?)"/>).</description></item>
-    ///   <item><description><b>Open/Close</b>: open tables from a backing map path and close managed instances (<see cref="Open(string)"/>, <see cref="Close(Guid)"/>, <see cref="CloseAll"/>).</description></item>
+    ///   <item><description><b>Open/Close</b>: open tables from a backing map path and close managed instances (<see cref="Open(string)"/>, <see cref="CloseStrict(Guid)"/>, <see cref="CloseAll"/>).</description></item>
     ///   <item><description><b>Data population</b>: fill or copy columns efficiently (<see cref="FillColumn"/>, <see cref="FillColumn{T}"/>, <see cref="CopyColumn"/>).</description></item>
     ///   <item><description><b>Relationships</b>: maintain parent/child references and ref-vectors (<see cref="LinkRef"/>, <see cref="EnsureRefVec"/>, <see cref="GetOrCreateAndLinkChild"/>).</description></item>
     ///   <item><description><b>Maintenance</b>: rebuild indexes and run operations under a named scope (<see cref="RebuildIndexes"/>, <see cref="Run"/>, <see cref="RunWithReindexAll"/>).</description></item>
@@ -35,14 +35,14 @@ namespace Extend0.Metadata
         /// </summary>
         /// <param name="tableId">Identifier of the table to close.</param>
         /// <returns><see langword="true"/> if a table was found and closed; otherwise <see langword="false"/>.</returns>
-        bool Close(Guid tableId);
+        bool CloseStrict(Guid tableId);
 
         /// <summary>
         /// Closes a managed table identified by its registered <paramref name="name"/>.
         /// </summary>
         /// <param name="name">Registered table name.</param>
         /// <returns><see langword="true"/> if a table was found and closed; otherwise <see langword="false"/>.</returns>
-        bool Close(string name);
+        bool CloseStrict(string name);
 
         /// <summary>
         /// Closes all managed tables using best-effort semantics.

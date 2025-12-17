@@ -883,9 +883,6 @@ namespace Extend0.Metadata
         ///   Removes the associated name entry from <c>_byName</c>, when present.
         ///   </description></item>
         ///   <item><description>
-        ///   Removes any cached child-table mappings from <c>_childIndex</c>.
-        ///   </description></item>
-        ///   <item><description>
         ///   If the table was already materialized (<c>ManagedTable.IsCreated == true</c>),
         ///   disposes its underlying <see cref="MetadataTable"/>.
         ///   </description></item>
@@ -896,7 +893,7 @@ namespace Extend0.Metadata
         /// unregisters the table from this manager.
         /// </para>
         /// </remarks>
-        public bool Close(Guid tableId)
+        public bool CloseStrict(Guid tableId)
         {
             if (tableId == Guid.Empty)
                 return false;
@@ -943,47 +940,89 @@ namespace Extend0.Metadata
         /// was found and closed; otherwise <see langword="false"/>.
         /// </returns>
         /// <remarks>
-        /// This is a convenience overload over <see cref="Close(Guid)"/> that resolves
+        /// This is a convenience overload over <see cref="CloseStrict(Guid)"/> that resolves
         /// the identifier from the name registry.
         /// </remarks>
-        public bool Close(string name)
+        public bool CloseStrict(string name)
         {
             if (!TryGetIdByName(name, out var id) || id == Guid.Empty)
                 return false;
 
-            return Close(id);
+            return CloseStrict(id);
         }
 
         /// <summary>
-        /// Closes and unregisters all currently managed tables.
+        /// Closes and unregisters the table associated with the given identifier using best-effort semantics.
         /// </summary>
+        /// <param name="tableId">The table identifier to close and unregister.</param>
+        /// <returns>
+        /// <see langword="true"/> if a managed table existed for <paramref name="tableId"/> and it was closed successfully;
+        /// otherwise <see langword="false"/> (unknown id, already closed, or close failed).
+        /// </returns>
         /// <remarks>
         /// <para>
-        /// This method iterates over the current snapshot of table identifiers and
-        /// calls <see cref="Close(Guid)"/> for each one. It is safe to call multiple
-        /// times; tables that have already been closed are simply ignored.
+        /// This method is <b>best-effort</b>: it never throws. If the table is found, it is removed from the manager registries
+        /// and then closed via <see cref="CloseStrict(Guid)"/>. Any exception is caught, logged, and the method returns
+        /// <see langword="false"/>.
         /// </para>
         /// <para>
-        /// Like <see cref="Close(Guid)"/>, this only releases in-process resources
-        /// and does not delete any underlying files on disk.
+        /// This method does <b>not</b> delete backing files on disk (e.g. <c>.meta</c> and <c>.tablespec.json</c>).
+        /// It only releases in-process resources and unregisters the table from this manager.
         /// </para>
         /// <para>
-        /// This is a fail-fast operation intended for strict shutdown scenarios
-        /// (e.g. tests or tooling).
+        /// For fail-fast behavior (exceptions propagated), use <see cref="CloseStrict(Guid)"/>.
         /// </para>
         /// </remarks>
-        /// <exception cref="Exception">
-        /// Propagates the first exception thrown by <see cref="Close(Guid)"/>.
-        /// The operation stops immediately on failure.
-        /// </exception>
-        public void CloseAllStrict()
+        public bool Close(Guid tableId) => CloseBestEffortCore(tableId);
+
+        /// <summary>
+        /// Closes and unregisters a table by its registered name using best-effort semantics.
+        /// </summary>
+        /// <param name="name">The registered table name (case-sensitive).</param>
+        /// <returns>
+        /// <see langword="true"/> if a table with the given <paramref name="name"/> was found and closed successfully;
+        /// otherwise <see langword="false"/> (unknown name, already closed, or close failed).
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a convenience overload over <see cref="Close(Guid)"/> that first resolves the identifier from the name registry.
+        /// It is <b>best-effort</b> and never throws.
+        /// </para>
+        /// <para>
+        /// This method does <b>not</b> delete backing files on disk (e.g. <c>.meta</c> and <c>.tablespec.json</c>).
+        /// It only releases in-process resources and unregisters the table from this manager.
+        /// </para>
+        /// <para>
+        /// For fail-fast behavior (exceptions propagated), use <see cref="CloseStrict(Guid)"/>.
+        /// </para>
+        /// </remarks>
+        public bool Close(string name)
         {
-            // ConcurrentDictionary supports snapshot enumeration; modifications
-            // during iteration do not invalidate the enumerator.
-            foreach (var id in _byId.Keys)
+            if (!TryGetIdByName(name, out var id) || id == Guid.Empty) return false;
+            return CloseBestEffortCore(id);
+        }
+
+        /// <summary>
+        /// Shared best-effort close implementation that delegates to <see cref="CloseStrict(Guid)"/>.
+        /// </summary>
+        /// <param name="id">The table identifier to close.</param>
+        /// <returns>
+        /// <see langword="true"/> if the table was found and closed successfully; otherwise <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This helper catches and logs any exception thrown by <see cref="CloseStrict(Guid)"/> and converts it to a
+        /// <see langword="false"/> return value. It is intended for use from public best-effort APIs and cleanup paths
+        /// (e.g., <c>finally</c> blocks) where throwing would be undesirable.
+        /// </para>
+        /// </remarks>
+        private bool CloseBestEffortCore(Guid id)
+        {
+            try { return CloseStrict(id); }
+            catch (Exception ex)
             {
-                // Ignore result; per-table errors (dispose failures) will surface as exceptions.
-                Close(id);
+                _log?.LogError(ex, "Close failed (Id={Id})", id);
+                return false;
             }
         }
 
@@ -993,11 +1032,44 @@ namespace Extend0.Metadata
         /// <remarks>
         /// <para>
         /// This method iterates over the current snapshot of table identifiers and
-        /// calls <see cref="Close(Guid)"/> for each one. It is safe to call multiple
+        /// calls <see cref="CloseStrict(Guid)"/> for each one. It is safe to call multiple
         /// times; tables that have already been closed are simply ignored.
         /// </para>
         /// <para>
-        /// Like <see cref="Close(Guid)"/>, this only releases in-process resources
+        /// Like <see cref="CloseStrict(Guid)"/>, this only releases in-process resources
+        /// and does not delete any underlying files on disk.
+        /// </para>
+        /// <para>
+        /// This is a fail-fast operation intended for strict shutdown scenarios
+        /// (e.g. tests or tooling).
+        /// </para>
+        /// </remarks>
+        /// <exception cref="Exception">
+        /// Propagates the first exception thrown by <see cref="CloseStrict(Guid)"/>.
+        /// The operation stops immediately on failure.
+        /// </exception>
+        public void CloseAllStrict()
+        {
+            // ConcurrentDictionary supports snapshot enumeration; modifications
+            // during iteration do not invalidate the enumerator.
+            foreach (var id in _byId.Keys)
+            {
+                // Ignore result; per-table errors (dispose failures) will surface as exceptions.
+                CloseStrict(id);
+            }
+        }
+
+        /// <summary>
+        /// Closes and unregisters all currently managed tables.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This method iterates over the current snapshot of table identifiers and
+        /// calls <see cref="CloseStrict(Guid)"/> for each one. It is safe to call multiple
+        /// times; tables that have already been closed are simply ignored.
+        /// </para>
+        /// <para>
+        /// Like <see cref="CloseStrict(Guid)"/>, this only releases in-process resources
         /// and does not delete any underlying files on disk.
         /// </para>
         /// <para>
@@ -1011,7 +1083,7 @@ namespace Extend0.Metadata
         /// </exception>
         public void CloseAll()
         {
-            List<Exception> exceptions = [];
+            List<Exception> exceptions = new List<Exception>(_byId.Count);
             // ConcurrentDictionary supports snapshot enumeration; modifications
             // during iteration do not invalidate the enumerator.
             foreach (var id in _byId.Keys)
@@ -1019,7 +1091,7 @@ namespace Extend0.Metadata
                 try
                 {
                     // Ignore result; per-table errors (dispose failures) will surface as exceptions.
-                    Close(id);
+                    CloseStrict(id);
                 }
                 catch (Exception ex) when (ex is not ObjectDisposedException)
                 {
@@ -1151,7 +1223,7 @@ namespace Extend0.Metadata
         /// <remarks>
         /// <para>
         /// This helper is intentionally forgiving: it skips <see cref="Guid.Empty"/> and suppresses any exception thrown by
-        /// <see cref="Close(Guid)"/>, logging the failure when a logger is available.
+        /// <see cref="CloseStrict(Guid)"/>, logging the failure when a logger is available.
         /// </para>
         /// <para>
         /// It is meant to be used from <c>finally</c> blocks so cleanup does not mask the original failure.
@@ -1160,7 +1232,7 @@ namespace Extend0.Metadata
         private void CloseEphemeralBestEffort(Guid id)
         {
             if (id == Guid.Empty) return;
-            try { Close(id); }
+            try { CloseStrict(id); }
             catch (Exception ex) { _log?.LogError(ex, "WithTableEphemeral failed closing table (Id={Id})", id); }
         }
 
@@ -1178,7 +1250,7 @@ namespace Extend0.Metadata
         /// and then closes the opened table in a <c>finally</c> block.
         /// </para>
         /// <para>
-        /// Closing is best-effort: failures during <see cref="Close(Guid)"/> are swallowed and logged so they do not hide exceptions
+        /// Closing is best-effort: failures during <see cref="CloseStrict(Guid)"/> are swallowed and logged so they do not hide exceptions
         /// thrown by <paramref name="action"/>.
         /// </para>
         /// </remarks>
@@ -1220,7 +1292,7 @@ namespace Extend0.Metadata
         /// and then closes the opened table in a <c>finally</c> block.
         /// </para>
         /// <para>
-        /// Closing is best-effort: failures during <see cref="Close(Guid)"/> are swallowed and logged so they do not hide exceptions
+        /// Closing is best-effort: failures during <see cref="CloseStrict(Guid)"/> are swallowed and logged so they do not hide exceptions
         /// thrown by <paramref name="func"/>.
         /// </para>
         /// </remarks>
@@ -1260,7 +1332,7 @@ namespace Extend0.Metadata
         /// and then closes the opened table in a <c>finally</c> block.
         /// </para>
         /// <para>
-        /// Closing is best-effort: failures during <see cref="Close(Guid)"/> are swallowed and logged so they do not hide exceptions
+        /// Closing is best-effort: failures during <see cref="CloseStrict(Guid)"/> are swallowed and logged so they do not hide exceptions
         /// thrown by <paramref name="func"/>.
         /// </para>
         /// </remarks>
@@ -1302,7 +1374,7 @@ namespace Extend0.Metadata
         /// and then closes the opened table in a <c>finally</c> block.
         /// </para>
         /// <para>
-        /// Closing is best-effort: failures during <see cref="Close(Guid)"/> are swallowed and logged so they do not hide exceptions
+        /// Closing is best-effort: failures during <see cref="CloseStrict(Guid)"/> are swallowed and logged so they do not hide exceptions
         /// thrown by <paramref name="func"/>.
         /// </para>
         /// </remarks>
@@ -1676,7 +1748,7 @@ namespace Extend0.Metadata
         /// the table (best-effort) and only performs asynchronous work when <paramref name="deleteNow"/> is enabled.
         /// </para>
         /// <para>
-        /// The close step is best-effort: exceptions thrown by <see cref="Close(Guid)"/> are caught and logged
+        /// The close step is best-effort: exceptions thrown by <see cref="CloseStrict(Guid)"/> are caught and logged
         /// to avoid masking any primary exception from the calling operation.
         /// </para>
         /// <para>
@@ -1697,7 +1769,7 @@ namespace Extend0.Metadata
         {
             if (id != Guid.Empty)
             {
-                try { Close(id); }
+                try { CloseStrict(id); }
                 catch (Exception ex) { _log?.LogError(ex, "WithTableEphemeral cleanup failed closing table (Id={Id})", id); }
             }
 
@@ -1891,9 +1963,6 @@ namespace Extend0.Metadata
         ///   </item>
         ///   <item>
         ///     <description><c>_byName</c>: maps table name to its <see cref="Guid"/>.</description>
-        ///   </item>
-        ///   <item>
-        ///     <description><c>_childIndex</c>: initializes the per-parent child-table cache.</description>
         ///   </item>
         /// <para>
         /// If name registration fails, the previously added id entry is rolled back and a warning
@@ -2545,7 +2614,7 @@ namespace Extend0.Metadata
                 var temp = _byId.Keys.ToArray();
                 foreach (var id in temp)
                 {
-                    try { Close(id); }
+                    try { CloseStrict(id); }
                     catch (Exception ex) { _log?.LogDebug(ex, "Close failed during DisposeAsync (Id={Id})", id); }
                 }
 
