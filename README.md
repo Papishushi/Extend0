@@ -18,8 +18,42 @@ dotnet add <YourProject>.csproj reference Extend0/Extend0.csproj
 dotnet add <YourProject>.csproj reference Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj
 dotnet add <YourProject>.csproj reference Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj
 ```
+This approach is recommended when you want to:
 
-The package targets `net9.0` and depends on `Microsoft.Extensions.Logging.Abstractions` for optional logging. But an update to `net10.0` is planned soon.
+- Develop directly against Extend0
+- Debug or modify internals
+- Keep source generators in lockstep with your code
+
+## GitHub Releases (prebuilt binaries)
+
+You can also use the **GitHub Releases** section of the repository:
+
+- Each release provides prebuilt DLLs for a fixed version
+- Useful when you want pinned binaries without building from source
+- Suitable for deployment, tooling, or restricted environments
+
+Source generators are published as separate artifacts when applicable.
+
+## NuGet packages
+
+Extend0 is available through the **NuGet registry**:
+
+- You can download the packages directly from **nuget.org**
+- You can install them using **Visual Studio NuGet Package Manager**
+- Or via the dotnet CLI:
+
+```bash
+dotnet add package Extend0
+```
+NuGet versions are aligned with GitHub releases.
+
+## Target framework
+
+The library currently targets: 
+ - net9.0 (net10 is supported but not fully migrated.)
+
+Dependencies are minimal:
+ - Microsoft.Extensions.Logging.Abstractions (optional logging only)
 
 ## Cross-process singletons
 
