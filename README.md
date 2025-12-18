@@ -24,7 +24,7 @@ This approach is recommended when you want to:
 - Debug or modify internals
 - Keep source generators in lockstep with your code
 
-## GitHub Releases (prebuilt binaries)
+### GitHub Releases (prebuilt binaries)
 
 You can also use the **GitHub Releases** section of the repository:
 
@@ -34,7 +34,7 @@ You can also use the **GitHub Releases** section of the repository:
 
 Source generators are published as separate artifacts when applicable.
 
-## NuGet packages
+### NuGet packages
 
 Extend0 is available through the **NuGet registry**:
 
@@ -47,7 +47,7 @@ dotnet add package Extend0
 ```
 NuGet versions are aligned with GitHub releases.
 
-## Target framework
+### Target framework
 
 The library currently targets: 
  - net9.0 (net10 is supported but not fully migrated.)
