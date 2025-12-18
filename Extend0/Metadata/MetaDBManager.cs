@@ -917,16 +917,16 @@ namespace Extend0.Metadata
                 }
                 catch (Exception ex)
                 {
-                    if (_isLogActivated && _log is not null)
-                        _log.LogError(ex, "Error disposing metadata table {Name} ({Id})", name ?? string.Empty, tableId);
+                    if (_isLogActivated)
+                        _log?.LogError(ex, "Error disposing metadata table {Name} ({Id})", name ?? string.Empty, tableId);
 
                     // Re-throw to let callers decide how to handle disposal failures.
                     throw;
                 }
             }
 
-            if (_isLogActivated && _log is not null)
-                _log.LogDebug("Closed metadata table {Name} ({Id})", name ?? string.Empty, tableId);
+            if (_isLogActivated)
+                _log?.LogDebug("Closed metadata table {Name} ({Id})", name ?? string.Empty, tableId);
 
             return true;
         }
