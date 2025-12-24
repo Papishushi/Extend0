@@ -1,7 +1,12 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Indexing.Contract;
+using Extend0.Metadata.Indexing.Internal.BuiltIn;
+using Extend0.Metadata.Indexing.Registries;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Extend0.Metadata
 {
@@ -36,18 +41,22 @@ namespace Extend0.Metadata
     /// </remarks>
     public sealed class MetadataTable : IDisposable
     {
+        private static readonly UTF8Encoding Utf8Strict = new(false, true);
+
         private readonly List<ColumnConfiguration> _columns = [];
-        private readonly Dictionary<string, uint> _colIndexByName = new(StringComparer.Ordinal);
-
-        // col -> (keyBytes -> row)
-        private readonly Dictionary<uint, Dictionary<byte[], uint>> _indexByKeyPerColumn = [];
-
-        // global key -> (column, row)
-        private readonly Dictionary<byte[], (uint col, uint row)> _globalKeyIndex = new(ByteArrayComparer.Ordinal);
+        // Schema-level lookup (not a rebuildable table index). Built once from TableSpec.Columns.
+        private readonly FrozenDictionary<string, uint> _colIndexByName;
 
         private readonly ICellStore _store;
         private readonly TableSpec _spec;
 
+        private const string COL_KEY_INDEX = "__builtIn:colKey";
+        private const string GLOBAL_KEY_INDEX = "__builtIn:globalKey";
+
+        /// <summary>
+        /// Gets the registry of indexes associated with this table.
+        /// </summary>
+        public TableIndexesRegistry Indexes { get; } = new TableIndexesRegistry();
 
         /// <summary>
         /// Gets the total number of columns defined in this table.
@@ -58,6 +67,62 @@ namespace Extend0.Metadata
         /// Retrieves the <see cref="TableSpec"/> that defines this table.
         /// </summary>
         public TableSpec Spec => _spec;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MetadataTable"/> class using the
+        /// provided <see cref="TableSpec"/>.
+        /// </summary>
+        /// <param name="spec">
+        /// The specification describing the table name, backing file path (if any) and columns.
+        /// </param>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <see cref="TableSpec.Columns"/> is empty.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// If <see cref="TableSpec.MapPath"/> is <see langword="null"/>, the table is backed by
+        /// an <see cref="InMemoryStore"/>. Otherwise, a <see cref="MappedStore"/> is created.
+        /// </para>
+        /// <para>
+        /// For in-memory tables, initial cells for each column are materialized up to
+        /// <see cref="ColumnConfiguration.InitialCapacity"/>. For mapped tables, the space
+        /// already exists in the underlying file.
+        /// </para>
+        /// </remarks>
+        public MetadataTable(TableSpec spec)
+        {
+            _spec = spec;
+            var columns = spec.Columns;
+            if (columns.Length == 0) throw new ArgumentException("At least one column.", nameof(spec));
+
+            _columns = new List<ColumnConfiguration>(columns.Length);
+            var tempColIndexByName = new Dictionary<string, uint>(columns.Length, StringComparer.Ordinal);
+
+            for (int i = 0; i < columns.Length; i++)
+            {
+                ref readonly var c = ref columns[i];
+                _columns.Add(c);
+                tempColIndexByName[c.Name] = (uint)i;
+            }
+
+            _colIndexByName = tempColIndexByName.ToFrozenDictionary();
+
+            _store = spec.MapPath is null
+                ? new InMemoryStore(_columns)
+                : new MappedStore(spec);
+
+            // Prematerialize initial cells (only relevant for InMemoryStore and similars for example on MappedStore already exists the space)
+            if (_store is InMemoryStore)
+                for (uint col = 0; col < _columns.Count; col++)
+                {
+                    var meta = _columns[(int)col];
+                    for (uint row = 0; row < meta.InitialCapacity; row++)
+                        _ = _store.GetOrCreateCell(col, row, meta);
+                }
+
+            GetOrCreateColKeyIndex();
+            GetOrCreateGlobalKeyIndex();
+        }
 
         /// <summary>
         /// Opens an existing metadata table from the memory-mapped file described by
@@ -106,184 +171,247 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="MetadataTable"/> class using the
-        /// provided <see cref="TableSpec"/>.
+        /// Rebuilds all registered rebuildable indexes for this table by scanning the underlying storage.
         /// </summary>
-        /// <param name="spec">
-        /// The specification describing the table name, backing file path (if any) and columns.
+        /// <param name="strict">
+        /// When <see langword="true"/>, the method enforces strict rebuild rules:
+        /// <list type="bullet">
+        ///   <item>
+        ///     <description>
+        ///     Any index registered in <see cref="Indexes"/> that does not implement
+        ///     <see cref="IRebuildableIndex"/> causes an exception.
+        ///     </description>
+        ///   </item>
+        ///   <item>
+        ///     <description>
+        ///     Any enumerated cell that belongs to a key/value column and does not expose a non-empty key
+        ///     causes an exception.
+        ///     </description>
+        ///   </item>
+        /// </list>
+        /// When <see langword="false"/>, non-rebuildable indexes are ignored and keyless cells are skipped.
         /// </param>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <see cref="TableSpec.Columns"/> is empty.
-        /// </exception>
         /// <remarks>
         /// <para>
-        /// If <see cref="TableSpec.MapPath"/> is <see langword="null"/>, the table is backed by
-        /// an <see cref="InMemoryStore"/>. Otherwise, a <see cref="MappedStore"/> is created.
+        /// Indexes are treated as ephemeral caches. The method starts by clearing all current index state via
+        /// <see cref="TableIndexesRegistry.ClearAll"/> and then repopulates indexes from the table storage.
         /// </para>
         /// <para>
-        /// For in-memory tables, initial cells for each column are materialized up to
-        /// <see cref="ColumnConfiguration.InitialCapacity"/>. For mapped tables, the space
-        /// already exists in the underlying file.
+        /// Rebuild flow:
+        /// </para>
+        /// <list type="number">
+        ///   <item>
+        ///     <description>
+        ///     <b>Optional strict validation</b>: when <paramref name="strict"/> is enabled, the table is scanned
+        ///     and every cell in a key/value column must expose a non-empty key.
+        ///     </description>
+        ///   </item>
+        ///   <item>
+        ///     <description>
+        ///     <b>Index rebuild</b>: all indexes in <see cref="Indexes"/> that implement
+        ///     <see cref="IRebuildableIndex"/> are rebuilt by calling
+        ///     <see cref="IRebuildableIndex.Rebuild(MetadataTable)"/>.
+        ///     </description>
+        ///   </item>
+        /// </list>
+        /// <para>
+        /// Key semantics:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item>
+        ///     <description>
+        ///     Value-only columns (<c>KeySize == 0</c>) do not produce keys and are always allowed to be keyless.
+        ///     They are ignored by key-based indexes.
+        ///     </description>
+        ///   </item>
+        ///   <item>
+        ///     <description>
+        ///     In strict mode, only key/value columns are validated; value-only columns are explicitly exempt.
+        ///     </description>
+        ///   </item>
+        /// </list>
+        /// <para>
+        /// Concurrency: this method does not take a global table lock. Individual indexes are expected to handle
+        /// their own synchronization (e.g., reader/writer locks) during rebuild.
         /// </para>
         /// </remarks>
-        public MetadataTable(TableSpec spec)
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when <paramref name="strict"/> is <see langword="true"/> and either:
+        /// <list type="bullet">
+        ///   <item><description>An index in <see cref="Indexes"/> is not rebuildable.</description></item>
+        ///   <item><description>A scanned cell in a key/value column does not expose a non-empty key.</description></item>
+        /// </list>
+        /// </exception>
+        public void RebuildIndexes(bool strict = false)
         {
-            _spec = spec;
-            var columns = spec.Columns;
-            if (columns.Length == 0) throw new ArgumentException("At least one column.", nameof(spec));
+            // Clear everything (ephemeral by design)
+            Indexes.ClearAll();
 
-            _columns = new List<ColumnConfiguration>(columns.Length);
-            _colIndexByName = new Dictionary<string, uint>(columns.Length, StringComparer.Ordinal);
-
-            for (int i = 0; i < columns.Length; i++)
+            if (strict)
             {
-                ref readonly var c = ref columns[i];
-                _columns.Add(c);
-                _colIndexByName[c.Name] = (uint)i;
+                foreach (var entry in EnumerateCells())
+                {
+                    // Value-only columns are allowed to have no key
+                    var meta = _columns[(int)entry.Col];
+                    if (meta.Size.GetKeySize() == 0)
+                        continue;
+
+                    if (!entry.Cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
+                        throw new InvalidOperationException($"Cell at ({entry.Col}, {entry.Row}) has no key.");
+                }
             }
 
-            _store = spec.MapPath is null
-                ? new InMemoryStore(_columns)
-                : new MappedStore(spec);
-
-            // Prematerialize initial cells (solo relevante para InMemoryStore en MappedStore ya existe el espacio)
-            if (_store is InMemoryStore)
-                for (uint col = 0; col < _columns.Count; col++)
-                {
-                    var meta = _columns[(int)col];
-                    for (uint row = 0; row < meta.InitialCapacity; row++)
-                        _ = _store.GetOrCreateCell(col, row, meta);
-                }
+            // Rebuild all indexes that know how to rebuild
+            foreach (var idx in Indexes.Enumerate())
+            {
+                if (idx is IRebuildableIndex r) r.Rebuild(this);
+                else if (strict) throw new InvalidOperationException($"Index '{idx.Name}' is not rebuildable.");
+            }
         }
 
         /// <summary>
-        /// Rebuilds the per-column and, optionally, the global key indexes by scanning
-        /// all cells in the table.
+        /// Gets the built-in column-key index or creates and registers it on demand.
         /// </summary>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild the global index that maps keys to
-        /// <c>(column, row)</c> pairs; <see langword="false"/> to rebuild only
-        /// per-column indexes.
-        /// </param>
+        /// <returns>The singleton <see cref="ColumnKeyIndex"/> instance for this table.</returns>
         /// <remarks>
         /// <para>
-        /// This method performs a full scan over the underlying store via
-        /// <see cref="EnumerateCells"/>. For each <see cref="CellRowColumnValueEntry"/> it:
-        /// </para>
-        /// <list type="bullet">
-        ///   <item><description>
-        ///   Extracts the cell key (when present) using <see cref="MetadataCell.TryGetKey(out ReadOnlySpan{byte})"/>.
-        ///   </description></item>
-        ///   <item><description>
-        ///   Populates <see cref="_indexByKeyPerColumn"/> so that, for each column,
-        ///   keys map to their row index.
-        ///   </description></item>
-        ///   <item><description>
-        ///   Optionally populates <see cref="_globalKeyIndex"/> so that keys map to a
-        ///   <c>(column, row)</c> pair across all columns.
-        ///   </description></item>
-        /// </list>
-        /// <para>
-        /// Keys are stored as defensive copies (<see cref="byte"/> arrays) to ensure
-        /// they remain valid beyond the lifetime of any temporary spans used while
-        /// scanning the store.
+        /// The column-key index is a built-in index stored in <see cref="Indexes"/> under the fixed name
+        /// <see cref="COL_KEY_INDEX"/> (<c>"__builtIn:colKey"</c>).
         /// </para>
         /// <para>
-        /// When duplicate keys are found within the same column, the last occurrence
-        /// overwrites previous entries. If you need to track multiple rows for the
-        /// same key, replace the value type with a multi-map or a list.
+        /// This method is a fast-path helper: it first attempts to retrieve the index from the registry and,
+        /// if missing, constructs it and registers it via <c>Indexes.Add(created)</c>.
         /// </para>
         /// </remarks>
-        public void RebuildIndexes(bool includeGlobal = true)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ColumnKeyIndex GetOrCreateColKeyIndex()
         {
-            _indexByKeyPerColumn.Clear();
-            if (includeGlobal) _globalKeyIndex.Clear();
+            if (Indexes.TryGet(COL_KEY_INDEX, out var idx) && idx is ColumnKeyIndex ck)
+                return ck;
 
-            foreach (var entry in EnumerateCells())
-            {
-                if (!entry.Cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
-                    continue;
+            var created = new ColumnKeyIndex(COL_KEY_INDEX);
+            Indexes.Add(created);
+            return created;
+        }
 
-                // Defensive copy for small keys
-                var keyCopy = k.ToArray();
+        /// <summary>
+        /// Gets the built-in global-key index or creates and registers it on demand.
+        /// </summary>
+        /// <returns>The singleton <see cref="GlobalKeyIndex"/> instance for this table.</returns>
+        /// <remarks>
+        /// <para>
+        /// The global-key index is a built-in index stored in <see cref="Indexes"/> under the fixed name
+        /// <see cref="GLOBAL_KEY_INDEX"/> (<c>"__builtIn:globalKey"</c>).
+        /// </para>
+        /// <para>
+        /// This index typically maps a key to a global hit (for example, <c>(column,row)</c>) across the table,
+        /// enabling cross-column key lookups without scanning every column.
+        /// </para>
+        /// <para>
+        /// This helper is implemented as a lazy accessor with a fast registry lookup first, then creation +
+        /// registration if missing.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private GlobalKeyIndex GetOrCreateGlobalKeyIndex()
+        {
+            if (Indexes.TryGet(GLOBAL_KEY_INDEX, out var idx) && idx is GlobalKeyIndex gk)
+                return gk;
 
-                if (!_indexByKeyPerColumn.TryGetValue(entry.Col, out var dict))
-                {
-                    dict = new Dictionary<byte[], uint>(ByteArrayComparer.Ordinal);
-                    _indexByKeyPerColumn[entry.Col] = dict;
-                }
-
-                // If there are duplicates in the same column, the last one wins.
-                dict[keyCopy] = entry.Row;
-
-                if (includeGlobal)
-                    _globalKeyIndex[keyCopy] = (entry.Col, entry.Row);
-            }
+            var created = new GlobalKeyIndex(GLOBAL_KEY_INDEX);
+            Indexes.Add(created);
+            return created;
         }
 
         /// <summary>
         /// Tries to find the row index within a column that matches the specified UTF-8 key.
         /// </summary>
         /// <param name="column">The zero-based column index to search.</param>
-        /// <param name="keyUtf8">The key bytes, encoded as UTF-8, provided as a read-only span.</param>
+        /// <param name="keyUtf8">
+        /// The key bytes, encoded as UTF-8, provided as a read-only span.
+        /// </param>
         /// <param name="row">
-        /// When this method returns <see langword="true"/>, contains the row index of
-        /// the cell with the given key; otherwise, 0.
+        /// When this method returns <see langword="true"/>, contains the row index of the cell
+        /// with the given key; otherwise, 0.
         /// </param>
         /// <returns>
-        /// <see langword="true"/> if a row with the specified key was found in the given
-        /// column; otherwise, <see langword="false"/>.
+        /// <see langword="true"/> if a row with the specified key was found in the given column;
+        /// otherwise, <see langword="false"/>.
         /// </returns>
         /// <remarks>
         /// <para>
-        /// The lookup uses the per-column index built by <see cref="RebuildIndexes(bool)"/>.
-        /// If the index is stale or has not been built, the result may be incomplete.
+        /// This method performs the lookup using the built-in per-column key index
+        /// (<see cref="ColumnKeyIndex"/>) registered under
+        /// <see cref="COL_KEY_INDEX"/>. The index is created on demand via
+        /// <see cref="GetOrCreateColKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// This overload allocates a new <see cref="byte"/> array per call to match the
-        /// dictionary key type. For hot paths, prefer the <see cref="TryFindRowByKey(uint, byte[], out uint)"/>
-        /// overload, which avoids this allocation.
+        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// If the index is empty or stale, the lookup may return <see langword="false"/>
+        /// even if the key exists in the underlying storage.
+        /// </para>
+        /// <para>
+        /// This overload allocates a new <see cref="byte"/> array on each call in order to
+        /// match the index key type (<see cref="byte"/>[]). For allocation-sensitive or hot
+        /// paths, prefer the overload that accepts a <see cref="byte"/>[] directly.
+        /// </para>
+        /// <para>
+        /// Note: value-only columns (<c>KeySize == 0</c>) do not produce keys and therefore
+        /// cannot be queried through this API. Only key/value columns participate in the
+        /// key index.
         /// </para>
         /// </remarks>
         public bool TryFindRowByKey(uint column, ReadOnlySpan<byte> keyUtf8, out uint row)
         {
-            row = 0;
-            if (!_indexByKeyPerColumn.TryGetValue(column, out var dict)) return false;
+            var keySize = _columns[(int)column].Size.GetKeySize();
+            if (keySize == 0) { row = 0; return false; } // value-only
 
-            // We need a byte[] because the dictionary is keyed on byte[].
-            // This allocates once per lookup; if this is hot, consider using the overload.
-            var key = keyUtf8.ToArray();
-            return dict.TryGetValue(key, out row);
+            var index = GetOrCreateColKeyIndex();
+            return index.TryGetRow(column, keyUtf8, out row);
         }
 
         /// <summary>
         /// Tries to find the row index within a column that matches the specified UTF-8 key.
         /// </summary>
         /// <param name="column">The zero-based column index to search.</param>
-        /// <param name="keyUtf8">The key bytes, encoded as UTF-8, provided as a <see cref="byte"/> array.</param>
+        /// <param name="keyUtf8">
+        /// The key bytes, encoded as UTF-8, provided as a <see cref="byte"/> array.
+        /// </param>
         /// <param name="row">
-        /// When this method returns <see langword="true"/>, contains the row index of
-        /// the cell with the given key; otherwise, 0.
+        /// When this method returns <see langword="true"/>, contains the row index of the cell
+        /// with the given key; otherwise, 0.
         /// </param>
         /// <returns>
-        /// <see langword="true"/> if a row with the specified key was found in the given
-        /// column; otherwise, <see langword="false"/>.
+        /// <see langword="true"/> if a row with the specified key was found in the given column;
+        /// otherwise, <see langword="false"/>.
         /// </returns>
         /// <remarks>
         /// <para>
-        /// The lookup uses the per-column index built by <see cref="RebuildIndexes(bool)"/>.
-        /// If the index is stale or has not been built, the result may be incomplete.
+        /// This method performs the lookup using the built-in per-column key index
+        /// (<see cref="ColumnKeyIndex"/>) registered under
+        /// <see cref="COL_KEY_INDEX"/>. The index is created on demand via
+        /// <see cref="GetOrCreateColKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// This overload avoids allocations by using the provided <paramref name="keyUtf8"/>
-        /// array directly as the dictionary key, and is preferred for hot paths where the
-        /// caller already has a <see cref="byte"/> array.
+        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// If the index is empty or stale, the lookup may return <see langword="false"/>
+        /// even if the key exists in the underlying storage.
+        /// </para>
+        /// <para>
+        /// This overload avoids allocations by using the provided <paramref name="keyUtf8"/> array
+        /// directly as the lookup key. It is preferred for hot paths where the caller already
+        /// has a <see cref="byte"/>[].
+        /// </para>
+        /// <para>
+        /// Note: value-only columns (<c>KeySize == 0</c>) do not produce keys and therefore
+        /// cannot be queried through this API. Only key/value columns participate in the
+        /// key index.
         /// </para>
         /// </remarks>
         public bool TryFindRowByKey(uint column, byte[] keyUtf8, out uint row)
         {
-            row = 0;
-            return _indexByKeyPerColumn.TryGetValue(column, out var dict) && dict.TryGetValue(keyUtf8, out row);
+            var indexByKeyPerColumn = GetOrCreateColKeyIndex();
+            return indexByKeyPerColumn.TryGetRow(column, keyUtf8, out row);
         }
 
         /// <summary>
@@ -308,6 +436,27 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
+        /// Tries to locate a cell by its UTF-8 key within a specific column.
+        /// </summary>
+        /// <param name="column">The zero-based column index.</param>
+        /// <param name="keyUtf8">The key bytes, encoded as UTF-8.</param>
+        /// <param name="cell">
+        /// When this method returns <see langword="true"/>, contains the located
+        /// <see cref="MetadataCell"/>; otherwise, the default value.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if a cell with the specified key was found;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
+        public bool TryFindCellByKey(uint column, byte[] keyUtf8, out MetadataCell cell)
+        {
+            if (TryFindRowByKey(column, keyUtf8, out var row))
+                return TryGetCell(column, row, out cell);
+            cell = default;
+            return false;
+        }
+
+        /// <summary>
         /// Tries to find a cell by its UTF-8 key across all columns using the global index.
         /// </summary>
         /// <param name="keyUtf8">The key bytes, encoded as UTF-8.</param>
@@ -320,13 +469,60 @@ namespace Extend0.Metadata
         /// <see langword="false"/>.
         /// </returns>
         /// <remarks>
-        /// This method relies on the global index created by <see cref="RebuildIndexes(bool)"/>
-        /// with <paramref name="includeGlobal"/> set to <see langword="true"/>.
+        /// <para>
+        /// This method performs the lookup using the built-in global key index
+        /// (<see cref="GlobalKeyIndex"/>) registered under
+        /// <see cref="GLOBAL_KEY_INDEX"/>. The index is created on demand via
+        /// <see cref="GetOrCreateGlobalKeyIndex"/>; creation does not populate it.
+        /// </para>
+        /// <para>
+        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// If the index is empty or stale, the lookup may return <see langword="false"/>
+        /// even if the key exists in the underlying storage.
+        /// </para>
+        /// <para>
+        /// This overload allocates a new <see cref="byte"/> array per call to match the index
+        /// key type (<see cref="byte"/>[]). If you already have a <see cref="byte"/>[] key,
+        /// consider using the overload to avoid this allocation.
+        /// </para>
         /// </remarks>
         public bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out (uint col, uint row) hit)
         {
-            var tmp = keyUtf8.ToArray();
-            if (_globalKeyIndex.TryGetValue(tmp, out hit)) return true;
+            var _globalKeyIndex = GetOrCreateGlobalKeyIndex();
+            if (_globalKeyIndex.TryGetHit(keyUtf8, out hit)) return true;
+            hit = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Tries to find a cell by its UTF-8 key across all columns using the global index.
+        /// </summary>
+        /// <param name="keyUtf8">The key bytes, encoded as UTF-8.</param>
+        /// <param name="hit">
+        /// When this method returns <see langword="true"/>, contains the column and row
+        /// indices where the key was found; otherwise, the default tuple.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the key exists in the global index; otherwise,
+        /// <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method performs the lookup using the built-in global key index
+        /// (<see cref="GlobalKeyIndex"/>) registered under
+        /// <see cref="GLOBAL_KEY_INDEX"/>. The index is created on demand via
+        /// <see cref="GetOrCreateGlobalKeyIndex"/>; creation does not populate it.
+        /// </para>
+        /// <para>
+        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// If the index is empty or stale, the lookup may return <see langword="false"/>
+        /// even if the key exists in the underlying storage.
+        /// </para>
+        /// </remarks>
+        public bool TryFindGlobal(byte[] keyUtf8, out (uint col, uint row) hit)
+        {
+            var _globalKeyIndex = GetOrCreateGlobalKeyIndex();
+            if (_globalKeyIndex.TryGetHit(keyUtf8, out hit)) return true;
             hit = default;
             return false;
         }
@@ -451,16 +647,23 @@ namespace Extend0.Metadata
         /// <returns>
         /// The number of logical rows that contain data in at least one column.
         /// </returns>
-        public unsafe int GetLogicalRowCount()
+        public unsafe uint GetLogicalRowCount()
         {
             if (_columns.Count == 0)
                 return 0;
 
             int colCount = _columns.Count;
-            int maxCapacity = (int)_columns.Max(c => (long)c.InitialCapacity);
-            int logical = 0;
 
-            for (int r = 0; r < maxCapacity; r++)
+            uint maxCapacity = 0;
+            if (_store is ITryGrowableStore growableStore)
+                for (uint i = 0; i < (uint)colCount; i++)
+                    if (growableStore.TryGetColumnCapacity(i, out uint cap) && cap > maxCapacity)
+                        maxCapacity = cap;
+
+            if (maxCapacity == 0) maxCapacity = _columns.Max(c => c.InitialCapacity);
+
+            uint logical = 0;
+            for (uint r = 0; r < maxCapacity; r++)
             {
                 bool anyNonEmpty = RowHasAnyData(colCount, r);
                 if (anyNonEmpty)
@@ -514,11 +717,11 @@ namespace Extend0.Metadata
         /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        private unsafe bool RowHasAnyData(int colCount, int r)
+        private unsafe bool RowHasAnyData(int colCount, uint r)
         {
             for (int c = 0; c < colCount; c++)
             {
-                if (!_store.TryGetCell((uint)c, (uint)r, out var cell))
+                if (!_store.TryGetCell((uint)c, r, out var cell))
                     continue;
 
                 var meta = _columns[c];
@@ -533,33 +736,31 @@ namespace Extend0.Metadata
                     switch (valueSize)
                     {
                         case 1:
-                            if (*(byte*)valuePtr != 0)
+                            if (*valuePtr != 0)
                                 return true;
                             break;
 
                         case 2:
-                            if (*(ushort*)valuePtr != 0)
+                            if (Unsafe.ReadUnaligned<ushort>(valuePtr) != 0)
                                 return true;
                             break;
 
                         case 4:
-                            if (*(uint*)valuePtr != 0)
+                            if (Unsafe.ReadUnaligned<uint>(valuePtr) != 0)
                                 return true;
                             break;
 
                         case 8:
-                            if (*(ulong*)valuePtr != 0)
+                            if (Unsafe.ReadUnaligned<ulong>(valuePtr) != 0)
                                 return true;
                             break;
 
                         default:
                             {
                                 var raw = new ReadOnlySpan<byte>(valuePtr, valueSize);
-                                foreach (var b in raw)
-                                {
-                                    if (b != 0)
+                                for (int i = 0; i < raw.Length; i++)
+                                    if (raw[i] != 0)
                                         return true;
-                                }
                                 break;
                             }
                     }
@@ -626,46 +827,48 @@ namespace Extend0.Metadata
         /// debugging and diagnostics. It samples the data to size column widths and
         /// truncates long values with an ellipsis.
         /// </remarks>
-        public string ToString(int maxRows)
+        public string ToString(uint maxRows)
         {
             var sb = new System.Text.StringBuilder();
 
             int colCount = _columns.Count;
             if (colCount == 0) return "MetadataTable { Columns=0 }\n";
 
-            int totalRows = _columns.Min(c => GetLogicalRowCount());
-            int rowsToShow = Math.Clamp(maxRows, 0, totalRows);
+            uint totalRows = GetLogicalRowCount();
+            uint rowsToShow = Math.Clamp(maxRows, 0, totalRows);
 
             const int MAX_COL_WIDTH = 48;
+
             var widths = new int[colCount + 1];
             widths[0] = Math.Max(3, rowsToShow.ToString().Length); // "Row"
 
             for (int c = 0; c < colCount; c++)
                 widths[c + 1] = Math.Min(MAX_COL_WIDTH, Math.Max(3, _columns[c].Name.Length));
 
+            var colCountUnsigned = (uint)colCount;
             // Sample to compute column widths (uses Preview with MAX_COL_WIDTH)
-            ObtainWidths(colCount, rowsToShow, MAX_COL_WIDTH, widths);
+            ObtainWidths(colCountUnsigned, rowsToShow, MAX_COL_WIDTH, widths);
 
             // Header
             sb.Append("MetadataTable { Columns=").Append(_columns.Count)
               .Append(", Rows≈").Append(totalRows).AppendLine(" }");
 
-            sb.Append(Border(colCount, widths));
+            sb.Append(Border(colCountUnsigned, widths));
             sb.Append("| ").Append(Pad("Row", widths[0])).Append(' ');
             for (int c = 0; c < colCount; c++)
                 sb.Append("| ").Append(Pad(_columns[c].Name, widths[c + 1])).Append(' ');
             sb.Append("|\n");
-            sb.Append(Border(colCount, widths));
+            sb.Append(Border(colCountUnsigned, widths));
 
             // Rows
-            WriteRows(sb, colCount, rowsToShow, widths);
+            WriteRows(sb, colCountUnsigned, rowsToShow, widths);
 
             if (rowsToShow < totalRows)
             {
-                sb.Append(Border(colCount, widths));
+                sb.Append(Border(colCountUnsigned, widths));
                 sb.Append("… ").Append(totalRows - rowsToShow).Append(" more rows\n");
             }
-            sb.Append(Border(colCount, widths));
+            sb.Append(Border(colCountUnsigned, widths));
 
             return sb.ToString();
         }
@@ -681,18 +884,18 @@ namespace Extend0.Metadata
         /// Each cell is retrieved from the underlying store and rendered using <see cref="Preview(ReadOnlySpan{byte}, int)"/>.
         /// Missing or unreadable cells are rendered as empty strings.
         /// </remarks>
-        private unsafe void WriteRows(System.Text.StringBuilder sb, int colCount, int rowsToShow, int[] widths)
+        private unsafe void WriteRows(System.Text.StringBuilder sb, uint colCount, uint rowsToShow, int[] widths)
         {
-            for (int r = 0; r < rowsToShow; r++)
+            for (uint r = 0; r < rowsToShow; r++)
             {
                 sb.Append("| ").Append(Pad(r.ToString(), widths[0])).Append(' ');
-                for (int c = 0; c < colCount; c++)
+                for (uint c = 0; c < colCount; c++)
                 {
                     string cellText = "";
 
-                    if (_store.TryGetCell((uint)c, (uint)r, out var cell))
+                    if (_store.TryGetCell(c, r, out var cell))
                     {
-                        var meta = _columns[c];
+                        var meta = _columns[(int)c];
                         int keySize = meta.Size.GetKeySize();
                         int valueSize = meta.Size.GetValueSize();
 
@@ -746,16 +949,16 @@ namespace Extend0.Metadata
         /// Uses <see cref="Preview(ReadOnlySpan{byte}, int)"/> with <paramref name="MAX_COL_WIDTH"/>
         /// to estimate a reasonable width for each column, capped at the specified maximum.
         /// </remarks>
-        private unsafe void ObtainWidths(int colCount, int rowsToShow, int MAX_COL_WIDTH, int[] widths)
+        private unsafe void ObtainWidths(uint colCount, uint rowsToShow, int MAX_COL_WIDTH, int[] widths)
         {
-            for (int r = 0; r < rowsToShow; r++)
+            for (uint r = 0; r < rowsToShow; r++)
             {
-                for (int c = 0; c < colCount; c++)
+                for (uint c = 0; c < colCount; c++)
                 {
-                    if (!_store.TryGetCell((uint)c, (uint)r, out var cell))
+                    if (!_store.TryGetCell(c, r, out var cell))
                         continue;
 
-                    var meta = _columns[c];
+                    var meta = _columns[(int)c];
                     int keySize = meta.Size.GetKeySize();
                     int valueSize = meta.Size.GetValueSize();
 
@@ -869,7 +1072,16 @@ namespace Extend0.Metadata
         /// </returns>
         private static bool TryDecodePrintableUtf8(ReadOnlySpan<byte> v, out string text)
         {
-            text = System.Text.Encoding.UTF8.GetString(v);
+            try
+            {
+                text = Utf8Strict.GetString(v);
+            }
+            catch
+            {
+                text = string.Empty;
+                return false;
+            }
+
             if (text.Contains('\uFFFD')) return false;
             foreach (var ch in text)
                 if (char.IsControl(ch) && ch != '\t' && ch != '\r' && ch != '\n')
@@ -939,7 +1151,7 @@ namespace Extend0.Metadata
         /// A string containing a border line composed of <c>'+'</c> and <c>'-'</c> characters,
         /// followed by a newline.
         /// </returns>
-        private static string Border(int colCount, int[] widths)
+        private static string Border(uint colCount, int[] widths)
         {
             var b = new System.Text.StringBuilder();
             b.Append('+').Append(new string('-', widths[0] + 2));

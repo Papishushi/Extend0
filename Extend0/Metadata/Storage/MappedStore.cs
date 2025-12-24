@@ -37,7 +37,7 @@ namespace Extend0.Metadata.Storage
     /// end of the file and extended, updating the corresponding <see cref="ColumnDesc"/>.
     /// </para>
     /// </remarks>
-    internal sealed unsafe class MappedStore : ITryGrowableStore
+    internal sealed unsafe class MappedStore : ITryGrowableStore, ICompactableStore
     {
         private MemoryMappedFile _mmf;
         private MemoryMappedViewAccessor _view;
@@ -646,5 +646,9 @@ namespace Extend0.Metadata.Storage
 
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 
+        void ICompactableStore.Compact()
+        {
+            throw new NotImplementedException();
+        }
     }
 }

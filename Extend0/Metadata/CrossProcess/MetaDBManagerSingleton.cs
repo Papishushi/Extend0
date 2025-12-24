@@ -1,4 +1,5 @@
 ﻿using Extend0.Lifecycle.CrossProcess;
+using Extend0.Metadata.CrossProcess.Contract;
 using Extend0.Metadata.Schema;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

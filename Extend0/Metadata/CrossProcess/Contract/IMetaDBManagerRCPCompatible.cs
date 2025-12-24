@@ -1,7 +1,8 @@
 ﻿using Extend0.Lifecycle.CrossProcess;
+using Extend0.Metadata.CrossProcess.DTO;
 using Extend0.Metadata.Schema;
 
-namespace Extend0.Metadata.CrossProcess;
+namespace Extend0.Metadata.CrossProcess.Contract;
 
 /// <summary>
 /// High-level manager for cross-process (RPC) interaction with MetaDB tables.
@@ -15,13 +16,13 @@ namespace Extend0.Metadata.CrossProcess;
 /// Core responsibilities typically include:
 /// </para>
 /// <list type="bullet">
-///   <item><description><b>Registration</b>: define tables and their schema (<see cref="RegisterTable(string,string,ColumnConfiguration[])"/>, <see cref="RegisterTable(TableSpec,bool)"/>).</description></item>
-///   <item><description><b>Identity</b>: resolve table ids by name (<see cref="TryGetIdByName(string,out Guid)"/>).</description></item>
-///   <item><description><b>Open/Close</b>: close managed instances using strict or best-effort semantics (<see cref="CloseStrict(Guid)"/>, <see cref="CloseStrict(string)"/>, <see cref="CloseAll"/>, <see cref="CloseAllStrict"/>).</description></item>
-///   <item><description><b>Reads</b>: read cell/row/column/block values as serializable payloads and produce human-readable previews (<see cref="ReadCell(Guid,uint,uint,CellPayloadMode)"/>, <see cref="ReadBlock(Guid,uint[],uint,uint,CellPayloadMode)"/>, <see cref="PreviewTable(Guid,int)"/>).</description></item>
-///   <item><description><b>Data movement</b>: copy and fill columns without delegates (<see cref="CopyColumn"/>, <see cref="FillColumn"/>, <see cref="FillColumnRaw"/>).</description></item>
-///   <item><description><b>Relationships</b>: maintain parent/child references and ref-vectors without factory callbacks (<see cref="EnsureRefVec"/>, <see cref="LinkRef"/>, <see cref="GetOrCreateAndLinkChild(Guid,uint,uint,TableSpec,uint,uint)"/>).</description></item>
-///   <item><description><b>Maintenance</b>: rebuild indexes and manage background deletion workers (<see cref="RebuildIndexes"/>, <see cref="RebuildAllIndexes"/>, <see cref="RestartDeleteWorker(string?)"/>).</description></item>
+///   <item><description><b>Registration</b>: define tables and their schema (<see cref="IMetaDBManagerCommon.RegisterTable(string,string,ColumnConfiguration[])"/>, <see cref="IMetaDBManagerCommon.RegisterTable(TableSpec,bool)"/>).</description></item>
+///   <item><description><b>Identity</b>: resolve table ids by name (<see cref="IMetaDBManagerCommon.TryGetIdByName(string,out Guid)"/>).</description></item>
+///   <item><description><b>Open/Close</b>: close managed instances using strict or best-effort semantics (<see cref="IMetaDBManagerCommon.CloseStrict(Guid)"/>, <see cref="IMetaDBManagerCommon.CloseStrict(string)"/>, <see cref="IMetaDBManagerCommon.CloseAll"/>, <see cref="IMetaDBManagerCommon.CloseAllStrict"/>).</description></item>
+///   <item><description><b>Reads</b>: read cell/row/column/block values as serializable payloads and produce human-readable previews (<see cref="ReadCell(Guid,uint,uint,CellPayloadModeDTO)"/>, <see cref="ReadBlock(Guid,uint[],uint,uint,CellPayloadModeDTO)"/>, <see cref="PreviewTable(Guid, uint)"/>).</description></item>
+///   <item><description><b>Data movement</b>: copy and fill columns without delegates (<see cref="IMetaDBManagerCommon.CopyColumn"/>, <see cref="FillColumn"/>, <see cref="FillColumnRaw"/>).</description></item>
+///   <item><description><b>Relationships</b>: maintain parent/child references and ref-vectors without factory callbacks (<see cref="IMetaDBManagerCommon.EnsureRefVec"/>, <see cref="IMetaDBManagerCommon.LinkRef"/>, <see cref="GetOrCreateAndLinkChild(Guid,uint,uint,TableSpec,uint,uint)"/>).</description></item>
+///   <item><description><b>Maintenance</b>: rebuild indexes and manage background deletion workers (<see cref="IMetaDBManagerCommon.RebuildIndexes"/>, <see cref="IMetaDBManagerCommon.RebuildAllIndexes"/>, <see cref="IMetaDBManagerCommon.RestartDeleteWorker(string?)"/>).</description></item>
 /// </list>
 /// <para>
 /// This interface intentionally excludes APIs that:
@@ -33,7 +34,7 @@ namespace Extend0.Metadata.CrossProcess;
 /// </list>
 /// <para>
 /// Implementations are expected to be thread-safe where appropriate, and to honor best-effort vs strict semantics
-/// as exposed by the API (e.g., <see cref="CloseAll"/> vs <see cref="CloseAllStrict"/>).
+/// as exposed by the API (e.g., <see cref="IMetaDBManagerCommon.CloseAll"/> vs <see cref="IMetaDBManagerCommon.CloseAllStrict"/>).
 /// </para>
 /// </remarks>
 public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProcessService, IDisposable, IAsyncDisposable
@@ -43,7 +44,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// </summary>
     /// <param name="tableId">Target table id.</param>
     /// <returns>The logical number of rows containing data (implementation-defined).</returns>
-    int GetRowCount(Guid tableId);
+    uint GetRowCount(Guid tableId);
 
     /// <summary>
     /// Gets the number of columns declared for the table identified by <paramref name="tableId"/>.
@@ -66,7 +67,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// <param name="tableId">Target table id.</param>
     /// <param name="maxRows">Maximum number of rows to include in the preview.</param>
     /// <returns>A formatted textual preview of the table.</returns>
-    string PreviewTable(Guid tableId, int maxRows = 32);
+    string PreviewTable(Guid tableId, uint maxRows = 32);
 
     /// <summary>
     /// Reads a single cell from a table and returns a serializable snapshot of its VALUE payload.
@@ -88,7 +89,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// <see langword="null"/> (or an implementation-defined placeholder) while still returning raw bytes when requested.
     /// </para>
     /// </remarks>
-    CellResultDTO? ReadCell(Guid tableId, uint column, uint row, CellPayloadMode cellPayloadMode = CellPayloadMode.Both);
+    CellResultDTO? ReadCell(Guid tableId, uint column, uint row, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both);
 
     /// <summary>
     /// Reads a single cell from a table and returns a defensive copy of its raw VALUE payload bytes.
@@ -98,7 +99,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// <param name="row">Zero-based row index.</param>
     /// <returns>The raw VALUE bytes, or <see langword="null"/> if the cell is missing or logically empty.</returns>
     /// <remarks>
-    /// This is a convenience wrapper over <see cref="ReadCell(Guid,uint,uint,CellPayloadMode)"/> using <see cref="CellPayloadMode.RawOnly"/>.
+    /// This is a convenience wrapper over <see cref="ReadCell(Guid,uint,uint,CellPayloadModeDTO)"/> using <see cref="CellPayloadModeDTO.RawOnly"/>.
     /// </remarks>
     byte[]? ReadCellRaw(Guid tableId, uint column, uint row);
 
@@ -112,7 +113,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// A dictionary where keys are column names and values are cell payload snapshots
     /// (or <see langword="null"/> when a cell is missing or logically empty).
     /// </returns>
-    Dictionary<string, CellResultDTO?> ReadRow(Guid tableId, uint row, CellPayloadMode cellPayloadMode = CellPayloadMode.Both);
+    Dictionary<string, CellResultDTO?> ReadRow(Guid tableId, uint row, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both);
 
     /// <summary>
     /// Reads all column values for a given row and returns them as a name→raw VALUE payload map.
@@ -137,7 +138,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// An array of length <paramref name="rowCount"/> containing payload snapshots
     /// (or <see langword="null"/> for missing/empty cells).
     /// </returns>
-    CellResultDTO?[] ReadColumn(Guid tableId, uint column, uint startRow, uint rowCount, CellPayloadMode cellPayloadMode = CellPayloadMode.Both);
+    CellResultDTO?[] ReadColumn(Guid tableId, uint column, uint startRow, uint rowCount, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both);
 
     /// <summary>
     /// Reads a contiguous range of raw VALUE payloads from a column.
@@ -167,7 +168,7 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// <remarks>
     /// Jagged arrays are used instead of multi-dimensional arrays for maximum serializer compatibility across RPC boundaries.
     /// </remarks>
-    CellResultDTO?[][] ReadBlock(Guid tableId, uint[] columns, uint startRow, uint rowCount, CellPayloadMode cellPayloadMode = CellPayloadMode.Both);
+    CellResultDTO?[][] ReadBlock(Guid tableId, uint[] columns, uint startRow, uint rowCount, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both);
 
     /// <summary>
     /// Reads a rectangular block of raw VALUE payloads for the specified columns, starting at <paramref name="startRow"/>.
@@ -218,15 +219,15 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// <param name="policy">Capacity policy applied when growth is needed.</param>
     /// <param name="cellPayloadMode">
     /// Describes which parts of <see cref="CellResultDTO"/> should be considered for writes.
-    /// For example, <see cref="CellPayloadMode.Utf8Only"/> uses <see cref="CellResultDTO.Utf8"/>,
-    /// <see cref="CellPayloadMode.RawOnly"/> uses <see cref="CellResultDTO.Raw"/>, and <see cref="CellPayloadMode.Both"/>
+    /// For example, <see cref="CellPayloadModeDTO.Utf8Only"/> uses <see cref="CellResultDTO.Utf8"/>,
+    /// <see cref="CellPayloadModeDTO.RawOnly"/> uses <see cref="CellResultDTO.Raw"/>, and <see cref="CellPayloadModeDTO.Both"/>
     /// prefers raw bytes when present and otherwise falls back to UTF-8 encoding (implementation-defined).
     /// </param>
     /// <remarks>
     /// This replaces delegate-based fill APIs for RPC usage. Implementations must apply the underlying column size rules:
     /// truncate oversize inputs, and zero-fill remaining capacity as required by the storage layout.
     /// </remarks>
-    void FillColumn(Guid tableId, uint column, uint startRow, CellResultDTO?[] values, CapacityPolicy policy = CapacityPolicy.None, CellPayloadMode cellPayloadMode = CellPayloadMode.Both);
+    void FillColumn(Guid tableId, uint column, uint startRow, CellResultDTO?[] values, CapacityPolicy policy = CapacityPolicy.None, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both);
 
     /// <summary>
     /// Fills a column by writing raw VALUE payloads directly into a contiguous range of rows.
@@ -241,4 +242,86 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// Implementations must apply the underlying column size rules: truncate oversize inputs and zero-fill remaining capacity.
     /// </remarks>
     void FillColumnRaw(Guid tableId, uint column, uint startRow, byte[]?[] valuesRaw, CapacityPolicy policy = CapacityPolicy.None);
+
+    /// <summary>
+    /// Returns a point-in-time snapshot of the indexes currently registered for the specified table.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <returns>
+    /// An array of <see cref="IndexInfoDTO"/> describing each registered index. The returned snapshot is detached
+    /// from future mutations (subsequent adds/removes won’t affect this array).
+    /// </returns>
+    IndexInfoDTO[] GetIndexes(Guid tableId);
+
+    /// <summary>
+    /// Registers an index in the table registry, optionally replacing an existing one with the same name.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <param name="request">
+    /// The index definition request, including name, kind, and kind-specific payload.
+    /// </param>
+    /// <returns>
+    /// A mutation result describing whether the index was created/replaced, or why the operation failed.
+    /// </returns>
+    /// <remarks>
+    /// If <see cref="AddIndexRequestDTO.ReplaceIfExists"/> is <see langword="false"/> and an index with the same
+    /// name already exists, the call returns <see cref="IndexMutationStatusDTO.AlreadyExists"/>.
+    /// </remarks>
+    IndexMutationResultDTO AddIndex(Guid tableId, AddIndexRequestDTO request);
+
+    /// <summary>
+    /// Removes an index from the table registry by its logical name.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <param name="name">The logical name of the index to remove.</param>
+    /// <returns>
+    /// A mutation result describing whether the index was removed, or why the operation failed.
+    /// </returns>
+    IndexMutationResultDTO RemoveIndex(Guid tableId, string name);
+
+    /// <summary>
+    /// Finds the first matching row using an index that targets a specific column and a UTF-8 key provided as text.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <param name="column">The target column identifier used by the index lookup.</param>
+    /// <param name="keyUtf8">
+    /// The lookup key encoded as text; the receiver treats it as UTF-8 input for matching.
+    /// </param>
+    /// <returns>
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome (found/not found/error) and any row reference.
+    /// </returns>
+    IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, string keyUtf8);
+
+    /// <summary>
+    /// Finds the first matching row using an index that targets a specific column and a UTF-8 key provided as raw bytes.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <param name="column">The target column identifier used by the index lookup.</param>
+    /// <param name="keyUtf8">The lookup key as a UTF-8 byte sequence.</param>
+    /// <returns>
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome (found/not found/error) and any row reference.
+    /// </returns>
+    IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, byte[] keyUtf8);
+
+    /// <summary>
+    /// Finds a row using the table’s global index (or equivalent) with a UTF-8 key provided as text.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <param name="keyUtf8">
+    /// The lookup key encoded as text; the receiver treats it as UTF-8 input for matching.
+    /// </param>
+    /// <returns>
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome (found/not found/error) and any row reference.
+    /// </returns>
+    IndexLookupResultDTO FindGlobal(Guid tableId, string keyUtf8);
+
+    /// <summary>
+    /// Finds a row using the table’s global index (or equivalent) with a UTF-8 key provided as raw bytes.
+    /// </summary>
+    /// <param name="tableId">The identifier of the target table.</param>
+    /// <param name="keyUtf8">The lookup key as a UTF-8 byte sequence.</param>
+    /// <returns>
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome (found/not found/error) and any row reference.
+    /// </returns>
+    IndexLookupResultDTO FindGlobal(Guid tableId, byte[] keyUtf8);
 }

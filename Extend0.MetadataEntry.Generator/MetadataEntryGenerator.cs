@@ -484,22 +484,47 @@ namespace Extend0.Metadata.CodeGen
         }
 
         /// <summary>
-        /// Attempts to get the stored key as a UTF-8 byte span.
+        /// Attempts to retrieve the stored key as a UTF-8 byte span.
         /// </summary>
-        /// <param name="keyUtf8">Receives the key span if present.</param>
-        /// <returns><c>true</c> if a non-empty key is stored; otherwise <c>false</c>.</returns>
+        /// <param name="keyUtf8">
+        /// When this method returns <see langword="true"/>, contains a slice of the key slot
+        /// representing the stored key (excluding the terminating <c>NUL</c> byte). When this
+        /// method returns <see langword="false"/>, the value is <see langword="default"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the cell contains a valid, non-empty <c>NUL</c>-terminated key;
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Keys are stored in a fixed-size key slot and are expected to be <c>NUL</c>-terminated.
+        /// The key length is determined by the first <c>0</c> byte.
+        /// </para>
+        /// <para>
+        /// If the key slot does not contain any <c>NUL</c> terminator (<c>IndexOf(0) == -1</c>),
+        /// the slot is treated as uninitialized/invalid and the method returns <see langword="false"/>.
+        /// This prevents interpreting random memory as a full-length key when the underlying storage
+        /// is not guaranteed to be zero-initialized.
+        /// </para>
+        /// <para>
+        /// Empty keys (<c>IndexOf(0) == 0</c>) are considered not present and also return
+        /// <see langword="false"/>.
+        /// </para>
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetKey(out ReadOnlySpan<byte> keyUtf8)
         {
             int cap = KeyCap(_size);
             var stored = new ReadOnlySpan<byte>(_entry, cap);
+        
             int len = stored.IndexOf((byte)0);
-            if (len == 0)
+            if (len <= 0) // 0 => empty, -1 => invalid/uninitialized
             {
                 keyUtf8 = default;
                 return false;
             }
-            keyUtf8 = len < 0 ? stored : stored[..len];
+        
+            keyUtf8 = stored[..len];
             return true;
         }
 
@@ -562,18 +587,40 @@ namespace Extend0.Metadata.CodeGen
         }
 
         /// <summary>
-        /// Compares the stored key with the provided UTF-8 bytes.
+        /// Compares the cell's stored key against the provided UTF-8 key bytes.
         /// </summary>
-        /// <param name="keyUtf8">UTF-8 encoded key bytes.</param>
-        /// <returns><c>true</c> if keys are equal; otherwise <c>false</c>.</returns>
+        /// <param name="keyUtf8">UTF-8 encoded key bytes to compare with the stored key.</param>
+        /// <returns>
+        /// <see langword="true"/> if the cell contains a valid, non-empty key and it matches
+        /// <paramref name="keyUtf8"/> byte-for-byte; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Keys in a <see cref="MetadataCell"/> are stored in a fixed-size key slot and are
+        /// expected to be <c>NUL</c>-terminated. A key is considered valid only when the slot
+        /// contains a <c>0</c> byte terminator at some position &gt; 0.
+        /// </para>
+        /// <para>
+        /// If the key slot contains no <c>NUL</c> terminator (<c>IndexOf(0) == -1</c>), this method
+        /// treats the slot as uninitialized/invalid and returns <see langword="false"/>. This is
+        /// critical for scenarios where the underlying storage may not be zero-initialized.
+        /// </para>
+        /// <para>
+        /// This method rejects empty keys (<c>len == 0</c>) and keys that do not fit the slot
+        /// (<paramref name="keyUtf8"/> length must be strictly less than the slot capacity).
+        /// </para>
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool KeyEquals(ReadOnlySpan<byte> keyUtf8)
         {
             int cap = KeyCap(_size);
             if (keyUtf8.Length >= cap) return false;
+        
             var stored = new ReadOnlySpan<byte>(_entry, cap);
             int len = stored.IndexOf((byte)0);
-            if (len < 0) len = cap;
+            if (len < 0) return false; // no NUL => invalid/uninitialized
+            if (len == 0) return false; // empty key
+        
             return len == keyUtf8.Length && stored[..len].SequenceEqual(keyUtf8);
         }
 

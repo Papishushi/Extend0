@@ -1,4 +1,6 @@
-﻿namespace Extend0
+﻿using System.Runtime.CompilerServices;
+
+namespace Extend0
 {
     /// <summary>
     /// Provides a value-based equality comparer for <see cref="byte"/> arrays.
@@ -12,6 +14,8 @@
     /// It is intended for use as a key comparer in dictionaries and hash-based collections
     /// where <c>byte[]</c> instances represent immutable keys (for example, UTF-8 keys or
     /// binary identifiers).
+    /// <b>Important:</b> Arrays used as keys must not be mutated after insertion into a hash-based collection.
+    /// </para>
     /// </remarks>
     public sealed class ByteArrayComparer : IEqualityComparer<byte[]>
     {
@@ -21,28 +25,14 @@
         /// </summary>
         public static readonly ByteArrayComparer Ordinal = new();
 
-        /// <summary>
-        /// Determines whether two <see cref="byte"/> arrays are equal.
-        /// </summary>
-        /// <param name="x">The first byte array to compare.</param>
-        /// <param name="y">The second byte array to compare.</param>
-        /// <returns>
-        /// <see langword="true"/> if both arrays reference the same instance, or if both are
-        /// non-<see langword="null"/> and contain the same bytes in the same order;
-        /// otherwise, <see langword="false"/>.
-        /// </returns>
+        /// <inheritdoc/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(byte[]? x, byte[]? y)
-            => ReferenceEquals(x, y) || x is not null && y is not null && x.AsSpan().SequenceEqual(y);
+            => ReferenceEquals(x, y) || (x is not null && y is not null && x.AsSpan().SequenceEqual(y));
 
-        /// <summary>
-        /// Returns a hash code for the specified <see cref="byte"/> array.
-        /// </summary>
-        /// <param name="obj">The byte array for which to compute a hash code.</param>
-        /// <returns>
-        /// A hash code that combines all bytes of <paramref name="obj"/> using a simple
-        /// multiplicative hash (starting from 17 and multiplying by 31 for each byte).
-        /// </returns>
+        /// <inheritdoc/>
         /// <remarks>
+        /// Uses FNV-1a (32-bit) over the full array.
         /// This implementation assumes that the contents of <paramref name="obj"/> do not
         /// change while it is used as a key in a hash-based collection. Mutating the array
         /// after insertion may lead to undefined behavior.
@@ -50,15 +40,22 @@
         /// <exception cref="ArgumentNullException">
         /// Thrown if <paramref name="obj"/> is <see langword="null"/>.
         /// </exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetHashCode(byte[] obj)
         {
             ArgumentNullException.ThrowIfNull(obj);
 
             unchecked
             {
-                int h = 17;
-                foreach (byte b in obj) h = h * 31 + b;
-                return h;
+                // FNV-1a 32-bit
+                const uint offset = 2166136261u;
+                const uint prime = 16777619u;
+
+                uint hash = offset;
+                for (int i = 0; i < obj.Length; i++)
+                    hash = (hash ^ obj[i]) * prime;
+
+                return (int)hash;
             }
         }
     }

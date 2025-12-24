@@ -1,8 +1,13 @@
-﻿using System.Text;
-using Extend0.Lifecycle.CrossProcess;
+﻿using Extend0.Lifecycle.CrossProcess;
 using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.CrossProcess.Contract;
+using Extend0.Metadata.CrossProcess.DTO;
+using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Schema;
 using Microsoft.Extensions.Logging;
+using System.Buffers;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Extend0.Metadata.CrossProcess
 {
@@ -16,7 +21,7 @@ namespace Extend0.Metadata.CrossProcess
     /// </para>
     /// <para>
     /// Read operations return <see cref="CellResultDTO"/> snapshots, which are cross-process safe and can include:
-    /// UTF-8 decoded payloads, raw byte copies, or both, depending on <see cref="CellPayloadMode"/>.
+    /// UTF-8 decoded payloads, raw byte copies, or both, depending on <see cref="CellPayloadModeDTO"/>.
     /// </para>
     /// <para>
     /// Column layout rules are derived from the column entry size:
@@ -198,7 +203,7 @@ namespace Extend0.Metadata.CrossProcess
         /// a value-only column has any non-zero VALUE byte, or a key/value column stores a non-empty KEY.
         /// Intended for diagnostics and UI inspection rather than hot paths.
         /// </remarks>
-        public int GetRowCount(Guid tableId)
+        public uint GetRowCount(Guid tableId)
             => _innerManager.WithTable(tableId, t => t.GetLogicalRowCount());
 
         /// <summary>
@@ -218,7 +223,7 @@ namespace Extend0.Metadata.CrossProcess
         /// </summary>
         /// <param name="tableId">Table identifier.</param>
         /// <param name="maxRows">Maximum number of rows to render in the preview.</param>
-        public string PreviewTable(Guid tableId, int maxRows = 32)
+        public string PreviewTable(Guid tableId, uint maxRows = 32)
             => _innerManager.WithTable(tableId, t => t.ToString(maxRows));
 
         /// <summary>
@@ -231,18 +236,18 @@ namespace Extend0.Metadata.CrossProcess
         /// <returns>
         /// A DTO snapshot. When the cell is missing/unreadable, <see cref="CellResultDTO.HasCell"/> is <see langword="false"/>.
         /// </returns>
-        public CellResultDTO? ReadCell(Guid tableId, uint column, uint row, CellPayloadMode cellPayloadMode = CellPayloadMode.Both)
+        public CellResultDTO? ReadCell(Guid tableId, uint column, uint row, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
             => _innerManager.WithTable(tableId, t => BuildCellDto(t, column, row, cellPayloadMode));
 
         /// <summary>
         /// Reads the VALUE payload of a cell as a raw byte copy.
         /// </summary>
         /// <remarks>
-        /// Convenience wrapper over <see cref="ReadCell"/> that requests <see cref="CellPayloadMode.RawOnly"/>
+        /// Convenience wrapper over <see cref="ReadCell"/> that requests <see cref="CellPayloadModeDTO.RawOnly"/>
         /// and returns <see cref="CellResultDTO.ValueRaw"/>.
         /// </remarks>
         public byte[]? ReadCellRaw(Guid tableId, uint column, uint row)
-            => _innerManager.WithTable(tableId, t => BuildCellDto(t, column, row, CellPayloadMode.RawOnly)?.ValueRaw);
+            => _innerManager.WithTable(tableId, t => BuildCellDto(t, column, row, CellPayloadModeDTO.RawOnly)?.ValueRaw);
 
         /// <summary>
         /// Reads a row and returns a dictionary keyed by column name with per-cell DTO snapshots.
@@ -250,7 +255,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="tableId">Table identifier.</param>
         /// <param name="row">Row index.</param>
         /// <param name="cellPayloadMode">Payload selection strategy.</param>
-        public Dictionary<string, CellResultDTO?> ReadRow(Guid tableId, uint row, CellPayloadMode cellPayloadMode = CellPayloadMode.Both)
+        public Dictionary<string, CellResultDTO?> ReadRow(Guid tableId, uint row, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
             => _innerManager.WithTable(tableId, t =>
             {
                 var cols = t.Spec.Columns;
@@ -271,7 +276,7 @@ namespace Extend0.Metadata.CrossProcess
                 var cols = t.Spec.Columns;
                 var dict = new Dictionary<string, byte[]?>(cols.Length, StringComparer.Ordinal);
                 for (uint c = 0; c < (uint)cols.Length; c++)
-                    dict[cols[c].Name] = BuildCellDto(t, c, row, CellPayloadMode.RawOnly)?.ValueRaw;
+                    dict[cols[c].Name] = BuildCellDto(t, c, row, CellPayloadModeDTO.RawOnly)?.ValueRaw;
                 return dict;
             });
 
@@ -283,7 +288,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="startRow">First row to read.</param>
         /// <param name="rowCount">Number of rows to read.</param>
         /// <param name="cellPayloadMode">Payload selection strategy.</param>
-        public CellResultDTO?[] ReadColumn(Guid tableId, uint column, uint startRow, uint rowCount, CellPayloadMode cellPayloadMode = CellPayloadMode.Both)
+        public CellResultDTO?[] ReadColumn(Guid tableId, uint column, uint startRow, uint rowCount, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
             => _innerManager.WithTable(tableId, t =>
             {
                 var arr = new CellResultDTO?[rowCount];
@@ -304,7 +309,7 @@ namespace Extend0.Metadata.CrossProcess
             {
                 var arr = new byte[]?[rowCount];
                 for (uint i = 0; i < rowCount; i++)
-                    arr[i] = BuildCellDto(t, column, startRow + i, CellPayloadMode.RawOnly)?.ValueRaw;
+                    arr[i] = BuildCellDto(t, column, startRow + i, CellPayloadModeDTO.RawOnly)?.ValueRaw;
                 return arr;
             });
 
@@ -316,7 +321,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="startRow">First row to read.</param>
         /// <param name="rowCount">Number of rows to read.</param>
         /// <param name="cellPayloadMode">Payload selection strategy.</param>
-        public CellResultDTO?[][] ReadBlock(Guid tableId, uint[] columns, uint startRow, uint rowCount, CellPayloadMode cellPayloadMode = CellPayloadMode.Both)
+        public CellResultDTO?[][] ReadBlock(Guid tableId, uint[] columns, uint startRow, uint rowCount, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
             => _innerManager.WithTable(tableId, t =>
             {
                 var rows = new CellResultDTO?[rowCount][];
@@ -345,7 +350,7 @@ namespace Extend0.Metadata.CrossProcess
                 {
                     var line = new byte[]?[columns.Length];
                     for (int ci = 0; ci < columns.Length; ci++)
-                        line[ci] = BuildCellDto(t, columns[ci], startRow + r, CellPayloadMode.RawOnly)?.ValueRaw;
+                        line[ci] = BuildCellDto(t, columns[ci], startRow + r, CellPayloadModeDTO.RawOnly)?.ValueRaw;
                     rows[r] = line;
                 }
                 return rows;
@@ -391,7 +396,7 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public void FillColumn(Guid tableId, uint column, uint startRow, CellResultDTO?[] values,
-            CapacityPolicy policy = CapacityPolicy.None, CellPayloadMode cellPayloadMode = CellPayloadMode.Both)
+            CapacityPolicy policy = CapacityPolicy.None, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
             => _innerManager.WithTable(tableId, t =>
             {
                 var meta = t.Spec.Columns[(int)column];
@@ -506,7 +511,7 @@ namespace Extend0.Metadata.CrossProcess
         /// Payload copies are created only according to <paramref name="mode"/> to minimize allocations in bulk reads.
         /// </para>
         /// </remarks>
-        private static CellResultDTO? BuildCellDto(MetadataTable t, uint column, uint row, CellPayloadMode mode)
+        private static CellResultDTO? BuildCellDto(MetadataTable t, uint column, uint row, CellPayloadModeDTO mode)
         {
             var meta = t.Spec.Columns[(int)column];
             int keyCap = meta.Size.GetKeySize();
@@ -571,13 +576,13 @@ namespace Extend0.Metadata.CrossProcess
             string? keyUtf8 = null;
             string? valUtf8 = null;
 
-            if (mode is CellPayloadMode.Both or CellPayloadMode.RawOnly)
+            if (mode is CellPayloadModeDTO.Both or CellPayloadModeDTO.RawOnly)
             {
                 if (hasKey && !key.IsEmpty) keyRaw = key.ToArray();
                 if (!value.IsEmpty) valRaw = value.ToArray();
             }
 
-            if (mode is CellPayloadMode.Both or CellPayloadMode.Utf8Only)
+            if (mode is CellPayloadModeDTO.Both or CellPayloadModeDTO.Utf8Only)
             {
                 if (hasKey && !key.IsEmpty) keyUtf8 = TryDecodePrintableUtf8(key, keyLenHint);
                 if (!value.IsEmpty) valUtf8 = TryDecodePrintableUtf8(value, valLenHint);
@@ -680,16 +685,16 @@ namespace Extend0.Metadata.CrossProcess
         /// Raw bytes are preferred when <paramref name="mode"/> allows it; otherwise UTF-8 encoding is used.
         /// When room exists, a trailing <c>0</c> is written to preserve "C-string-like" semantics for textual keys.
         /// </remarks>
-        private static unsafe void WriteKeySegment(byte* keyPtr, int keyCap, byte[]? keyRaw, string? keyUtf8, CellPayloadMode mode)
+        private static unsafe void WriteKeySegment(byte* keyPtr, int keyCap, byte[]? keyRaw, string? keyUtf8, CellPayloadModeDTO mode)
         {
             var seg = new Span<byte>(keyPtr, keyCap);
             seg.Clear();
 
             ReadOnlySpan<byte> payload = default;
 
-            if ((mode == CellPayloadMode.RawOnly || mode == CellPayloadMode.Both) && keyRaw is { Length: > 0 })
+            if ((mode == CellPayloadModeDTO.RawOnly || mode == CellPayloadModeDTO.Both) && keyRaw is { Length: > 0 })
                 payload = keyRaw;
-            else if ((mode == CellPayloadMode.Utf8Only || mode == CellPayloadMode.Both) && !string.IsNullOrEmpty(keyUtf8))
+            else if ((mode == CellPayloadModeDTO.Utf8Only || mode == CellPayloadModeDTO.Both) && !string.IsNullOrEmpty(keyUtf8))
                 payload = Encoding.UTF8.GetBytes(keyUtf8);
 
             if (payload.IsEmpty) return;
@@ -708,16 +713,16 @@ namespace Extend0.Metadata.CrossProcess
         /// Raw bytes are preferred when <paramref name="mode"/> allows it; otherwise UTF-8 encoding is used.
         /// When room exists, a trailing <c>0</c> is written to preserve "C-string-like" semantics for textual values.
         /// </remarks>
-        private static unsafe void WriteValueSegment(byte* valuePtr, int valCap, byte[]? valueRaw, string? valueUtf8, CellPayloadMode mode)
+        private static unsafe void WriteValueSegment(byte* valuePtr, int valCap, byte[]? valueRaw, string? valueUtf8, CellPayloadModeDTO mode)
         {
             var seg = new Span<byte>(valuePtr, valCap);
             seg.Clear();
 
             ReadOnlySpan<byte> payload = default;
 
-            if ((mode == CellPayloadMode.RawOnly || mode == CellPayloadMode.Both) && valueRaw is { Length: > 0 })
+            if ((mode == CellPayloadModeDTO.RawOnly || mode == CellPayloadModeDTO.Both) && valueRaw is { Length: > 0 })
                 payload = valueRaw;
-            else if ((mode == CellPayloadMode.Utf8Only || mode == CellPayloadMode.Both) && !string.IsNullOrEmpty(valueUtf8))
+            else if ((mode == CellPayloadModeDTO.Utf8Only || mode == CellPayloadModeDTO.Both) && !string.IsNullOrEmpty(valueUtf8))
                 payload = Encoding.UTF8.GetBytes(valueUtf8);
 
             if (payload.IsEmpty) return;
@@ -838,5 +843,430 @@ namespace Extend0.Metadata.CrossProcess
             try { await _innerManager.DisposeAsync().ConfigureAwait(false); }
             finally { GC.SuppressFinalize(this); }
         }
+
+        /// <summary>
+        /// Returns a snapshot of the indexes currently registered for the specified table.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <returns>
+        /// An array of <see cref="IndexInfoDTO"/> describing each registered index.  
+        /// Returns an empty array when <paramref name="tableId"/> is <see cref="Guid.Empty"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method enumerates <c>MetadataTable.Indexes</c> and projects each <see cref="ITableIndex"/> into a DTO
+        /// suitable for cross-process transport.
+        /// </para>
+        /// <para>
+        /// The returned list is a point-in-time snapshot; it does not reflect subsequent registry mutations.
+        /// </para>
+        /// </remarks>
+        public IndexInfoDTO[] GetIndexes(Guid tableId)
+        {
+            if (tableId == Guid.Empty) return [];
+
+            return _innerManager.WithTable(tableId, t =>
+            {
+                return t.Indexes
+                    .Enumerate()
+                    .Select(idx => new IndexInfoDTO(
+                        Name: idx.Name,
+                        Kind: idx switch
+                        {
+                            // Built-ins conocidos
+                            Indexing.Internal.BuiltIn.ColumnKeyIndex => IndexKindDTO.BuiltIn_ColumnKey,
+                            Indexing.Internal.BuiltIn.GlobalKeyIndex => IndexKindDTO.BuiltIn_GlobalKey,
+                            _ => IndexKindDTO.Custom
+                        },
+                        IsRebuildable: idx is IRebuildableIndex,
+                        IsBuiltIn: idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
+                                     || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex,
+                        Notes: null
+                    ))
+                    .ToArray();
+            });
+        }
+
+        /// <summary>
+        /// Registers an index in the table registry, optionally replacing an existing one with the same name.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <param name="request">Index definition request (name, kind and payload).</param>
+        /// <returns>
+        /// A <see cref="IndexMutationResultDTO"/> describing the outcome of the mutation.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method mutates the per-table index registry (<c>t.Indexes</c>). Built-in indexes are protected and cannot be
+        /// added, removed, or replaced through this API.
+        /// </para>
+        /// <para>
+        /// If an index with the same <see cref="AddIndexRequestDTO.Name"/> already exists:
+        /// <list type="bullet">
+        ///   <item>
+        ///     <description>
+        ///     When <see cref="AddIndexRequestDTO.ReplaceIfExists"/> is <see langword="false"/>, the method returns
+        ///     <see cref="IndexMutationStatusDTO.AlreadyExists"/>.
+        ///     </description>
+        ///   </item>
+        ///   <item>
+        ///     <description>
+        ///     When <see cref="AddIndexRequestDTO.ReplaceIfExists"/> is <see langword="true"/>, the method attempts a safe replacement.
+        ///     The previous index is not removed until the new index has been successfully created.
+        ///     </description>
+        ///   </item>
+        /// </list>
+        /// </para>
+        /// <para>
+        /// The creation of custom indexes is backend-specific and currently delegated to
+        /// <see cref="TryCreateCustomIndex(AddIndexRequestDTO, out ITableIndex?, out string?)"/>. Until a payload schema is defined and
+        /// supported, custom index creation returns <see cref="IndexMutationStatusDTO.NotSupported"/>.
+        /// </para>
+        /// <para>
+        /// Replacement is performed using a best-effort swap with rollback: if the old index was removed and adding the new index fails,
+        /// the method tries to re-add the previous instance before returning <see cref="IndexMutationStatusDTO.Error"/>.
+        /// </para>
+        /// </remarks>
+        public IndexMutationResultDTO AddIndex(Guid tableId, AddIndexRequestDTO request)
+        {
+            if (tableId == Guid.Empty)
+                return new(IndexMutationStatusDTO.TableNotOpen, null, "Empty tableId.");
+
+            if (string.IsNullOrWhiteSpace(request.Name))
+                return new(IndexMutationStatusDTO.InvalidName, null, "Invalid index name.");
+
+            if (request.Kind == IndexKindDTO.Unknown)
+                return new(IndexMutationStatusDTO.InvalidKind, null, "Invalid/unknown index kind.");
+
+            // Built-ins are protected (cannot be created/replaced manually).
+            if (request.Kind is IndexKindDTO.BuiltIn_ColumnKey or IndexKindDTO.BuiltIn_GlobalKey)
+                return new(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be added manually.");
+
+            return _innerManager.WithTable(tableId, t =>
+            {
+                // 1) Detect existing index (if any)
+                bool exists = t.Indexes.TryGet(request.Name, out ITableIndex? existing) && existing is not null;
+
+                if (exists)
+                {
+                    // Never allow mutating built-ins even if someone named-collides.
+                    if (IsBuiltIn(existing!))
+                        return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be replaced/removed.");
+
+                    if (!request.ReplaceIfExists)
+                        return new(IndexMutationStatusDTO.AlreadyExists, null, request.Notes);
+                }
+
+                // 2) Create the new index instance (backend-specific)
+                //    IMPORTANT: do NOT remove the old one until we have a valid new instance.
+                var create = TryCreateCustomIndex(request, out var created, out var createNotes);
+
+                if (create != IndexMutationStatusDTO.Ok || created is null)
+                    return new(create, null, createNotes ?? request.Notes);
+
+                // 3) Swap (safe replace)
+                try
+                {
+                    if (exists)
+                        t.Indexes.Remove(request.Name);
+
+                    t.Indexes.Add(created);
+
+                    // Optional: if the index is rebuildable and you want it "ready" immediately, uncomment:
+                    // if (created is IRebuildableIndex r) r.Rebuild(t);
+
+                    var info = ToIndexInfoDTO(created);
+                    return new(IndexMutationStatusDTO.Ok, info, request.Notes);
+                }
+                catch (Exception ex)
+                {
+                    // Best-effort rollback if we removed the previous one
+                    try
+                    {
+                        if (exists) t.Indexes.Add(existing!);
+                    }
+                    catch
+                    {
+                        // swallow: we already have an error to report
+                    }
+
+                    return new(IndexMutationStatusDTO.Error, null, ex.Message);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Returns whether the specified index instance is a protected built-in index.
+        /// </summary>
+        /// <param name="idx">Index instance.</param>
+        /// <returns><see langword="true"/> if the index is built-in; otherwise <see langword="false"/>.</returns>
+        private static bool IsBuiltIn(ITableIndex idx)
+            => idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
+            || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex;
+
+        /// <summary>
+        /// Converts a runtime index instance into an <see cref="IndexInfoDTO"/> snapshot.
+        /// </summary>
+        /// <param name="idx">Index instance.</param>
+        /// <returns>DTO describing the index.</returns>
+        private static IndexInfoDTO ToIndexInfoDTO(ITableIndex idx) => new(
+            Name: idx.Name,
+            Kind: idx switch
+            {
+                Indexing.Internal.BuiltIn.ColumnKeyIndex => IndexKindDTO.BuiltIn_ColumnKey,
+                Indexing.Internal.BuiltIn.GlobalKeyIndex => IndexKindDTO.BuiltIn_GlobalKey,
+                _ => IndexKindDTO.Custom
+            },
+            IsRebuildable: idx is IRebuildableIndex,
+            IsBuiltIn: IsBuiltIn(idx),
+            Notes: null
+        );
+
+        /// <summary>
+        /// Backend-specific factory that attempts to create a custom index instance from the request payload.
+        /// </summary>
+        /// <param name="request">Index request.</param>
+        /// <param name="created">Receives the created index instance when successful; otherwise <see langword="null"/>.</param>
+        /// <param name="notes">Receives diagnostic notes describing failures or unsupported features.</param>
+        /// <returns>
+        /// <see cref="IndexMutationStatusDTO.Ok"/> when an index was created; otherwise a status describing the reason.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method is intentionally conservative: until a stable payload schema is defined for <see cref="AddIndexRequestDTO.IndexInputPayload"/>,
+        /// it returns <see cref="IndexMutationStatusDTO.NotSupported"/> for <see cref="IndexKindDTO.Custom"/>.
+        /// </para>
+        /// </remarks>
+        private static IndexMutationStatusDTO TryCreateCustomIndex(AddIndexRequestDTO request, out ITableIndex? created, out string? notes)
+        {
+            created = null;
+
+            if (request.Kind != IndexKindDTO.Custom)
+            {
+                notes = $"Index kind '{request.Kind}' is not supported by this backend.";
+                return IndexMutationStatusDTO.NotSupported;
+            }
+
+            // TODO: parse request.IndexInputPayload and create a concrete index instance.
+            // Example shape you might support later:
+            // { "type": "kv", "key": "bytes_fixed", "value": "row_u32", "capacity": 0, "rebuild": true, ... }
+
+            notes = "Custom index creation is not supported in this backend version.";
+            return IndexMutationStatusDTO.NotSupported;
+        }
+
+
+        /// <summary>
+        /// Removes an index from the table registry by name.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <param name="name">Index name.</param>
+        /// <returns>
+        /// A <see cref="IndexMutationResultDTO"/> describing the outcome of the mutation.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Built-in indexes are protected and cannot be removed.
+        /// </para>
+        /// <para>
+        /// If the index does not exist, the method returns <see cref="IndexMutationStatusDTO.NotFound"/>.
+        /// </para>
+        /// </remarks>
+        public IndexMutationResultDTO RemoveIndex(Guid tableId, string name)
+        {
+            if (tableId == Guid.Empty)
+                return new(IndexMutationStatusDTO.TableNotOpen, null);
+
+            if (string.IsNullOrWhiteSpace(name))
+                return new(IndexMutationStatusDTO.InvalidName, null);
+
+            return _innerManager.WithTable(tableId, t =>
+            {
+                if (!t.Indexes.TryGet(name, out var idx))
+                    return new IndexMutationResultDTO(IndexMutationStatusDTO.NotFound, null);
+
+                if (idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
+                    || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex)
+                    return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null);
+
+                t.Indexes.Remove(name);
+                return new IndexMutationResultDTO(IndexMutationStatusDTO.Ok, null);
+            });
+        }
+
+        /// <summary>
+        /// Attempts to locate the row index for a given key in a specific column using the built-in column-key index.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <param name="column">Column index to search.</param>
+        /// <param name="keyUtf8">Key as a managed string (encoded as UTF-8 before lookup).</param>
+        /// <returns>
+        /// A <see cref="IndexLookupResultDTO"/> containing the lookup status and, when found, the hit information.
+        /// </returns>
+        /// <remarks>
+        /// This overload encodes <paramref name="keyUtf8"/> to UTF-8 and forwards the lookup to the byte[] overload.
+        /// </remarks>
+        public IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, string keyUtf8)
+        {
+            if (string.IsNullOrEmpty(keyUtf8))
+                return new(IndexLookupStatusDTO.InvalidKey, default);
+
+            return WithUtf8(keyUtf8, bytes => FindRowByKey(tableId, column, bytes));
+        }
+
+        /// <summary>
+        /// Attempts to locate the row index for a given UTF-8 key in a specific column using the built-in column-key index.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <param name="column">Column index to search.</param>
+        /// <param name="keyUtf8">Key bytes in UTF-8 encoding.</param>
+        /// <returns>
+        /// A <see cref="IndexLookupResultDTO"/> containing:
+        /// <list type="bullet">
+        ///   <item><description><see cref="IndexLookupStatusDTO.Ok"/> and a populated <see cref="IndexHitDTO"/> when found.</description></item>
+        ///   <item><description><see cref="IndexLookupStatusDTO.NotFound"/> when the key is not present in the index.</description></item>
+        ///   <item><description><see cref="IndexLookupStatusDTO.InvalidColumn"/> when <paramref name="column"/> is out of range.</description></item>
+        ///   <item><description><see cref="IndexLookupStatusDTO.ValueOnlyColumn"/> when the column has no key segment (<c>KeySize == 0</c>).</description></item>
+        ///   <item><description><see cref="IndexLookupStatusDTO.TableNotOpen"/> when the table cannot be resolved/opened.</description></item>
+        /// </list>
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method relies on the built-in "column key index" which maps (column, key) -> row.
+        /// </para>
+        /// <para>
+        /// The returned <see cref="IndexHitDTO"/> includes the resolved <paramref name="column"/> and the matching row index.
+        /// </para>
+        /// </remarks>
+        public IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, byte[] keyUtf8)
+        {
+            if (tableId == Guid.Empty)
+                return new(IndexLookupStatusDTO.TableNotOpen, default);
+
+            return _innerManager.WithTable(tableId, t =>
+            {
+                if (column >= t.ColumnCount)
+                    return new IndexLookupResultDTO(IndexLookupStatusDTO.InvalidColumn, default);
+
+                var keySize = t.Spec.Columns[(int)column].Size.GetKeySize();
+                if (keySize == 0)
+                    return new(IndexLookupStatusDTO.ValueOnlyColumn, default);
+
+                if (!t.TryFindRowByKey(column, keyUtf8, out var row))
+                    return new(IndexLookupStatusDTO.NotFound, new(false, 0, 0));
+
+                return new(
+                    IndexLookupStatusDTO.Ok,
+                    new IndexHitDTO(true, column, row)
+                );
+            });
+        }
+
+        /// <summary>
+        /// Attempts to locate a (column,row) hit for a given global key using the built-in global key index.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <param name="keyUtf8">Global key as a managed string (encoded as UTF-8 before lookup).</param>
+        /// <returns>
+        /// A <see cref="IndexLookupResultDTO"/> containing the lookup status and, when found, the hit information.
+        /// </returns>
+        /// <remarks>
+        /// This overload encodes <paramref name="keyUtf8"/> to UTF-8 and forwards the lookup to the byte[] overload.
+        /// </remarks>
+        public IndexLookupResultDTO FindGlobal(Guid tableId, string keyUtf8)
+        {
+            if (string.IsNullOrEmpty(keyUtf8))
+                return new(IndexLookupStatusDTO.InvalidKey, default);
+
+            return WithUtf8(keyUtf8, bytes => FindGlobal(tableId, bytes));
+        }
+
+        /// <summary>
+        /// Attempts to locate a (column,row) hit for a given global UTF-8 key using the built-in global key index.
+        /// </summary>
+        /// <param name="tableId">Table identifier.</param>
+        /// <param name="keyUtf8">Global key bytes in UTF-8 encoding.</param>
+        /// <returns>
+        /// A <see cref="IndexLookupResultDTO"/> containing:
+        /// <list type="bullet">
+        ///   <item><description><see cref="IndexLookupStatusDTO.Ok"/> and a populated <see cref="IndexHitDTO"/> when found.</description></item>
+        ///   <item><description><see cref="IndexLookupStatusDTO.NotFound"/> when the key is not present in the index.</description></item>
+        ///   <item><description><see cref="IndexLookupStatusDTO.TableNotOpen"/> when the table cannot be resolved/opened.</description></item>
+        /// </list>
+        /// </returns>
+        /// <remarks>
+        /// The global index typically maps a unique key to the corresponding (column,row) location within the table.
+        /// </remarks>
+        public IndexLookupResultDTO FindGlobal(Guid tableId, byte[] keyUtf8)
+        {
+            if (tableId == Guid.Empty)
+                return new(IndexLookupStatusDTO.TableNotOpen, default);
+
+            return _innerManager.WithTable(tableId, t =>
+            {
+                if (!t.TryFindGlobal(keyUtf8, out var hit))
+                    return new IndexLookupResultDTO(IndexLookupStatusDTO.NotFound, new(false, 0, 0));
+
+                return new(
+                    IndexLookupStatusDTO.Ok,
+                    new IndexHitDTO(true, hit.col, hit.row)
+                );
+            });
+        }
+
+        /// <summary>
+        /// Encodes a managed string to an exact-length UTF-8 byte array and invokes a callback with the result.
+        /// </summary>
+        /// <param name="s">Input string to encode.</param>
+        /// <param name="fn">Callback that receives an exact-length UTF-8 byte array.</param>
+        /// <returns>The callback result.</returns>
+        /// <remarks>
+        /// <para>
+        /// Uses a <c>stackalloc</c> fast-path for small payloads and <see cref="ArrayPool{T}"/> for larger ones.
+        /// The callback always receives a new exact-length array (never a pooled buffer) to avoid leaking pooled memory.
+        /// </para>
+        /// <para>
+        /// This helper intentionally performs a single allocation for the exact-length array to keep the public API
+        /// (<c>Func&lt;byte[], ...&gt;</c>) safe and simple.
+        /// </para>
+        /// </remarks>
+        private static IndexLookupResultDTO WithUtf8(string s, Func<byte[], IndexLookupResultDTO> fn)
+        {
+            const int STACK_LIMIT = 512;
+            int byteCount = Encoding.UTF8.GetByteCount(s);
+
+            if (byteCount <= STACK_LIMIT)
+            {
+                Span<byte> tmp = stackalloc byte[byteCount];
+                Encoding.UTF8.GetBytes(s.AsSpan(), tmp);
+
+                // 1 alloc exacto
+                var arr = new byte[byteCount];
+                tmp.CopyTo(arr);
+                return fn(arr);
+            }
+
+            byte[] rented = ArrayPool<byte>.Shared.Rent(byteCount);
+            try
+            {
+                int written = Encoding.UTF8.GetBytes(s.AsSpan(), rented);
+                var arr = new byte[written];
+                Buffer.BlockCopy(rented, 0, arr, 0, written);
+                return fn(arr);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented, clearArray: false);
+            }
+        }
+
+        /// <summary>
+        /// Throws an <see cref="ObjectDisposedException"/> if this instance has been disposed.
+        /// </summary>
+        /// <remarks>
+        /// Centralized guard used by public RPC methods to prevent operations after disposal.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, nameof(MetaDBManagerRCPCompatible));
     }
 }

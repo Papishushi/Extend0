@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata.CrossProcess
+﻿namespace Extend0.Metadata.CrossProcess.DTO
 {
     /// <summary>
     /// Specifies which representations of a MetaDB cell payload are included in a returned snapshot.
@@ -18,7 +18,7 @@
     /// </list>
     /// </para>
     /// </remarks>
-    public enum CellPayloadMode : byte
+    public enum CellPayloadModeDTO : byte
     {
         /// <summary>
         /// Returns only UTF-8 decoded strings (best-effort), omitting raw byte copies.
