@@ -1,4 +1,7 @@
 ﻿using Extend0.Metadata.Diagnostics;
+using Extend0.Metadata.Indexing.Internal.BuiltIn;
+using Extend0.Metadata.Indexing.Registries;
+using Extend0.Metadata.Indexing.Registries.Contract;
 using Extend0.Metadata.Refs;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
@@ -12,7 +15,7 @@ namespace Extend0.Metadata
 {
     /// <summary>
     /// High-level orchestrator for Extend0 MetaDB operations.
-    /// Manages <see cref="MetadataTable"/> lifecycles (register/open/close), provides
+    /// Manages <see cref="IMetadataTable"/> lifecycles (register/open/close), provides
     /// column pipelines (fill/copy) with capacity policies, and supports parent→child
     /// reference linking with idempotent semantics and structured observability.
     /// </summary>
@@ -57,7 +60,7 @@ namespace Extend0.Metadata
     ///   <item>
     ///     <description>
     ///       <see cref="CapacityPolicy.AutoGrowZeroInit"/>: attempts to grow using the table
-    ///       <c><see cref="MetadataTable.TryGrowColumnTo(uint, uint, bool)"/></c> hook, then validates capacity.
+    ///       <c><see cref="IMetadataTable.TryGrowColumnTo(uint, uint, bool)"/></c> hook, then validates capacity.
     ///     </description>
     ///   </item>
     /// </list>
@@ -97,11 +100,11 @@ namespace Extend0.Metadata
     /// <para>
     /// <b>Threading</b>:
     /// internal registries are <see cref="ConcurrentDictionary{TKey, TValue}"/> to support concurrent
-    /// registration and lookup. Thread-safety of <see cref="MetadataTable"/> operations themselves depends on
+    /// registration and lookup. Thread-safety of <see cref="IMetadataTable"/> operations themselves depends on
     /// the guarantees of the table implementation and the caller’s usage patterns.
     /// </para>
     /// </remarks>
-    /// <seealso cref="MetadataTable"/>
+    /// <seealso cref="IMetadataTable"/>
     /// <seealso cref="TableSpec"/>
     /// <seealso cref="ColumnBlock"/>
     /// <seealso cref="MetadataTableRef"/>
@@ -117,6 +120,8 @@ namespace Extend0.Metadata
         /// The default name for the delete-queue persistence file.
         /// </summary>
         private const string DELETES_FILE_DEFAULT_NAME = "metadb.deletes.log";
+
+        private const string CROSS_GLOBAL_KEY_INDEX = "__builtIn:cross:globalKey";
 
         /// <summary>
         /// Shared <see cref="ActivitySource"/> used to emit OpenTelemetry-compatible activities
@@ -164,15 +169,20 @@ namespace Extend0.Metadata
         private int _disposed;
 
         /// <summary>
-        /// Factory that creates <see cref="MetadataTable"/> instances from a <see cref="TableSpec"/>.
+        /// Factory that creates <see cref="IMetadataTable"/> instances from a <see cref="TableSpec"/>.
         /// Injectable for testing; invoked lazily on first access.
         /// </summary>
-        private readonly Func<TableSpec?, MetadataTable> _factory;
+        private readonly Func<TableSpec?, IMetadataTable> _factory;
 
         /// <summary>
         /// Registry of managed tables by identifier.
         /// </summary>
         private readonly ConcurrentDictionary<Guid, ManagedTable> _byId = new();
+
+        /// <summary>
+        /// Gets an enumeration of all registered table identifiers.
+        /// </summary>
+        public IEnumerable<Guid> TableIds => _byId.Keys;
 
         /// <summary>
         /// Registry of table identifiers by unique name (case-sensitive, <see cref="StringComparer.Ordinal"/>).
@@ -230,13 +240,18 @@ namespace Extend0.Metadata
         private readonly SemaphoreSlim _deleteWorkerGate = new(1, 1);
 
         /// <summary>
-        /// Default <see cref="MetadataTable"/> factory used when no custom factory
+        /// Gets the registry of indexes associated with this table.
+        /// </summary>
+        public ICrossTableIndexesRegistry Indexes { get; } = new CrossTableIndexesRegistry();
+
+        /// <summary>
+        /// Default <see cref="IMetadataTable"/> factory used when no custom factory
         /// is supplied to the <see cref="MetaDBManager"/> constructor.
         /// </summary>
         /// <remarks>
         /// Throws <see cref="ArgumentNullException"/> if the provided <see cref="TableSpec"/> is null.
         /// </remarks>
-        private static readonly Func<TableSpec?, MetadataTable> s_FactoryCreator = static (spec) =>
+        private static readonly Func<TableSpec?, IMetadataTable> s_FactoryCreator = static (spec) =>
         {
             if (!spec.HasValue)
                 throw new ArgumentNullException(nameof(spec));
@@ -245,14 +260,14 @@ namespace Extend0.Metadata
         };
 
         /// <summary>
-        /// Initializes a new <see cref="MetaDBManager"/> that orchestrates <see cref="MetadataTable"/> creation,
+        /// Initializes a new <see cref="MetaDBManager"/> that orchestrates <see cref="IMetadataTable"/> creation,
         /// registration and high-level operations with structured logging and optional growth hooks.
         /// </summary>
         /// <param name="logger">
         /// Application logger used for structured traces, scopes, and diagnostics. Must not be <c>null</c>.
         /// </param>
         /// <param name="factory">
-        /// Optional factory that creates a <see cref="MetadataTable"/> from a <see cref="TableSpec"/>.
+        /// Optional factory that creates a <see cref="IMetadataTable"/> from a <see cref="TableSpec"/>.
         /// If <c>null</c>, defaults to <see cref="CreateTable(TableSpec)"/>. The factory is invoked lazily on first use.
         /// </param>
         /// <param name="capacityPolicy">
@@ -266,7 +281,7 @@ namespace Extend0.Metadata
         /// defaults to <c>{AppContext.BaseDirectory}\metadb.deletes.log</c>.
         /// Ignored when running in browser (<see cref="OperatingSystem.IsBrowser"/>).
         /// </param>
-        public MetaDBManager(ILogger? logger, Func<TableSpec?, MetadataTable>? factory = null, CapacityPolicy capacityPolicy = CapacityPolicy.Throw, string? deleteQueuePath = null)
+        public MetaDBManager(ILogger? logger, Func<TableSpec?, IMetadataTable>? factory = null, CapacityPolicy capacityPolicy = CapacityPolicy.Throw, string? deleteQueuePath = null)
         {
             _log = logger;
             _isLogActivated = _log != null && _log.IsEnabled(LogLevel.Debug);
@@ -287,6 +302,105 @@ namespace Extend0.Metadata
                 _deleteCts = null;
                 _deleteWorkerTask = Task.CompletedTask;
             }
+
+            GetOrCreateCrossGlobalKeyIndex();
+        }
+
+        /// <summary>
+        /// Gets the built-in cross-table global-key index or creates and registers it on demand.
+        /// </summary>
+        /// <returns>The singleton <see cref="GlobalMultiTableKeyIndex"/> instance for this table.</returns>
+        /// <remarks>
+        /// <para>
+        /// The cross-table global-key index is a built-in index stored in <see cref="Indexes"/> under the fixed name
+        /// <see cref="CROSS_GLOBAL_KEY_INDEX"/> (<c>"__builtIn:cross:globalKey"</c>).
+        /// </para>
+        /// <para>
+        /// This index typically maps a key to a global hit (for example, <c>(tableName,column,row)</c>) across the table,
+        /// enabling cross-table cross-column key lookups without scanning every column.
+        /// </para>
+        /// <para>
+        /// This helper is implemented as a lazy accessor with a fast registry lookup first, then creation +
+        /// registration if missing.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private GlobalMultiTableKeyIndex GetOrCreateCrossGlobalKeyIndex()
+        {
+            if (Indexes.TryGet(CROSS_GLOBAL_KEY_INDEX, out var idx) && idx is GlobalMultiTableKeyIndex gk)
+                return gk;
+
+            var created = new GlobalMultiTableKeyIndex(CROSS_GLOBAL_KEY_INDEX);
+            Indexes.Add(created);
+            return created;
+        }
+
+        /// <summary>
+        /// Tries to find a cell by its UTF-8 key across all columns and tables using the global index.
+        /// </summary>
+        /// <param name="keyUtf8">The key bytes, encoded as UTF-8.</param>
+        /// <param name="hit">
+        /// When this method returns <see langword="true"/>, contains the table name and the column/row
+        /// indices where the key was found; otherwise, the default tuple.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the key exists in the global index; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// The lookup is performed using the built-in cross-table global key index
+        /// (<see cref="GlobalMultiTableKeyIndex"/>) registered under <see cref="CROSS_GLOBAL_KEY_INDEX"/>.
+        /// The index is created on demand via <see cref="GetOrCreateCrossGlobalKeyIndex"/>; creation does not populate it.
+        /// </para>
+        /// <para>
+        /// The index must have been populated beforehand by <see cref="RebuildAllIndexes(bool)"/> or
+        /// <see cref="RebuildIndexes(Guid, bool)"/>. If the index is empty or stale, this method may return
+        /// <see langword="false"/> even if the key exists in the underlying storage.
+        /// </para>
+        /// <para>
+        /// This overload avoids allocations by accepting a <see cref="ReadOnlySpan{T}"/>.
+        /// </para>
+        /// </remarks>
+        public bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out (string tableName, uint col, uint row) hit)
+        {
+            var _globalKeyIndex = GetOrCreateCrossGlobalKeyIndex();
+            if (_globalKeyIndex.TryGetHit(keyUtf8, out hit)) return true;
+            hit = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Tries to find a cell by its UTF-8 key across all columns and tables using the global index.
+        /// </summary>
+        /// <param name="keyUtf8">The key bytes, encoded as UTF-8.</param>
+        /// <param name="hit">
+        /// When this method returns <see langword="true"/>, contains the table name and the column/row
+        /// indices where the key was found; otherwise, the default tuple.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the key exists in the global index; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// The lookup is performed using the built-in cross-table global key index
+        /// (<see cref="GlobalMultiTableKeyIndex"/>) registered under <see cref="CROSS_GLOBAL_KEY_INDEX"/>.
+        /// The index is created on demand via <see cref="GetOrCreateCrossGlobalKeyIndex"/>; creation does not populate it.
+        /// </para>
+        /// <para>
+        /// The index must have been populated beforehand by <see cref="RebuildAllIndexes(bool)"/> or
+        /// <see cref="RebuildIndexes(Guid, bool)"/>. If the index is empty or stale, this method may return
+        /// <see langword="false"/> even if the key exists in the underlying storage.
+        /// </para>
+        /// <para>
+        /// This overload accepts a <see cref="byte"/> array for convenience.
+        /// </para>
+        /// </remarks>
+        public bool TryFindGlobal(byte[] keyUtf8, out (string tableName, uint col, uint row) hit)
+        {
+            var _globalKeyIndex = GetOrCreateCrossGlobalKeyIndex();
+            if (_globalKeyIndex.TryGetHit(keyUtf8, out hit)) return true;
+            hit = default;
+            return false;
         }
 
         /// <summary>
@@ -645,7 +759,7 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Attempts to retrieve the materialized <see cref="MetadataTable"/> associated
+        /// Attempts to retrieve the materialized <see cref="IMetadataTable"/> associated
         /// with the specified identifier without throwing on failure.
         /// </summary>
         /// <param name="id">
@@ -654,12 +768,12 @@ namespace Extend0.Metadata
         /// </param>
         /// <param name="table">
         /// When this method returns <see langword="true"/>, contains the
-        /// resolved <see cref="MetadataTable"/> instance. When it returns
+        /// resolved <see cref="IMetadataTable"/> instance. When it returns
         /// <see langword="false"/>, this value is <see langword="null"/>.
         /// </param>
         /// <returns>
         /// <see langword="true"/> if a managed table was found for the given
-        /// <paramref name="id"/> and its underlying <see cref="MetadataTable"/>
+        /// <paramref name="id"/> and its underlying <see cref="IMetadataTable"/>
         /// could be obtained; otherwise <see langword="false"/>.
         /// </returns>
         /// <remarks>
@@ -676,7 +790,7 @@ namespace Extend0.Metadata
         /// <see langword="true"/>.
         /// </para>
         /// </remarks>
-        public bool TryGetManaged(Guid id, [NotNullWhen(true)] out MetadataTable? table)
+        public bool TryGetManaged(Guid id, [NotNullWhen(true)] out IMetadataTable? table)
         {
             table = null;
             var found = _byId.TryGetValue(id, out ManagedTable? managed);
@@ -688,7 +802,7 @@ namespace Extend0.Metadata
 
         /// <summary>
         /// Registers a table according to the provided <see cref="TableSpec"/>. 
-        /// Registration is lazy by default: the physical <see cref="MetadataTable"/> is not
+        /// Registration is lazy by default: the physical <see cref="IMetadataTable"/> is not
         /// created until it is first accessed, unless <paramref name="createNow"/> is set to <c>true</c>.
         /// </summary>
         /// <param name="spec">
@@ -749,10 +863,10 @@ namespace Extend0.Metadata
         /// Returns the table instance, forcing creation if it does not exist yet.
         /// </summary>
         /// <param name="tableId">Table identifier.</param>
-        /// <returns>The materialized <see cref="MetadataTable"/>.</returns>
+        /// <returns>The materialized <see cref="IMetadataTable"/>.</returns>
         /// <exception cref="ArgumentException">Thrown when <paramref name="tableId"/> is <see cref="Guid.Empty"/>.</exception>
         /// <exception cref="KeyNotFoundException">Thrown when the id is not registered.</exception>
-        public MetadataTable GetOrCreate(Guid tableId)
+        public IMetadataTable GetOrCreate(Guid tableId)
         {
             if (tableId == Guid.Empty)
                 throw new ArgumentException("Table id must not be empty (Guid.Empty).", nameof(tableId));
@@ -764,14 +878,14 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Opens an existing <see cref="MetadataTable"/> from a given map path by loading its adjacent
+        /// Opens an existing <see cref="IMetadataTable"/> from a given map path by loading its adjacent
         /// <c>.tablespec.json</c> file and registering the managed table in this manager.
         /// </summary>
         /// <param name="mapPath">
         /// The map file path for the table (e.g., <c>C:\data\users.meta</c>). The method will look for
         /// a <c>.tablespec.json</c> file next to it (i.e., <c>users.meta.tablespec.json</c>).
         /// </param>
-        /// <returns>The opened, managed <see cref="MetadataTable"/>.</returns>
+        /// <returns>The opened, managed <see cref="IMetadataTable"/>.</returns>
         /// <exception cref="ArgumentException">Thrown when <paramref name="mapPath"/> is null or whitespace.</exception>
         /// <exception cref="FileNotFoundException">
         /// Thrown when the <c>.tablespec.json</c> file does not exist for the provided <paramref name="mapPath"/>.
@@ -779,12 +893,12 @@ namespace Extend0.Metadata
         /// <exception cref="InvalidOperationException">
         /// Thrown when registration fails due to id conflict or duplicate table name.
         /// </exception>
-        public MetadataTable Open(string mapPath) => Open(mapPath, false).Table;
+        public IMetadataTable Open(string mapPath) => Open(mapPath, false).Table;
 
         /// <summary>
         /// Opens an existing table from <paramref name="mapPath"/> by loading its adjacent
         /// <c>.tablespec.json</c> file, registering it in this manager, and returning both
-        /// the generated table id and the materialized <see cref="MetadataTable"/>.
+        /// the generated table id and the materialized <see cref="IMetadataTable"/>.
         /// </summary>
         /// <param name="mapPath">
         /// The map file path for the table (e.g., <c>C:\data\users.meta</c>).
@@ -797,13 +911,13 @@ namespace Extend0.Metadata
         /// When <see langword="false"/>, the loaded spec is used as-is; a mismatch is only optionally logged.
         /// </param>
         /// <returns>
-        /// A tuple containing the generated table id and the opened, managed <see cref="MetadataTable"/>.
+        /// A tuple containing the generated table id and the opened, managed <see cref="IMetadataTable"/>.
         /// </returns>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentException">Thrown when <paramref name="mapPath"/> is null or whitespace.</exception>
         /// <exception cref="FileNotFoundException">Thrown when the resolved <c>.tablespec.json</c> file does not exist.</exception>
         /// <exception cref="InvalidOperationException">Thrown when registration fails due to id conflict or duplicate table name.</exception>
-        public (Guid Id, MetadataTable Table) Open(string mapPath, bool forceRelocation = false)
+        public (Guid Id, IMetadataTable Table) Open(string mapPath, bool forceRelocation = false)
         {
             ThrowIfDisposed();
             if (string.IsNullOrWhiteSpace(mapPath))
@@ -868,7 +982,7 @@ namespace Extend0.Metadata
         /// <param name="tableId">The table identifier to close and unregister.</param>
         /// <returns>
         /// <see langword="true"/> if a managed table existed for <paramref name="tableId"/>
-        /// and was successfully removed (its underlying <see cref="MetadataTable"/> disposed
+        /// and was successfully removed (its underlying <see cref="IMetadataTable"/> disposed
         /// if it had been created); otherwise <see langword="false"/>.
         /// </returns>
         /// <remarks>
@@ -884,7 +998,7 @@ namespace Extend0.Metadata
         ///   </description></item>
         ///   <item><description>
         ///   If the table was already materialized (<c>ManagedTable.IsCreated == true</c>),
-        ///   disposes its underlying <see cref="MetadataTable"/>.
+        ///   disposes its underlying <see cref="IMetadataTable"/>.
         ///   </description></item>
         /// </list>
         /// <para>
@@ -1103,10 +1217,10 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Resolves the <see cref="MetadataTable"/> identified by <paramref name="tableId"/>.
+        /// Resolves the <see cref="IMetadataTable"/> identified by <paramref name="tableId"/>.
         /// </summary>
         /// <param name="tableId">Identifier of the table to resolve.</param>
-        /// <returns>The resolved <see cref="MetadataTable"/> instance.</returns>
+        /// <returns>The resolved <see cref="IMetadataTable"/> instance.</returns>
         /// <remarks>
         /// This method is a small internal helper that:
         /// <list type="bullet">
@@ -1117,7 +1231,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private MetadataTable ResolveTable(Guid tableId)
+        private IMetadataTable ResolveTable(Guid tableId)
         {
             ThrowIfDisposed();
             return GetOrCreate(tableId);
@@ -1127,7 +1241,7 @@ namespace Extend0.Metadata
         /// Executes <paramref name="action"/> with the materialized table for <paramref name="tableId"/>.
         /// </summary>
         /// <param name="tableId">Identifier of the table to resolve.</param>
-        /// <param name="action">Callback executed with the resolved <see cref="MetadataTable"/>.</param>
+        /// <param name="action">Callback executed with the resolved <see cref="IMetadataTable"/>.</param>
         /// <remarks>
         /// <para>
         /// This helper is a convenience scope: it resolves the table via <see cref="ResolveTable(Guid)"/> and invokes
@@ -1139,7 +1253,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="action"/> is <see langword="null"/>.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
-        public void WithTable(Guid tableId, Action<MetadataTable> action)
+        public void WithTable(Guid tableId, Action<IMetadataTable> action)
         {
             ArgumentNullException.ThrowIfNull(action);
             action(ResolveTable(tableId));
@@ -1150,7 +1264,7 @@ namespace Extend0.Metadata
         /// </summary>
         /// <typeparam name="TResult">The result type returned by <paramref name="func"/>.</typeparam>
         /// <param name="tableId">Identifier of the table to resolve.</param>
-        /// <param name="func">Callback executed with the resolved <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Callback executed with the resolved <see cref="IMetadataTable"/>.</param>
         /// <returns>The value produced by <paramref name="func"/>.</returns>
         /// <remarks>
         /// <para>
@@ -1163,7 +1277,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="func"/> is <see langword="null"/>.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
-        public TResult WithTable<TResult>(Guid tableId, Func<MetadataTable, TResult> func)
+        public TResult WithTable<TResult>(Guid tableId, Func<IMetadataTable, TResult> func)
         {
             ArgumentNullException.ThrowIfNull(func);
             return func(ResolveTable(tableId));
@@ -1173,7 +1287,7 @@ namespace Extend0.Metadata
         /// Asynchronously executes <paramref name="func"/> with the materialized table for <paramref name="tableId"/>.
         /// </summary>
         /// <param name="tableId">Identifier of the table to resolve.</param>
-        /// <param name="func">Async callback executed with the resolved <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Async callback executed with the resolved <see cref="IMetadataTable"/>.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
         /// <remarks>
         /// <para>
@@ -1186,7 +1300,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="func"/> is <see langword="null"/>.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
-        public async Task WithTableAsync(Guid tableId, Func<MetadataTable, Task> func)
+        public async Task WithTableAsync(Guid tableId, Func<IMetadataTable, Task> func)
         {
             ArgumentNullException.ThrowIfNull(func);
             await func(ResolveTable(tableId)).ConfigureAwait(false);
@@ -1197,7 +1311,7 @@ namespace Extend0.Metadata
         /// </summary>
         /// <typeparam name="TResult">The result type returned by <paramref name="func"/>.</typeparam>
         /// <param name="tableId">Identifier of the table to resolve.</param>
-        /// <param name="func">Async callback executed with the resolved <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Async callback executed with the resolved <see cref="IMetadataTable"/>.</param>
         /// <returns>A task producing the value returned by <paramref name="func"/>.</returns>
         /// <remarks>
         /// <para>
@@ -1210,7 +1324,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="func"/> is <see langword="null"/>.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
-        public async Task<TResult> WithTableAsync<TResult>(Guid tableId, Func<MetadataTable, Task<TResult>> func)
+        public async Task<TResult> WithTableAsync<TResult>(Guid tableId, Func<IMetadataTable, Task<TResult>> func)
         {
             ArgumentNullException.ThrowIfNull(func);
             return await func(ResolveTable(tableId)).ConfigureAwait(false);
@@ -1240,7 +1354,7 @@ namespace Extend0.Metadata
         /// Opens a table from <paramref name="mapPath"/>, executes <paramref name="action"/>, and always closes the table afterwards.
         /// </summary>
         /// <param name="mapPath">Path to the memory-mapped file backing the table.</param>
-        /// <param name="action">Callback executed with the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="action">Callback executed with the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="forceRelocation">
         /// When <see langword="true"/>, forces relocation behavior during <see cref="Open(string, bool)"/> (implementation-defined).
         /// </param>
@@ -1257,7 +1371,7 @@ namespace Extend0.Metadata
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentException">Thrown if <paramref name="mapPath"/> is <see langword="null"/>, empty, or whitespace.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="action"/> is <see langword="null"/>.</exception>
-        public void WithTableEphemeral(string mapPath, Action<MetadataTable> action, bool forceRelocation = false)
+        public void WithTableEphemeral(string mapPath, Action<IMetadataTable> action, bool forceRelocation = false)
         {
             ThrowIfDisposed();
             ArgumentException.ThrowIfNullOrWhiteSpace(mapPath);
@@ -1281,7 +1395,7 @@ namespace Extend0.Metadata
         /// </summary>
         /// <typeparam name="TResult">The result type returned by <paramref name="func"/>.</typeparam>
         /// <param name="mapPath">Path to the memory-mapped file backing the table.</param>
-        /// <param name="func">Callback executed with the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Callback executed with the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="forceRelocation">
         /// When <see langword="true"/>, forces relocation behavior during <see cref="Open(string, bool)"/> (implementation-defined).
         /// </param>
@@ -1299,7 +1413,7 @@ namespace Extend0.Metadata
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentException">Thrown if <paramref name="mapPath"/> is <see langword="null"/>, empty, or whitespace.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="func"/> is <see langword="null"/>.</exception>
-        public TResult WithTableEphemeral<TResult>(string mapPath, Func<MetadataTable, TResult> func, bool forceRelocation = false)
+        public TResult WithTableEphemeral<TResult>(string mapPath, Func<IMetadataTable, TResult> func, bool forceRelocation = false)
         {
             ThrowIfDisposed();
             ArgumentException.ThrowIfNullOrWhiteSpace(mapPath);
@@ -1321,7 +1435,7 @@ namespace Extend0.Metadata
         /// Asynchronously opens a table from <paramref name="mapPath"/>, awaits <paramref name="func"/>, and always closes the table afterwards.
         /// </summary>
         /// <param name="mapPath">Path to the memory-mapped file backing the table.</param>
-        /// <param name="func">Async callback executed with the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Async callback executed with the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="forceRelocation">
         /// When <see langword="true"/>, forces relocation behavior during <see cref="Open(string, bool)"/> (implementation-defined).
         /// </param>
@@ -1339,7 +1453,7 @@ namespace Extend0.Metadata
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentException">Thrown if <paramref name="mapPath"/> is <see langword="null"/>, empty, or whitespace.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="func"/> is <see langword="null"/>.</exception>
-        public async Task WithTableEphemeralAsync(string mapPath, Func<MetadataTable, Task> func, bool forceRelocation = false)
+        public async Task WithTableEphemeralAsync(string mapPath, Func<IMetadataTable, Task> func, bool forceRelocation = false)
         {
             ThrowIfDisposed();
             ArgumentException.ThrowIfNullOrWhiteSpace(mapPath);
@@ -1363,7 +1477,7 @@ namespace Extend0.Metadata
         /// </summary>
         /// <typeparam name="TResult">The result type returned by <paramref name="func"/>.</typeparam>
         /// <param name="mapPath">Path to the memory-mapped file backing the table.</param>
-        /// <param name="func">Async callback executed with the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Async callback executed with the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="forceRelocation">
         /// When <see langword="true"/>, forces relocation behavior during <see cref="Open(string, bool)"/> (implementation-defined).
         /// </param>
@@ -1381,7 +1495,7 @@ namespace Extend0.Metadata
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentException">Thrown if <paramref name="mapPath"/> is <see langword="null"/>, empty, or whitespace.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="func"/> is <see langword="null"/>.</exception>
-        public async Task<TResult> WithTableEphemeralAsync<TResult>(string mapPath, Func<MetadataTable, Task<TResult>> func, bool forceRelocation = false)
+        public async Task<TResult> WithTableEphemeralAsync<TResult>(string mapPath, Func<IMetadataTable, Task<TResult>> func, bool forceRelocation = false)
         {
             ThrowIfDisposed();
             ArgumentException.ThrowIfNullOrWhiteSpace(mapPath);
@@ -1410,7 +1524,7 @@ namespace Extend0.Metadata
         /// A tuple containing:
         /// <list type="bullet">
         ///   <item><description><c>id</c>: The registration identifier.</description></item>
-        ///   <item><description><c>table</c>: The resolved <see cref="MetadataTable"/> instance.</description></item>
+        ///   <item><description><c>table</c>: The resolved <see cref="IMetadataTable"/> instance.</description></item>
         ///   <item><description><c>mapPath</c>: The backing map path for the table (if available).</description></item>
         ///   <item><description><c>specPath</c>: The path of the spec sidecar file (<c>{mapPath}.tablespec.json</c>) (if available).</description></item>
         /// </list>
@@ -1421,13 +1535,13 @@ namespace Extend0.Metadata
         /// it registers the table via <see cref="RegisterTable(TableSpec, bool)"/> and then resolves it via <see cref="GetOrCreate(Guid)"/>.
         /// </para>
         /// <para>
-        /// The returned paths are derived from <see cref="MetadataTable.Spec"/> and are intended to support follow-up cleanup
+        /// The returned paths are derived from <see cref="IMetadataTable.Spec"/> and are intended to support follow-up cleanup
         /// (e.g., deleting the map file and the spec sidecar).
         /// </para>
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> is <see langword="null"/>.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed (via the underlying operations).</exception>
-        private (Guid id, MetadataTable table, string? mapPath, string? specPath) OpenEphemeralFromSpec(TableSpec spec, bool createNow)
+        private (Guid id, IMetadataTable table, string? mapPath, string? specPath) OpenEphemeralFromSpec(TableSpec spec, bool createNow)
         {
             var id = RegisterTable(spec, createNow: createNow);
             var table = GetOrCreate(id);
@@ -1523,7 +1637,7 @@ namespace Extend0.Metadata
         /// and then finalizes the ephemeral resources.
         /// </summary>
         /// <param name="spec">The table specification used to register and open the ephemeral table.</param>
-        /// <param name="action">Callback executed with the ephemeral table id and the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="action">Callback executed with the ephemeral table id and the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="createNow">
         /// When <see langword="true"/>, forces immediate creation/materialization during registration (implementation-defined).
         /// </param>
@@ -1547,7 +1661,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> or <paramref name="action"/> is <see langword="null"/>.</exception>
-        public void WithTableEphemeral(TableSpec spec, Action<Guid, MetadataTable> action, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
+        public void WithTableEphemeral(TableSpec spec, Action<Guid, IMetadataTable> action, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(action);
@@ -1572,7 +1686,7 @@ namespace Extend0.Metadata
         /// </summary>
         /// <typeparam name="TResult">The result type returned by <paramref name="func"/>.</typeparam>
         /// <param name="spec">The table specification used to register and open the ephemeral table.</param>
-        /// <param name="func">Callback executed with the ephemeral table id and the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Callback executed with the ephemeral table id and the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="createNow">
         /// When <see langword="true"/>, forces immediate creation/materialization during registration (implementation-defined).
         /// </param>
@@ -1597,7 +1711,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> or <paramref name="func"/> is <see langword="null"/>.</exception>
-        public TResult WithTableEphemeral<TResult>(TableSpec spec, Func<Guid, MetadataTable, TResult> func, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
+        public TResult WithTableEphemeral<TResult>(TableSpec spec, Func<Guid, IMetadataTable, TResult> func, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(func);
@@ -1621,7 +1735,7 @@ namespace Extend0.Metadata
         /// and then finalizes the ephemeral resources.
         /// </summary>
         /// <param name="spec">The table specification used to register and open the ephemeral table.</param>
-        /// <param name="func">Async callback executed with the ephemeral table id and the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Async callback executed with the ephemeral table id and the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="createNow">
         /// When <see langword="true"/>, forces immediate creation/materialization during registration (implementation-defined).
         /// </param>
@@ -1635,7 +1749,7 @@ namespace Extend0.Metadata
         /// <returns>A task representing the asynchronous operation.</returns>
         /// <remarks>
         /// <para>
-        /// This is the async counterpart to <see cref="WithTableEphemeral(TableSpec, Action{Guid, MetadataTable}, bool, bool, bool)"/>.
+        /// This is the async counterpart to <see cref="WithTableEphemeral(TableSpec, Action{Guid, IMetadataTable}, bool, bool, bool)"/>.
         /// It opens the table via <see cref="OpenEphemeralFromSpec(TableSpec, bool)"/>, awaits <paramref name="func"/>,
         /// and then finalizes via <see cref="FinalizeEphemeralAsync(bool, bool, Guid, string?, string?)"/> in a <c>finally</c> block.
         /// </para>
@@ -1646,7 +1760,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> or <paramref name="func"/> is <see langword="null"/>.</exception>
-        public async Task WithTableEphemeralAsync(TableSpec spec, Func<Guid, MetadataTable, Task> func, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
+        public async Task WithTableEphemeralAsync(TableSpec spec, Func<Guid, IMetadataTable, Task> func, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(func);
@@ -1671,7 +1785,7 @@ namespace Extend0.Metadata
         /// </summary>
         /// <typeparam name="TResult">The result type returned by <paramref name="func"/>.</typeparam>
         /// <param name="spec">The table specification used to register and open the ephemeral table.</param>
-        /// <param name="func">Async callback executed with the ephemeral table id and the opened <see cref="MetadataTable"/>.</param>
+        /// <param name="func">Async callback executed with the ephemeral table id and the opened <see cref="IMetadataTable"/>.</param>
         /// <param name="createNow">
         /// When <see langword="true"/>, forces immediate creation/materialization during registration (implementation-defined).
         /// </param>
@@ -1685,7 +1799,7 @@ namespace Extend0.Metadata
         /// <returns>A task producing the value returned by <paramref name="func"/>.</returns>
         /// <remarks>
         /// <para>
-        /// This is the async counterpart to <see cref="WithTableEphemeral{TResult}(TableSpec, Func{Guid, MetadataTable, TResult}, bool, bool, bool)"/>.
+        /// This is the async counterpart to <see cref="WithTableEphemeral{TResult}(TableSpec, Func{Guid, IMetadataTable, TResult}, bool, bool, bool)"/>.
         /// It opens the table via <see cref="OpenEphemeralFromSpec(TableSpec, bool)"/>, awaits <paramref name="func"/>,
         /// and then finalizes via <see cref="FinalizeEphemeralAsync(bool, bool, Guid, string?, string?)"/> in a <c>finally</c> block.
         /// </para>
@@ -1696,7 +1810,7 @@ namespace Extend0.Metadata
         /// </remarks>
         /// <exception cref="ObjectDisposedException">Thrown if this manager has been disposed.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> or <paramref name="func"/> is <see langword="null"/>.</exception>
-        public async Task<TResult> WithTableEphemeralAsync<TResult>(TableSpec spec, Func<Guid, MetadataTable, Task<TResult>> func, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
+        public async Task<TResult> WithTableEphemeralAsync<TResult>(TableSpec spec, Func<Guid, IMetadataTable, Task<TResult>> func, bool createNow = true, bool deleteNow = false, bool throwIfDeleteFails = false)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(func);
@@ -2015,11 +2129,11 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Attempts to get the already-created <see cref="MetadataTable"/> by name without forcing creation.
+        /// Attempts to get the already-created <see cref="IMetadataTable"/> by name without forcing creation.
         /// </summary>
         /// <param name="name">Registered table name (case-sensitive).</param>
         /// <param name="table">
-        /// When this method returns <see langword="true"/>, contains the existing <see cref="MetadataTable"/> instance.
+        /// When this method returns <see langword="true"/>, contains the existing <see cref="IMetadataTable"/> instance.
         /// When it returns <see langword="false"/>, <paramref name="table"/> is <see langword="null"/> and no creation is triggered.
         /// </param>
         /// <returns>
@@ -2033,7 +2147,7 @@ namespace Extend0.Metadata
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [DebuggerStepThrough]
-        public bool TryGetTableIfCreated(string name, [NotNullWhen(true)] out MetadataTable? table)
+        public bool TryGetTableIfCreated(string name, [NotNullWhen(true)] out IMetadataTable? table)
         {
             table = null;
 
@@ -2510,9 +2624,9 @@ namespace Extend0.Metadata
         /// </param>
         /// <remarks>
         /// <para>
-        /// This method retrieves (or materializes on demand) the <see cref="MetadataTable"/>
+        /// This method retrieves (or materializes on demand) the <see cref="IMetadataTable"/>
         /// associated with <paramref name="tableId"/> and invokes
-        /// <see cref="MetadataTable.RebuildIndexes(bool)"/> on it.
+        /// <see cref="IMetadataTable.RebuildIndexes(bool)"/> on it.
         /// </para>
         /// <para>
         /// Only the target table is affected. To rebuild indexes for all materialized tables,
@@ -2534,7 +2648,7 @@ namespace Extend0.Metadata
         /// <see langword="false"/> to rebuild only per-column indexes.
         /// </param>
         /// <remarks>
-        /// Only tables whose underlying <see cref="MetadataTable"/> has already been created
+        /// Only tables whose underlying <see cref="IMetadataTable"/> has already been created
         /// (<c>ManagedTable.IsCreated == true</c>) are processed. Tables that are registered
         /// but still lazy are skipped.
         /// </remarks>

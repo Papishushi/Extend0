@@ -27,7 +27,17 @@ public enum IndexKindDTO : byte
     BuiltIn_GlobalKey = 2,
 
     /// <summary>
-    /// Custom / user-registered index kind.
+    /// Built-in global multi table key index (maps: key → (tableName,column,row)).
     /// </summary>
-    Custom = 100
+    BuiltIn_GlobalMultiTableKey = 3,
+
+    /// <summary>
+    /// Custom / user-registered table index kind.
+    /// </summary>
+    Custom_InTable = 100,
+
+    /// <summary>
+    /// Custom / user-registered manager index kind.
+    /// </summary>
+    Custom_CrossTable = 101
 }

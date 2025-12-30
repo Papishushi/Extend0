@@ -10,7 +10,7 @@ namespace Extend0.Metadata
 {
     /// <summary>
     /// Collection of low-level helper routines used by <see cref="MetaDBManager"/> to
-    /// manipulate column data in <see cref="MetadataTable"/> instances.
+    /// manipulate column data in <see cref="IMetadataTable"/> instances.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -46,9 +46,9 @@ namespace Extend0.Metadata
         /// </exception>
         /// <remarks>
         /// This method assumes the cell is already initialized; call
-        /// <see cref="EnsureRefVec(MetadataTable, uint, uint, CapacityPolicy)"/> first if unsure.
+        /// <see cref="EnsureRefVec(IMetadataTable, uint, uint, CapacityPolicy)"/> first if unsure.
         /// </remarks>
-        internal static unsafe void LinkRef(MetadataTable parent, uint refsCol, uint parentRow, in MetadataTableRef tref)
+        internal static unsafe void LinkRef(IMetadataTable parent, uint refsCol, uint parentRow, in MetadataTableRef tref)
         {
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
             var buf = new Span<byte>(cell.GetValuePointer(), cell.ValueSize);
@@ -60,7 +60,7 @@ namespace Extend0.Metadata
         /// <summary>
         /// Attempts to determine whether the parent's refs vector already contains the specified reference.
         /// </summary>
-        /// <param name="table">The parent <see cref="MetadataTable"/> that owns the refs column.</param>
+        /// <param name="table">The parent <see cref="IMetadataTable"/> that owns the refs column.</param>
         /// <param name="refsCol">Zero-based index of the refs column inside <paramref name="table"/>.</param>
         /// <param name="parentRow">Zero-based row index in <paramref name="table"/> whose refs vector is inspected.</param>
         /// <param name="tref">
@@ -83,7 +83,7 @@ namespace Extend0.Metadata
         /// initialization via an <c>EnsureRefVec</c>-style routine when required.
         /// </para>
         /// <para>
-        /// This method uses unsafe pointer access to avoid copying. The <see cref="MetadataTable"/> must remain alive and
+        /// This method uses unsafe pointer access to avoid copying. The <see cref="IMetadataTable"/> must remain alive and
         /// the underlying cell buffer must not be reallocated while the returned span is in use.
         /// </para>
         /// </remarks>
@@ -94,7 +94,7 @@ namespace Extend0.Metadata
         /// Thrown if <paramref name="table"/> has been disposed.
         /// </exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static unsafe bool TryHasRef(MetadataTable table, uint refsCol, uint parentRow, in MetadataTableRef tref)
+        internal static unsafe bool TryHasRef(IMetadataTable table, uint refsCol, uint parentRow, in MetadataTableRef tref)
         {
             var cell = table.GetOrCreateCell(refsCol, parentRow);
             var buf = new ReadOnlySpan<byte>(cell.GetValuePointer(), cell.ValueSize);
@@ -107,17 +107,17 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Copies an entire column from a source <see cref="MetadataTable"/> to a destination table
+        /// Copies an entire column from a source <see cref="IMetadataTable"/> to a destination table
         /// using block-based, strided memory copies when possible.
         /// </summary>
         /// <param name="src">
-        /// The source <see cref="MetadataTable"/> containing the column to copy.
+        /// The source <see cref="IMetadataTable"/> containing the column to copy.
         /// </param>
         /// <param name="srcCol">
         /// The zero-based index of the source column.
         /// </param>
         /// <param name="dst">
-        /// The destination <see cref="MetadataTable"/> that will receive the data.
+        /// The destination <see cref="IMetadataTable"/> that will receive the data.
         /// </param>
         /// <param name="dstCol">
         /// The zero-based index of the destination column.
@@ -352,9 +352,9 @@ namespace Extend0.Metadata
         /// Copies values row-by-row from a source column to a destination column,
         /// using per-cell accessors as a fallback when block-based copy is not applicable.
         /// </summary>
-        /// <param name="src">The source <see cref="MetadataTable"/> containing the column to copy.</param>
+        /// <param name="src">The source <see cref="IMetadataTable"/> containing the column to copy.</param>
         /// <param name="srcCol">The zero-based index of the source column.</param>
-        /// <param name="dst">The destination <see cref="MetadataTable"/> that will receive the data.</param>
+        /// <param name="dst">The destination <see cref="IMetadataTable"/> that will receive the data.</param>
         /// <param name="dstCol">The zero-based index of the destination column.</param>
         /// <param name="rows">The number of rows to copy.</param>
         /// <remarks>
@@ -372,7 +372,7 @@ namespace Extend0.Metadata
         /// Thrown when a source cell for a given row is missing, or when the value sizes
         /// of the source and destination cells differ for any row.
         /// </exception>
-        internal static unsafe void PerCellCopy(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows)
+        internal static unsafe void PerCellCopy(IMetadataTable src, uint srcCol, IMetadataTable dst, uint dstCol, uint rows)
         {
             for (uint row = 0; row < rows; row++)
             {
@@ -537,9 +537,9 @@ namespace Extend0.Metadata
         /// an existing cell), or <c>0</c> if the column is variable-sized or empty.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        internal static uint GetColumnValueSize(MetadataTable table, uint col)
+        internal static uint GetColumnValueSize(IMetadataTable table, uint col)
         {
-            if (table.TryGetColumnBlock(col, out var blk)) return (uint)blk.ValueSize;
+            if (table is MetadataTable mdTable && mdTable.TryGetColumnBlock(col, out var blk)) return (uint)blk.ValueSize;
             if (table.TryGetCell(col, 0, out var cell)) return (uint)cell.ValueSize;
             return 0; // desconocido/variable
         }
@@ -550,7 +550,7 @@ namespace Extend0.Metadata
         /// are copied directly into the VALUE buffer of each cell.
         /// </typeparam>
         /// <param name="table">
-        /// Target <see cref="MetadataTable"/> whose column will be filled.
+        /// Target <see cref="IMetadataTable"/> whose column will be filled.
         /// </param>
         /// <param name="column">
         /// Zero-based column index to fill.
@@ -592,7 +592,7 @@ namespace Extend0.Metadata
         /// contents are transient and not reused outside the current batch.
         /// </para>
         /// </remarks>
-        internal static unsafe void PerCellFill<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes) where T : unmanaged
+        internal static unsafe void PerCellFill<T>(IMetadataTable table, uint column, uint rows, Func<uint, T> factory, int batchSize, int tSize, int MaxStackBytes) where T : unmanaged
         {
             ForEachBatch(rows, factory, batchSize, tSize, MaxStackBytes, (start, batch) =>
             {
@@ -800,7 +800,7 @@ namespace Extend0.Metadata
         /// Attempts a block-based fast path for filling a fixed-size VALUE column
         /// using a raw writer callback over a <see cref="ColumnBlock"/>.
         /// </summary>
-        /// <param name="table">Target <see cref="MetadataTable"/>.</param>
+        /// <param name="table">Target <see cref="IMetadataTable"/>.</param>
         /// <param name="column">Zero-based index of the column to fill.</param>
         /// <param name="rows">Number of rows to fill (starting at 0).</param>
         /// <param name="writer">
@@ -819,7 +819,7 @@ namespace Extend0.Metadata
         /// </returns>
         /// <remarks>
         /// This helper is used as the “fast path” by
-        /// <see cref="FillColumn(MetadataTable, uint, uint, Action{uint, IntPtr, uint}, CapacityPolicy, int)"/>.
+        /// <see cref="FillColumn(IMetadataTable, uint, uint, Action{uint, IntPtr, uint}, CapacityPolicy, int)"/>.
         /// It only applies when the column reports a non-zero, fixed VALUE size.
         /// Variable-size columns always return <see langword="false"/>.
         /// </remarks>
@@ -854,7 +854,7 @@ namespace Extend0.Metadata
         /// Fills a column cell-by-cell using the raw writer callback as a fallback
         /// when no suitable fixed-size <see cref="ColumnBlock"/> is available.
         /// </summary>
-        /// <param name="table">Target <see cref="MetadataTable"/>.</param>
+        /// <param name="table">Target <see cref="IMetadataTable"/>.</param>
         /// <param name="column">Zero-based index of the column to fill.</param>
         /// <param name="rows">Number of rows to fill (starting at 0).</param>
         /// <param name="writer">
@@ -867,7 +867,7 @@ namespace Extend0.Metadata
         /// </param>
         /// <remarks>
         /// <para>
-        /// This helper uses <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>
+        /// This helper uses <see cref="IMetadataTable.GetOrCreateCell(uint, uint)"/>
         /// per row to retrieve the target cell and forwards its VALUE pointer and
         /// size to the provided <paramref name="writer"/>.
         /// </para>
@@ -876,7 +876,7 @@ namespace Extend0.Metadata
         /// cannot be used (e.g. variable-size columns, missing blocks, etc.).
         /// </para>
         /// </remarks>
-        internal static unsafe void PerCellFillRaw(MetadataTable table, uint column, uint rows, Action<uint, nint, uint> writer, int batchSize)
+        internal static unsafe void PerCellFillRaw(IMetadataTable table, uint column, uint rows, Action<uint, nint, uint> writer, int batchSize)
         {
             ForEachRowBatch(rows, batchSize, (start, count) =>
             {
@@ -1134,7 +1134,7 @@ namespace Extend0.Metadata
         /// <para>
         /// This method prefers a deterministic capacity check when the table/store can report capacity via
         /// <c>TryGetColumnCapacity</c>. If that information is not available, it falls back to “probe” semantics:
-        /// touching the last required row using <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/> to infer
+        /// touching the last required row using <see cref="IMetadataTable.GetOrCreateCell(uint, uint)"/> to infer
         /// whether the requested index is within bounds.
         /// </para>
         /// <para>
@@ -1152,7 +1152,7 @@ namespace Extend0.Metadata
         /// Thrown when the capacity is insufficient under <see cref="CapacityPolicy.Throw"/>, or when growth is requested
         /// but fails, or when growth reports success but the resulting capacity is still insufficient.
         /// </exception>
-        private static void EnsureRowCapacity(MetadataTable table, uint column, uint neededRows, CapacityPolicy policy)
+        private static void EnsureRowCapacity(IMetadataTable table, uint column, uint neededRows, CapacityPolicy policy)
         {
             if (neededRows == 0) return;
 
@@ -1218,16 +1218,16 @@ namespace Extend0.Metadata
         ///   A strided write fast path using pointer arithmetic.
         ///   </description></item>
         ///   <item><description>
-        ///   A per-cell fallback using <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>.
+        ///   A per-cell fallback using <see cref="IMetadataTable.GetOrCreateCell(uint, uint)"/>.
         ///   </description></item>
         /// </list>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        internal static void FillColumn<T>(MetadataTable table, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE) where T : unmanaged
+        internal static void FillColumn<T>(IMetadataTable table, uint column, uint rows, Func<uint, T> factory, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE) where T : unmanaged
         {
             if (rows == 0) return;
 
-            MetaDBManagerHelpers.EnsureRowCapacity(table, column, rows, policy);
+            EnsureRowCapacity(table, column, rows, policy);
 
             int tSize = Unsafe.SizeOf<T>();
 
@@ -1235,12 +1235,12 @@ namespace Extend0.Metadata
             const int MaxStackBytes = 16 * 1024;
 
             // ── FAST PATH: via column block (MMF / flat buffer) ────────────────────
-            if (table.TryGetColumnBlock(column, out var blk))
+            if (table is MetadataTable mdTable && mdTable.TryGetColumnBlock(column, out var blk))
             {
                 // Variable-size values cannot use the block fast path; fall back.
                 if (blk.ValueSize == 0)
                 {
-                    MetaDBManagerHelpers.PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
+                    PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
                     return;
                 }
 
@@ -1248,13 +1248,13 @@ namespace Extend0.Metadata
                     throw new InvalidOperationException(
                         $"[{table}] col={column}: VALUE {blk.ValueSize} < sizeof({typeof(T).Name})={tSize}");
 
-                if (MetaDBManagerHelpers.TryContiguousFill(rows, factory, batchSize, tSize, MaxStackBytes, blk)) return;
-                MetaDBManagerHelpers.StridedFill(rows, factory, batchSize, tSize, MaxStackBytes, blk);
+                if (TryContiguousFill(rows, factory, batchSize, tSize, MaxStackBytes, blk)) return;
+                StridedFill(rows, factory, batchSize, tSize, MaxStackBytes, blk);
                 return;
             }
 
             // ── SLOW PATH: per-cell (compat) — still batch the factory ─────────────
-            MetaDBManagerHelpers.PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
+            PerCellFill(table, column, rows, factory, batchSize, tSize, MaxStackBytes);
         }
 
         /// <summary>
@@ -1293,19 +1293,19 @@ namespace Extend0.Metadata
         /// <para>
         /// If no suitable column block exists (or the VALUE size is variable),
         /// the method falls back to per-cell access using
-        /// <see cref="MetadataTable.GetOrCreateCell(uint, uint)"/>.
+        /// <see cref="IMetadataTable.GetOrCreateCell(uint, uint)"/>.
         /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        internal static void FillColumn(MetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
+        internal static void FillColumn(IMetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
         {
             if (rows == 0) return;
 
-            MetaDBManagerHelpers.EnsureRowCapacity(table, column, rows, policy);
+            EnsureRowCapacity(table, column, rows, policy);
 
             // ── FAST PATH: via column block (MMF / flat buffer) ────────────────────
-            if (MetaDBManagerHelpers.TryContiguousFillRaw(table, column, rows, writer, batchSize)) return;
-            MetaDBManagerHelpers.PerCellFillRaw(table, column, rows, writer, batchSize);
+            if (table is MetadataTable mdTable && TryContiguousFillRaw(mdTable, column, rows, writer, batchSize)) return; // BLOCK ACCESS IS INTERNAL, ONLY FOR MetadataTable
+            PerCellFillRaw(table, column, rows, writer, batchSize);
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -1348,15 +1348,18 @@ namespace Extend0.Metadata
         /// If no column blocks are available, the method falls back to per-cell copying.
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        internal static void CopyColumn(MetadataTable src, uint srcCol, MetadataTable dst, uint dstCol, uint rows, CapacityPolicy dstPolicy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
+        internal static void CopyColumn(IMetadataTable src, uint srcCol, IMetadataTable dst, uint dstCol, uint rows, CapacityPolicy dstPolicy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
         {
-            MetaDBManagerHelpers.EnsureRowCapacity(dst, dstCol, rows, dstPolicy);
+            EnsureRowCapacity(dst, dstCol, rows, dstPolicy);
 
-            bool done = MetaDBManagerHelpers.PerBlockStridedCopy(src, srcCol, dst, dstCol, rows, batchSize);
-            if (done) return;
+            if (src is MetadataTable srcTable && dst is MetadataTable dstTable) // BLOCK ACCESS IS INTERNAL, ONLY FOR MetadataTable
+            {
+                bool done = PerBlockStridedCopy(srcTable, srcCol, dstTable, dstCol, rows, batchSize);
+                if (done) return;
+            }
 
             // ===== Fallback: API por celda =====
-            MetaDBManagerHelpers.PerCellCopy(src, srcCol, dst, dstCol, rows);
+            PerCellCopy(src, srcCol, dst, dstCol, rows);
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -1372,10 +1375,10 @@ namespace Extend0.Metadata
         /// <c>HeaderSize + EntrySize</c> bytes), or if growth is required but disallowed/misconfigured.
         /// </exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static unsafe bool EnsureRefVec(MetadataTable table, uint refsCol, uint parentRow, CapacityPolicy policy)
+        internal static unsafe bool EnsureRefVec(IMetadataTable table, uint refsCol, uint parentRow, CapacityPolicy policy)
         {
             // 1) Ensure row capacity (may grow)
-            MetaDBManagerHelpers.EnsureRowCapacity(table, refsCol, parentRow + 1, policy);
+            EnsureRowCapacity(table, refsCol, parentRow + 1, policy);
 
             // 2) Get VALUE buffer
             var cell = table.GetOrCreateCell(refsCol, parentRow);

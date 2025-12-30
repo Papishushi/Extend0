@@ -33,5 +33,13 @@ public readonly record struct IndexHitDTO(
     /// <remarks>
     /// Only meaningful when <see cref="Found"/> is <see langword="true"/>.
     /// </remarks>
-    uint Row
+    uint Row,
+
+    /// <summary>
+    /// The name of the table where the key was found.
+    /// </summary>
+    /// <remarks>
+    /// Only meaningful when <see cref="Found"/> is <see langword="true"/>.
+    /// </remarks>
+    string TableName
 );

@@ -7,14 +7,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Extend0.Metadata.CrossProcess
 {
     /// <summary>
-    /// Cross-process singleton host/client wrapper for <see cref="IMetaDBManagerRCPCompatible"/>.
+    /// Cross-process singleton host/client wrapper for <see cref="IMetaDBManagerRPCCompatible"/>.
     /// </summary>
     /// <remarks>
     /// <para>
     /// This type provides a single, stable access point to MetaDB across process boundaries by
     /// leveraging <see cref="CrossProcessSingleton{T}"/>. The first process that instantiates the
     /// singleton becomes the <em>owner</em> (server) and hosts the RPC endpoint; subsequent processes
-    /// connect as clients and obtain a proxy to <see cref="IMetaDBManagerRCPCompatible"/>.
+    /// connect as clients and obtain a proxy to <see cref="IMetaDBManagerRPCCompatible"/>.
     /// </para>
     ///
     /// <para>
@@ -36,13 +36,13 @@ namespace Extend0.Metadata.CrossProcess
     /// provided in the same process, when available.
     /// </para>
     /// </remarks>
-    public sealed class MetaDBManagerSingleton : CrossProcessSingleton<IMetaDBManagerRCPCompatible>
+    public sealed class MetaDBManagerSingleton : CrossProcessSingleton<IMetaDBManagerRPCCompatible>
     {
         /// <summary>
         /// The cross-process name used to identify the MetaDB singleton endpoint.
         /// </summary>
         /// <remarks>
-        /// This matches the pipe name used by <see cref="MetaDBManagerRCPCompatible"/> so all processes
+        /// This matches the pipe name used by <see cref="MetaDBManagerRPCCompatible"/> so all processes
         /// connect to the same IPC rendezvous point.
         /// </remarks>
         private const string NAME = "Extend0.MetaDB";
@@ -50,7 +50,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <summary>
         /// Last factory delegate used in the current process, stored so the upgrade handler can reuse it.
         /// </summary>
-        private static Func<TableSpec?, MetadataTable>? s_lastFactory;
+        private static Func<TableSpec?, IMetadataTable>? s_lastFactory;
 
         /// <summary>
         /// Last capacity policy used in the current process.
@@ -92,7 +92,7 @@ namespace Extend0.Metadata.CrossProcess
         /// </summary>
         /// <param name="logger">
         /// Logger used by the cross-process host/client infrastructure and passed to the hosted
-        /// <see cref="MetaDBManagerRCPCompatible"/> instance when this process becomes owner.
+        /// <see cref="MetaDBManagerRPCCompatible"/> instance when this process becomes owner.
         /// </param>
         /// <param name="factory">
         /// Optional table factory used by the hosted manager. This is process-local and cannot be
@@ -118,14 +118,14 @@ namespace Extend0.Metadata.CrossProcess
         /// </param>
         public MetaDBManagerSingleton(
             ILogger? logger,
-            Func<TableSpec?, MetadataTable>? factory = null,
+            Func<TableSpec?, IMetadataTable>? factory = null,
             CapacityPolicy capacityPolicy = CapacityPolicy.Throw,
             string? deleteQueuePath = null,
             string crossProcessServer = ".",
             int connectTimeoutMs = 5000,
             bool overwrite = true)
             : base(
-                () => new MetaDBManagerRCPCompatible(
+                () => new MetaDBManagerRPCCompatible(
                     logger,
                     factory,
                     capacityPolicy,
@@ -158,7 +158,7 @@ namespace Extend0.Metadata.CrossProcess
         /// </remarks>
         static MetaDBManagerSingleton()
         {
-            RpcDispatchProxy<IMetaDBManagerRCPCompatible>.UpgradeHandler = static async ex =>
+            RpcDispatchProxy<IMetaDBManagerRPCCompatible>.UpgradeHandler = static async ex =>
             {
                 var lf = Logging; // capture once (process-local)
                 var logger = lf?.CreateLogger<MetaDBManagerSingleton>() ?? NullLogger<MetaDBManagerSingleton>.Instance;

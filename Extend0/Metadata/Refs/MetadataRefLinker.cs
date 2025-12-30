@@ -21,7 +21,7 @@ namespace Extend0.Metadata.Refs
         /// If you need a stricter definition, switch to checking <see cref="MetadataTableRefVec.IsInitialized(System.ReadOnlySpan{byte})"/>.
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe void EnsureRefVec(MetadataTable parent, uint refsCol, uint parentRow, CapacityPolicy policy)
+        public static unsafe void EnsureRefVec(IMetadataTable parent, uint refsCol, uint parentRow, CapacityPolicy policy)
         {
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
 
@@ -50,7 +50,7 @@ namespace Extend0.Metadata.Refs
         /// <param name="childTableId">Outputs the found child table id if present.</param>
         /// <returns><see langword="true"/> if found; otherwise <see langword="false"/>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe bool TryFindChildByKey(MetadataTable parent, uint refsCol, uint parentRow, uint childKey, out Guid childTableId)
+        public static unsafe bool TryFindChildByKey(IMetadataTable parent, uint refsCol, uint parentRow, uint childKey, out Guid childTableId)
         {
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
             var buf = new ReadOnlySpan<byte>(cell.GetValuePointer(), cell.ValueSize);
@@ -87,7 +87,7 @@ namespace Extend0.Metadata.Refs
         /// </remarks>
         /// <exception cref="InvalidOperationException">Thrown when the refs vector is full.</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe void EnsureLinkRefNoDup(MetadataTable parent, uint refsCol, uint parentRow, Guid childTableId, uint childCol, uint childRow, uint childKey, CapacityPolicy policy)
+        public static unsafe void EnsureLinkRefNoDup(IMetadataTable parent, uint refsCol, uint parentRow, Guid childTableId, uint childCol, uint childRow, uint childKey, CapacityPolicy policy)
         {
             EnsureRefVec(parent, refsCol, parentRow, policy);
 
@@ -120,7 +120,7 @@ namespace Extend0.Metadata.Refs
         /// </remarks>
         /// <exception cref="InvalidOperationException">Thrown when the refs vector is full.</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe void EnsureLinkRefNoDupByKey(MetadataTable parent, uint refsCol, uint parentRow, Guid childTableId, uint childCol, uint childRow, uint childKey, CapacityPolicy policy)
+        public static unsafe void EnsureLinkRefNoDupByKey(IMetadataTable parent, uint refsCol, uint parentRow, Guid childTableId, uint childCol, uint childRow, uint childKey, CapacityPolicy policy)
         {
             EnsureRefVec(parent, refsCol, parentRow, policy);
 

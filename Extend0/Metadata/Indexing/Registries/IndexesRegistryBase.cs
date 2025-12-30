@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.Indexing.Contract;
+using Extend0.Metadata.Indexing.Registries.Contract;
 using System.Collections.Concurrent;
 
 namespace Extend0.Metadata.Indexing.Registries;
@@ -23,7 +24,7 @@ namespace Extend0.Metadata.Indexing.Registries;
 /// and can filter/cast during enumeration when needed.
 /// </para>
 /// </remarks>
-public abstract class IndexesRegistryBase : IDisposable
+public abstract class IndexesRegistryBase : IIndexesRegistryBase
 {
     /// <summary>
     /// Underlying index registry keyed by index name (ordinal).
@@ -92,7 +93,7 @@ public abstract class IndexesRegistryBase : IDisposable
             return;
 
         foreach (var kv in _indexes)
-            (kv.Value as IDisposable)?.Dispose();
+            kv.Value.Dispose();
 
         _indexes.Clear();
         GC.SuppressFinalize(this);

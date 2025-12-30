@@ -5,12 +5,12 @@ namespace Extend0.Metadata
     public sealed partial class MetaDBManager
     {
         /// <summary>
-        /// Lazily materialized wrapper for a <see cref="MetadataTable"/> registered in <see cref="MetaDBManager"/>.
+        /// Lazily materialized wrapper for a <see cref="IMetadataTable"/> registered in <see cref="MetaDBManager"/>.
         /// </summary>
         /// <remarks>
         /// <para>
         /// Instances are created with a <see cref="Guid"/> identifier, an optional <see cref="TableSpec"/>,
-        /// and a factory that knows how to turn that spec into a <see cref="MetadataTable"/>.
+        /// and a factory that knows how to turn that spec into a <see cref="IMetadataTable"/>.
         /// </para>
         /// <para>
         /// The underlying table is created on first access to <see cref="Table"/> and then published
@@ -18,7 +18,7 @@ namespace Extend0.Metadata
         /// Subsequent readers see the same instance.
         /// </para>
         /// </remarks>
-        private sealed class ManagedTable(Guid id, TableSpec? spec, Func<TableSpec?, MetadataTable> factory)
+        private sealed class ManagedTable(Guid id, TableSpec? spec, Func<TableSpec?, IMetadataTable> factory)
         {
             /// <summary>
             /// Stable identifier assigned to this managed table at registration time.
@@ -31,30 +31,30 @@ namespace Extend0.Metadata
             public string? Name => spec?.Name;
 
             /// <summary>
-            /// Factory used to create the underlying <see cref="MetadataTable"/> from the stored spec.
+            /// Factory used to create the underlying <see cref="IMetadataTable"/> from the stored spec.
             /// </summary>
             /// <exception cref="ArgumentNullException">
             /// Thrown if <paramref name="factory"/> is <see langword="null"/> when the <see cref="ManagedTable"/> is constructed.
             /// </exception>
-            private readonly Func<TableSpec?, MetadataTable> _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+            private readonly Func<TableSpec?, IMetadataTable> _factory = factory ?? throw new ArgumentNullException(nameof(factory));
 
             /// <summary>
             /// Backing field for <see cref="Table"/>. Published with <see cref="Volatile.Read{T}(ref T)"/>
             /// and <see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/>; <see langword="null"/> means “not created yet”.
             /// </summary>
-            private MetadataTable? _table; // published with Interlocked; null => not created
+            private IMetadataTable? _table; // published with Interlocked; null => not created
 
             /// <summary>
-            /// Indicates whether the underlying <see cref="MetadataTable"/> has already been created and published.
+            /// Indicates whether the underlying <see cref="IMetadataTable"/> has already been created and published.
             /// </summary>
             public bool IsCreated => _table is not null;
 
             /// <summary>
-            /// Lazily created and cached <see cref="MetadataTable"/> instance.
+            /// Lazily created and cached <see cref="IMetadataTable"/> instance.
             /// </summary>
             /// <remarks>
             /// <para>
-            /// The first caller that observes a <see langword="null"/> backing field creates a new <see cref="MetadataTable"/>
+            /// The first caller that observes a <see langword="null"/> backing field creates a new <see cref="IMetadataTable"/>
             /// using the factory and attempts to publish it with <see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/>.
             /// If the publish succeeds, the original <c>spec</c> reference is cleared to allow earlier GC.
             /// </para>
@@ -63,7 +63,7 @@ namespace Extend0.Metadata
             /// just-created instance and returns the one that was published. All callers eventually see the same table.
             /// </para>
             /// </remarks>
-            public MetadataTable Table
+            public IMetadataTable Table
             {
                 get
                 {

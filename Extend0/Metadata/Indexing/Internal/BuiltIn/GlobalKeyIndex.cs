@@ -1,9 +1,11 @@
-﻿using Extend0.Metadata.Indexing.Definitions;
+﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Indexing.Definitions;
+using System.Runtime.InteropServices;
 
 namespace Extend0.Metadata.Indexing.Internal.BuiltIn;
 
 /// <summary>
-/// Built-in global key index for a <see cref="MetadataTable"/> that maps a UTF-8 key to its
+/// Built-in global key index for a <see cref="IMetadataTable"/> that maps a UTF-8 key to its
 /// first-class location in the table as a <c>(column,row)</c> pair.
 /// </summary>
 /// <remarks>
@@ -13,34 +15,114 @@ namespace Extend0.Metadata.Indexing.Internal.BuiltIn;
 /// coordinates where that key was found.
 /// </para>
 /// <para>
-/// Thread-safety is provided by the inherited <see cref="ReaderWriterLockSlim"/>
-/// (<see cref="IndexBase{TKey, TValue}.Rwls"/>). Lookups take a read lock; rebuild and mutations
-/// take a write lock.
+/// <b>Thread-safety:</b> protected by the inherited <see cref="ReaderWriterLockSlim"/>.
+/// Lookups take a read lock; rebuild and mutations take a write lock.
 /// </para>
 /// <para>
-/// Conflict semantics: <b>last wins</b>. If multiple cells yield the same key, the latest observed
-/// entry overwrites the previous one.
+/// <b>Conflict semantics:</b> <b>last wins</b>. If multiple cells yield the same key (by content),
+/// the last observed entry overwrites the previous one.
 /// </para>
 /// <para>
-/// Key ownership: during rebuild, keys are materialized into fixed-size arrays rented from
-/// <see cref="IndexFixedSizeByteArrayPool"/> (via <c>TryRentKey</c>). Those arrays become the dictionary keys
-/// and must be returned to the pool when the index is cleared or rebuilt.
+/// <b>Key ownership:</b> all keys stored in the dictionary are pooled buffers owned by the index and must
+/// be returned to the pool when cleared, removed, or rebuilt.
 /// </para>
 /// <para>
-/// Only columns with a non-zero fixed key size (<c>GetKeySize() != 0</c>) participate.
-/// Cells without a key (or with an empty key) are skipped.
+/// <b>Fixed key size:</b> this global index uses a single fixed size for all keys: the maximum non-zero
+/// key size across all columns in the table schema. This makes cross-column lookups possible without
+/// requiring the caller to know which column produced the key.
 /// </para>
 /// </remarks>
 internal sealed class GlobalKeyIndex(string name, int capacity = 0)
     : RebuildableIndexDefinition<byte[], (uint col, uint row)>(name, ByteArrayComparer.Ordinal, capacity)
 {
     /// <summary>
+    /// Global fixed key size (bytes) used by this index, computed on <see cref="Rebuild(IMetadataTable)"/>.
+    /// </summary>
+    private int _keySize;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Key ownership:</b> on success, the index becomes the owner of the stored key buffer. The input key
+    /// is materialized into a pooled fixed-size buffer (copy + zero-fill) before insertion.
+    /// </para>
+    /// <para>
+    /// <b>Semantics:</b> this method does not mutate existing entries. If an equivalent key already exists
+    /// (by content), it returns <see langword="false"/> and the newly rented buffer is returned to the pool.
+    /// </para>
+    /// <para>
+    /// <b>Thread-safety:</b> performed under a write lock.
+    /// </para>
+    /// </remarks>
+    public override bool Add(byte[] key, (uint col, uint row) value)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(key);
+
+        Rwls.EnterWriteLock();
+        try
+        {
+            if (_keySize <= 0)
+                return false;
+
+            if ((uint)key.Length > (uint)_keySize)
+                return false;
+
+            if (!TryRentKey(_keySize, key, out var ownedKey))
+                return false;
+
+            try
+            {
+                // Add-only: if exists, do not modify.
+                ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(Index, ownedKey, out bool exists);
+                if (exists)
+                {
+                    ReturnPooledKey(ownedKey);
+                    return false;
+                }
+
+                slot = value;
+                ownedKey = null!;
+                return true;
+            }
+            finally
+            {
+                if (ownedKey is not null)
+                    ReturnPooledKey(ownedKey);
+            }
+        }
+        finally { Rwls.ExitWriteLock(); }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Uses a fixed-size scratch key (copy + zero-fill) to match the stored key shape.
+    /// </remarks>
+    public override bool TryGetValue(byte[] key, out (uint col, uint row) value)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(key);
+
+        value = default;
+
+        Rwls.EnterReadLock();
+        try
+        {
+            if (_keySize <= 0)
+                return false;
+
+            if ((uint)key.Length > (uint)_keySize)
+                return false;
+
+            var lookup = key.Length == _keySize ? key : GetScratchLookupKey(key, _keySize);
+            return Index.TryGetValue(lookup, out value);
+        }
+        finally { Rwls.ExitReadLock(); }
+    }
+
+    /// <summary>
     /// Clears the index and returns all stored key buffers to the underlying pool.
     /// </summary>
-    /// <remarks>
-    /// Caller-visible behavior is equivalent to dropping the index content, but pooled
-    /// buffers are recycled to reduce future allocations.
-    /// </remarks>
     public override void Clear()
     {
         ThrowIfDisposed();
@@ -55,42 +137,83 @@ internal sealed class GlobalKeyIndex(string name, int capacity = 0)
         finally { Rwls.ExitWriteLock(); }
     }
 
-    /// <summary>
-    /// Attempts to retrieve the table location associated with the specified UTF-8 key buffer.
-    /// </summary>
-    /// <param name="key">Fixed-size UTF-8 key buffer used as a dictionary key.</param>
-    /// <param name="hit">
-    /// When this method returns <see langword="true"/>, contains the <c>(col,row)</c> hit.
-    /// </param>
-    /// <returns><see langword="true"/> if the key exists; otherwise <see langword="false"/>.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown if the index has been disposed.</exception>
-    public bool TryGetHit(byte[] key, out (uint col, uint row) hit)
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>Content-based removal:</b> because stored keys are pooled buffers, callers usually cannot provide the exact
+    /// stored array instance. This method supports removal by content by scanning keys and comparing using
+    /// <see cref="ByteArrayComparer.Ordinal"/>.
+    /// </para>
+    /// <para>
+    /// <b>Pooling:</b> when a stored key is removed, its buffer is returned to the pool.
+    /// </para>
+    /// <para>
+    /// <b>Complexity:</b> <c>O(n)</c> due to the scan required to recover the stored key instance.
+    /// </para>
+    /// </remarks>
+    public override bool Remove(byte[] key)
     {
         ThrowIfDisposed();
-        Rwls.EnterReadLock();
-        try { return Index.TryGetValue(key, out hit); }
-        finally { Rwls.ExitReadLock(); }
+        ArgumentNullException.ThrowIfNull(key);
+
+        Rwls.EnterWriteLock();
+        try
+        {
+            if (_keySize <= 0)
+                return false;
+
+            if ((uint)key.Length > (uint)_keySize)
+                return false;
+
+            var lookup = key.Length == _keySize ? key : GetScratchLookupKey(key, _keySize);
+
+            // Find the *stored* key instance so we can return it to the pool.
+            foreach (var k in Index.Keys)
+            {
+                if (!ByteArrayComparer.Ordinal.Equals(k, lookup))
+                    continue;
+
+                if (Index.Remove(k))
+                {
+                    ReturnPooledKey(k);
+                    return true;
+                }
+
+                return false;
+            }
+
+            return false;
+        }
+        finally { Rwls.ExitWriteLock(); }
     }
 
     /// <summary>
-    /// Attempts to retrieve the table location associated with the specified key span without allocating.
+    /// Attempts to retrieve the table location associated with the specified UTF-8 key buffer.
     /// </summary>
-    /// <param name="keyUtf8">Key bytes (usually shorter than the fixed key size).</param>
-    /// <param name="keySize">
-    /// Fixed key size used by the column spec. The lookup uses a thread-static scratch buffer of this size
-    /// (zero-padded) to match stored dictionary keys.
-    /// </param>
-    /// <param name="hit">When true, receives the <c>(col,row)</c> hit.</param>
-    /// <returns><see langword="true"/> if the key exists; otherwise <see langword="false"/>.</returns>
     /// <remarks>
-    /// This method uses <see cref="IndexKeyScratch"/> to avoid allocations for the lookup key. The scratch buffer
-    /// is zero-padded to ensure comparison matches the fixed-size keys stored in the index.
+    /// This method accepts variable-length input and materializes a fixed-size lookup key using a scratch buffer.
+    /// </remarks>
+    public bool TryGetHit(byte[] key, out (uint col, uint row) hit)
+        => TryGetValue(key, out hit);
+
+    /// <summary>
+    /// Attempts to retrieve the table location associated with the specified UTF-8 key span without allocating.
+    /// </summary>
+    /// <remarks>
+    /// Uses a thread-static scratch buffer sized to the global fixed key size (copy + zero-fill).
     /// </remarks>
     public bool TryGetHit(ReadOnlySpan<byte> keyUtf8, out (uint col, uint row) hit)
     {
         ThrowIfDisposed();
+        hit = default;
 
-        var scratch = GetScratchLookupKey(keyUtf8, keyUtf8.Length);
+        if (_keySize <= 0)
+            return false;
+
+        if ((uint)keyUtf8.Length > (uint)_keySize)
+            return false;
+
+        var scratch = GetScratchLookupKey(keyUtf8, _keySize);
 
         Rwls.EnterReadLock();
         try { return Index.TryGetValue(scratch, out hit); }
@@ -98,48 +221,121 @@ internal sealed class GlobalKeyIndex(string name, int capacity = 0)
     }
 
     /// <summary>
-    /// Sets or overwrites the hit associated with the specified key.
+    /// Sets or overwrites the hit associated with the specified key bytes.
     /// </summary>
-    /// <param name="key">Owned key buffer (typically rented from the pool) used as the dictionary key.</param>
-    /// <param name="col">Zero-based column index where the key was found.</param>
-    /// <param name="row">Zero-based row index where the key was found.</param>
     /// <remarks>
-    /// Uses <b>last wins</b> semantics. The caller must ensure <paramref name="key"/> is an owned buffer that
-    /// will remain valid for the lifetime of the index entry (and returned to the pool when removed/cleared).
+    /// <para>
+    /// <b>Key materialization:</b> the input key is materialized into a pooled fixed-size buffer (copy + zero-fill).
+    /// If the key is longer than the configured fixed size, the call is a no-op.
+    /// </para>
+    /// <para>
+    /// <b>Pooling safety:</b> if an equivalent key already exists (by content), the dictionary retains its original stored
+    /// key instance and the newly rented key buffer is returned to the pool to avoid leaks.
+    /// </para>
+    /// <para>
+    /// <b>Semantics:</b> <b>last wins</b>.
+    /// </para>
     /// </remarks>
     internal void Set(byte[] key, uint col, uint row)
     {
         ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(key);
+
         Rwls.EnterWriteLock();
-        try { Set_NoLock(key, (col, row)); }
+
+        byte[]? owned = null;
+        try
+        {
+            if (_keySize <= 0)
+                return;
+
+            if ((uint)key.Length > (uint)_keySize)
+                return;
+
+            if (!TryRentKey(_keySize, key, out owned))
+                throw new InvalidOperationException("Failed to rent key buffer for index storage.");
+
+            Set_NoLock(owned, (col, row));
+        }
+        catch
+        {
+            if (owned is not null)
+                ReturnPooledKey(owned);
+            throw;
+        }
         finally { Rwls.ExitWriteLock(); }
     }
 
-    private void Set_NoLock(byte[] key, (uint col, uint row) hit) => Index[key] = hit;
+    private void Set_NoLock(byte[] ownedKey, (uint col, uint row) hit)
+    {
+        ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(Index, ownedKey, out bool exists);
+
+        // If it already existed, the dictionary kept its original stored key instance,
+        // so the incoming pooled key is unused -> return it to the pool.
+        if (exists)
+            ReturnPooledKey(ownedKey);
+
+        slot = hit; // last wins
+    }
 
     /// <summary>
     /// Rebuilds the index by scanning <paramref name="table"/> and indexing keys from all key/value columns.
     /// </summary>
-    /// <param name="table">Table to scan as the source of truth.</param>
     /// <remarks>
-    /// Existing keys are returned to the pool, then the index is repopulated. Value-only columns are skipped.
+    /// <para>
+    /// Computes the global fixed key size as the maximum non-zero key size across the table schema.
+    /// </para>
+    /// <para>
+    /// Returns all previously stored pooled keys to the pool, clears the index, then repopulates it by enumerating cells.
+    /// </para>
     /// </remarks>
-    public override void Rebuild(MetadataTable table)
+    public override void Rebuild(IMetadataTable table)
     {
         ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(table);
+
         var cols = table.Spec.Columns;
 
         Rwls.EnterWriteLock();
         try
         {
+            // Recompute global key size (max non-zero).
+            int max = 0;
+            for (uint i = 0; i < cols.Length; i++)
+            {
+                var ks = cols[i].Size.GetKeySize();
+                if (ks > max) max = ks;
+            }
+            _keySize = max;
+
+            // Return existing pooled keys.
             foreach (var k in Index.Keys)
                 ReturnPooledKey(k);
             Index.Clear();
 
+            if (_keySize <= 0)
+                return;
+
             foreach (var entry in table.EnumerateCells())
             {
-                if (!TryRentKey(cols, entry, out var owned)) continue;
-                Set_NoLock(owned, (entry.Col, entry.Row));
+                if (!TryRentKey(cols, entry, out var perColOwned))
+                    continue;
+
+                // Normalize to global key size so lookup doesn't need per-column size.
+                if (perColOwned.Length == _keySize)
+                {
+                    Set_NoLock(perColOwned, (entry.Col, entry.Row));
+                    continue;
+                }
+
+                if (!TryRentKey(_keySize, perColOwned, out var ownedMax))
+                {
+                    ReturnPooledKey(perColOwned);
+                    continue;
+                }
+
+                ReturnPooledKey(perColOwned);
+                Set_NoLock(ownedMax, (entry.Col, entry.Row));
             }
         }
         finally { Rwls.ExitWriteLock(); }

@@ -28,7 +28,7 @@
     /// <para>
     /// Generated types are expected to be <c>unsafe struct</c>s with inline buffers for the
     /// key and value and no managed references, so they can be used directly inside
-    /// <see cref="MetadataTable"/> value cells without allocations.
+    /// <see cref="IMetadataTable"/> value cells without allocations.
     /// </para>
     /// </remarks>
     public unsafe interface IMetadataEntry

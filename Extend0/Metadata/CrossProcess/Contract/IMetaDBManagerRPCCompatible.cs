@@ -9,7 +9,7 @@ namespace Extend0.Metadata.CrossProcess.Contract;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="IMetaDBManagerRCPCompatible"/> exposes an RPC-safe subset of MetaDB operations where all inputs and
+/// <see cref="IMetaDBManagerRPCCompatible"/> exposes an RPC-safe subset of MetaDB operations where all inputs and
 /// outputs are serializable and do not leak process-dependent state (pointers, spans, mapped views, or live table objects).
 /// </para>
 /// <para>
@@ -37,7 +37,7 @@ namespace Extend0.Metadata.CrossProcess.Contract;
 /// as exposed by the API (e.g., <see cref="IMetaDBManagerCommon.CloseAll"/> vs <see cref="IMetaDBManagerCommon.CloseAllStrict"/>).
 /// </para>
 /// </remarks>
-public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProcessService, IDisposable, IAsyncDisposable
+public interface IMetaDBManagerRPCCompatible : IMetaDBManagerCommon, ICrossProcessService
 {
     /// <summary>
     /// Gets the logical row count for the table identified by <paramref name="tableId"/>.
@@ -254,20 +254,75 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     IndexInfoDTO[] GetIndexes(Guid tableId);
 
     /// <summary>
-    /// Registers an index in the table registry, optionally replacing an existing one with the same name.
+    /// Returns a point-in-time snapshot of the indexes currently registered for the specified manager.
+    /// </summary>
+    /// <returns>
+    /// An array of <see cref="IndexInfoDTO"/> describing each registered index. The returned snapshot is detached
+    /// from future mutations (subsequent adds/removes won’t affect this array).
+    /// </returns>
+    IndexInfoDTO[] GetIndexes();
+
+    /// <summary>
+    /// Adds (or replaces) a per-table index in the specified table's index registry.
     /// </summary>
     /// <param name="tableId">The identifier of the target table.</param>
     /// <param name="request">
-    /// The index definition request, including name, kind, and kind-specific payload.
+    /// Index creation request (name, kind, and kind-specific payload and/or program bytes).
     /// </param>
     /// <returns>
-    /// A mutation result describing whether the index was created/replaced, or why the operation failed.
+    /// A <see cref="IndexMutationResultDTO"/> describing the mutation outcome:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexMutationStatusDTO.Ok"/> when the index was added or replaced.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.TableNotOpen"/> when the table cannot be resolved/opened.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.InvalidName"/> when the requested name is invalid.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.InvalidKind"/> when the requested kind is invalid/unknown.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.BuiltInProtected"/> when the request targets a built-in/protected kind or collides with a built-in index.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.AlreadyExists"/> when an index with the same name exists and <see cref="AddIndexRequestDTO.ReplaceIfExists"/> is <see langword="false"/>.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.NotSupported"/> when the backend does not support the requested custom kind/payload.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.Error"/> for unexpected failures while swapping/adding.</description></item>
+    /// </list>
     /// </returns>
     /// <remarks>
-    /// If <see cref="AddIndexRequestDTO.ReplaceIfExists"/> is <see langword="false"/> and an index with the same
-    /// name already exists, the call returns <see cref="IndexMutationStatusDTO.AlreadyExists"/>.
+    /// <para>
+    /// This method mutates the per-table registry (<c>IMetadataTable.Indexes</c>). Built-in indexes are protected
+    /// and cannot be added/replaced/removed through this API.
+    /// </para>
+    /// <para>
+    /// Replacement is best-effort: the implementation should avoid removing an existing index until a new instance
+    /// has been successfully created. If a swap partially fails, it may attempt a rollback to the previous instance.
+    /// </para>
     /// </remarks>
     IndexMutationResultDTO AddIndex(Guid tableId, AddIndexRequestDTO request);
+
+    /// <summary>
+    /// Adds (or replaces) a manager-level (cross-table) index in the manager index registry.
+    /// </summary>
+    /// <param name="request">
+    /// Index creation request (name, kind, and kind-specific payload and/or program bytes).
+    /// </param>
+    /// <returns>
+    /// A <see cref="IndexMutationResultDTO"/> describing the mutation outcome:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexMutationStatusDTO.Ok"/> when the index was added or replaced.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.InvalidName"/> when the requested name is invalid.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.InvalidKind"/> when the requested kind is invalid/unknown.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.BuiltInProtected"/> when the request targets a built-in/protected kind or collides with a built-in index.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.AlreadyExists"/> when an index with the same name exists and <see cref="AddIndexRequestDTO.ReplaceIfExists"/> is <see langword="false"/>.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.NotSupported"/> when the backend does not support the requested custom kind/payload.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.Error"/> for unexpected failures while swapping/adding.</description></item>
+    /// </list>
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This method mutates the manager-level registry (<c>_innerManager.Indexes</c>) which stores cross-table indexes
+    /// (e.g., a global multi-table key index).
+    /// </para>
+    /// <para>
+    /// Replacement is best-effort: the implementation should avoid removing an existing index until a new instance
+    /// has been successfully created. If a swap partially fails, it may attempt a rollback to the previous instance.
+    /// </para>
+    /// </remarks>
+    IndexMutationResultDTO AddIndex(AddIndexRequestDTO request);
 
     /// <summary>
     /// Removes an index from the table registry by its logical name.
@@ -275,9 +330,40 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     /// <param name="tableId">The identifier of the target table.</param>
     /// <param name="name">The logical name of the index to remove.</param>
     /// <returns>
-    /// A mutation result describing whether the index was removed, or why the operation failed.
+    /// A <see cref="IndexMutationResultDTO"/> describing the mutation outcome:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexMutationStatusDTO.Ok"/> when the index was removed.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.InvalidName"/> when <paramref name="name"/> is null/empty/whitespace.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.NotFound"/> when no index exists with the specified name.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.BuiltInProtected"/> when the target index is built-in/protected.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.Error"/> for unexpected failures.</description></item>
+    /// </list>
     /// </returns>
+    /// <remarks>
+    /// Built-in indexes are protected and cannot be removed through this API.
+    /// </remarks>
     IndexMutationResultDTO RemoveIndex(Guid tableId, string name);
+
+    /// <summary>
+    /// Removes an index from the manager-level (cross-table) index registry by its logical name.
+    /// </summary>
+    /// <param name="name">The logical name of the index to remove.</param>
+    /// <returns>
+    /// A <see cref="IndexMutationResultDTO"/> describing the mutation outcome:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexMutationStatusDTO.Ok"/> when the index was removed.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.InvalidName"/> when <paramref name="name"/> is null/empty/whitespace.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.NotFound"/> when no index exists with the specified name.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.BuiltInProtected"/> when the target index is built-in/protected.</description></item>
+    ///   <item><description><see cref="IndexMutationStatusDTO.Error"/> for unexpected failures.</description></item>
+    /// </list>
+    /// </returns>
+    /// <remarks>
+    /// This method affects the manager-level index registry (cross-table indexes). Built-in indexes are protected and
+    /// cannot be removed through this API.
+    /// </remarks>
+    IndexMutationResultDTO RemoveIndex(string name);
+
 
     /// <summary>
     /// Finds the first matching row using an index that targets a specific column and a UTF-8 key provided as text.
@@ -304,24 +390,87 @@ public interface IMetaDBManagerRCPCompatible : IMetaDBManagerCommon, ICrossProce
     IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, byte[] keyUtf8);
 
     /// <summary>
-    /// Finds a row using the table’s global index (or equivalent) with a UTF-8 key provided as text.
+    /// Attempts to locate a (column,row) hit for a given global key within a specific table using the built-in
+    /// global key index.
     /// </summary>
     /// <param name="tableId">The identifier of the target table.</param>
     /// <param name="keyUtf8">
-    /// The lookup key encoded as text; the receiver treats it as UTF-8 input for matching.
+    /// The lookup key as managed text. It is encoded as UTF-8 before performing the lookup.
     /// </param>
     /// <returns>
-    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome (found/not found/error) and any row reference.
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome and, when found, the hit information.
+    /// Typical results include:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexLookupStatusDTO.Ok"/> with a populated hit when found.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.NotFound"/> when the key is not present in the index.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.InvalidKey"/> when <paramref name="keyUtf8"/> is null/empty.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.TableNotOpen"/> when the table cannot be resolved/opened.</description></item>
+    /// </list>
     /// </returns>
+    /// <remarks>
+    /// This overload is a convenience wrapper that converts <paramref name="keyUtf8"/> to UTF-8 bytes and forwards
+    /// the lookup to <see cref="FindGlobal(System.Guid,byte[])"/>.
+    /// </remarks>
     IndexLookupResultDTO FindGlobal(Guid tableId, string keyUtf8);
 
     /// <summary>
-    /// Finds a row using the table’s global index (or equivalent) with a UTF-8 key provided as raw bytes.
+    /// Attempts to locate a (column,row) hit for a given global UTF-8 key within a specific table using the built-in
+    /// global key index.
     /// </summary>
     /// <param name="tableId">The identifier of the target table.</param>
     /// <param name="keyUtf8">The lookup key as a UTF-8 byte sequence.</param>
     /// <returns>
-    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome (found/not found/error) and any row reference.
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome and, when found, the hit information.
+    /// Typical results include:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexLookupStatusDTO.Ok"/> with a populated hit when found.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.NotFound"/> when the key is not present in the index.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.TableNotOpen"/> when the table cannot be resolved/opened.</description></item>
+    /// </list>
     /// </returns>
+    /// <remarks>
+    /// The global index typically maps a unique key to the corresponding (column,row) location within the table.
+    /// </remarks>
     IndexLookupResultDTO FindGlobal(Guid tableId, byte[] keyUtf8);
+
+    /// <summary>
+    /// Attempts to locate a (column,row) hit for a given global key across all tables using the built-in
+    /// manager-level global multi-table key index.
+    /// </summary>
+    /// <param name="keyUtf8">
+    /// The lookup key as managed text. It is encoded as UTF-8 before performing the lookup.
+    /// </param>
+    /// <returns>
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome and, when found, the hit information.
+    /// Typical results include:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexLookupStatusDTO.Ok"/> with a populated hit when found.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.NotFound"/> when the key is not present in the index.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.InvalidKey"/> when <paramref name="keyUtf8"/> is null/empty.</description></item>
+    /// </list>
+    /// </returns>
+    /// <remarks>
+    /// This overload is a convenience wrapper that converts <paramref name="keyUtf8"/> to UTF-8 bytes and forwards
+    /// the lookup to <see cref="FindGlobal(byte[])"/>.
+    /// </remarks>
+    IndexLookupResultDTO FindGlobal(string keyUtf8);
+
+    /// <summary>
+    /// Attempts to locate a (column,row) hit for a given global UTF-8 key across all tables using the built-in
+    /// manager-level global multi-table key index.
+    /// </summary>
+    /// <param name="keyUtf8">The lookup key as a UTF-8 byte sequence.</param>
+    /// <returns>
+    /// An <see cref="IndexLookupResultDTO"/> describing the lookup outcome and, when found, the hit information.
+    /// Typical results include:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IndexLookupStatusDTO.Ok"/> with a populated hit when found.</description></item>
+    ///   <item><description><see cref="IndexLookupStatusDTO.NotFound"/> when the key is not present in the index.</description></item>
+    /// </list>
+    /// </returns>
+    /// <remarks>
+    /// The global multi-table index is typically built/rebuilt out-of-band. If it is missing, empty, or stale, this
+    /// method may return <see cref="IndexLookupStatusDTO.NotFound"/> even if the key exists in underlying storage.
+    /// </remarks>
+    IndexLookupResultDTO FindGlobal(byte[] keyUtf8);
 }

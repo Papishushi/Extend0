@@ -45,14 +45,14 @@ public interface ITableIndex : IDisposable
 /// <typeparam name="TValue">Index value type.</typeparam>
 /// <remarks>
 /// <para>
-/// Intended for per-table indexes (owned by a single <see cref="MetadataTable"/>), where lookups
+/// Intended for per-table indexes (owned by a single <see cref="IMetadataTable"/>), where lookups
 /// do not require a table identifier.
 /// </para>
 /// <para>
 /// Implementations are expected to be thread-safe.
 /// </para>
 /// </remarks>
-public interface ITableIndex<TKey, TValue> : ITableIndex where TKey : notnull
+public interface ITableIndex<in TKey, TValue> : ITableIndex where TKey : notnull
 {
     /// <summary>
     /// Adds a new entry to the index.

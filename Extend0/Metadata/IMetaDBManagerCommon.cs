@@ -18,6 +18,8 @@ namespace Extend0.Metadata;
 /// </remarks>
 public interface IMetaDBManagerCommon : IDisposable, IAsyncDisposable
 {
+    IEnumerable<Guid> TableIds { get; }
+
     /// <summary>
     /// Registers a table by name and map path with the provided column configuration.
     /// </summary>

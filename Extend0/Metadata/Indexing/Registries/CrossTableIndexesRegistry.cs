@@ -1,5 +1,6 @@
 ﻿using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Definitions;
+using Extend0.Metadata.Indexing.Registries.Contract;
 using System.Collections.Concurrent;
 
 namespace Extend0.Metadata.Indexing.Registries
@@ -21,7 +22,7 @@ namespace Extend0.Metadata.Indexing.Registries
     /// Each index implementation is responsible for its own internal synchronization.
     /// </para>
     /// </remarks>
-    public sealed class CrossTableIndexesRegistry : IndexesRegistryBase
+    public sealed class CrossTableIndexesRegistry : IndexesRegistryBase, ICrossTableIndexesRegistry
     {
         /// <summary>
         /// Attempts to retrieve a registered cross-table index by name (non-generic).
@@ -63,24 +64,43 @@ namespace Extend0.Metadata.Indexing.Registries
         }
 
         /// <summary>
-        /// Creates and registers a new cross-table index.
+        /// Creates and registers a new cross-table index instance using a user-provided constructor.
         /// </summary>
-        /// <typeparam name="TKey">Key type.</typeparam>
-        /// <typeparam name="TValue">Value type.</typeparam>
-        /// <param name="name">Unique index name within this registry.</param>
-        /// <param name="comparer">Optional key comparer.</param>
-        /// <returns>The created typed cross-table index.</returns>
-        /// <exception cref="ArgumentNullException">Thrown if <paramref name="name"/> is null.</exception>
-        /// <exception cref="InvalidOperationException">Thrown if an index with the same name already exists.</exception>
-        public ICrossTableIndex<TKey, TValue> Add<TKey, TValue>(string name, IEqualityComparer<TKey>? comparer = null) where TKey : notnull
+        /// <typeparam name="TKey">The type of key used by the index. Must be non-null.</typeparam>
+        /// <typeparam name="TValue">The type of value stored in the index.</typeparam>
+        /// <param name="indexConstructor">
+        /// A factory delegate that constructs the index instance. Called only if no index with the same name exists.
+        /// </param>
+        /// <returns>The created index instance.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if an index with the specified <see cref="ITableIndex.Name"/> is already registered.
+        /// </exception>
+        public ICrossTableIndex Add<TKey, TValue>(Func<ICrossTableIndex> indexConstructor) where TKey : notnull
         {
             ThrowIfDisposed();
 
-            var created = new CrossTableIndexDefinition<TKey, TValue>(name, comparer);
-            if (!_indexes.TryAdd(name, created))
-                throw new InvalidOperationException($"Cross-table index '{name}' already exists.");
+            var created = indexConstructor();
+            if (!_indexes.TryAdd(created.Name, created))
+                throw new InvalidOperationException($"Cross-table index '{created.Name}' already exists.");
 
             return created;
+        }
+
+        /// <summary>
+        /// Registers an already-created index instance.
+        /// </summary>
+        /// <param name="index">Index instance to register.</param>
+        /// <returns>The same instance, for fluent usage.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if an index with the same name already exists.</exception>
+        public TIndex Add<TIndex>(TIndex index) where TIndex : class, ICrossTableIndex
+        {
+            ArgumentNullException.ThrowIfNull(index);
+            ThrowIfDisposed();
+
+            if (!_indexes.TryAdd(index.Name, index))
+                throw new InvalidOperationException($"Index '{index.Name}' already exists.");
+
+            return index;
         }
 
         /// <summary>

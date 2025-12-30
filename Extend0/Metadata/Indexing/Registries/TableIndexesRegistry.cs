@@ -1,5 +1,5 @@
 ﻿using Extend0.Metadata.Indexing.Contract;
-using Extend0.Metadata.Indexing.Definitions;
+using Extend0.Metadata.Indexing.Registries.Contract;
 
 namespace Extend0.Metadata.Indexing.Registries
 {
@@ -10,7 +10,7 @@ namespace Extend0.Metadata.Indexing.Registries
     /// Typically owned by a <c>MetadataTable</c> instance. Provides strongly-typed access
     /// while still allowing heterogeneous enumeration via <see cref="ITableIndex"/>.
     /// </remarks>
-    public sealed class TableIndexesRegistry : IndexesRegistryBase
+    public sealed class TableIndexesRegistry : IndexesRegistryBase, ITableIndexesRegistry
     {
         /// <summary>
         /// Attempts to retrieve a registered index by name (non-generic).
@@ -25,21 +25,23 @@ namespace Extend0.Metadata.Indexing.Registries
         }
 
         /// <summary>
-        /// Creates and registers a new per-table index.
+        /// Creates and registers a new per-table index instance using a user-provided constructor.
         /// </summary>
-        /// <typeparam name="TKey">Key type.</typeparam>
-        /// <typeparam name="TValue">Value type.</typeparam>
-        /// <param name="name">Unique index name within this registry.</param>
-        /// <param name="comparer">Optional key comparer.</param>
-        /// <param name="capacity">Optional initial dictionary capacity.</param>
-        /// <returns>The created typed index.</returns>
-        /// <exception cref="InvalidOperationException">Thrown if an index with the same name already exists.</exception>
-        public ITableIndex<TKey, TValue> Add<TKey, TValue>(string name, IEqualityComparer<TKey>? comparer = null, int capacity = 0) where TKey : notnull
+        /// <typeparam name="TKey">The type of key used by the index. Must be non-null.</typeparam>
+        /// <typeparam name="TValue">The type of value stored in the index.</typeparam>
+        /// <param name="indexConstructor">
+        /// A factory delegate that constructs the index instance. Called only if no index with the same name exists.
+        /// </param>
+        /// <returns>The created index instance.</returns>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if an index with the specified <see cref="ITableIndex.Name"/> is already registered.
+        /// </exception>
+        public ITableIndex Add<TKey, TValue>(Func<ITableIndex> indexConstructor) where TKey : notnull
         {
             ThrowIfDisposed();
-            var created = new IndexDefinition<TKey, TValue>(name, comparer, capacity);
-            if (!_indexes.TryAdd(name, created))
-                throw new InvalidOperationException($"Index '{name}' already exists.");
+            var created = indexConstructor();
+            if (!_indexes.TryAdd(created.Name, created))
+                throw new InvalidOperationException($"Index '{created.Name}' already exists.");
 
             return created;
         }
@@ -90,7 +92,7 @@ namespace Extend0.Metadata.Indexing.Registries
         /// Clears all registered indexes and rebuilds those that implement <see cref="IRebuildableIndex"/>.
         /// </summary>
         /// <param name="table">Table to scan.</param>
-        public void Rebuild(MetadataTable table)
+        public void Rebuild(IMetadataTable table)
         {
             ArgumentNullException.ThrowIfNull(table);
             ThrowIfDisposed();

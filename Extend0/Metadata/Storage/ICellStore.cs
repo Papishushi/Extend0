@@ -8,7 +8,7 @@ namespace Extend0.Metadata.Storage
     /// <remarks>
     /// <para>
     /// Implementations of <see cref="ICellStore"/> provide a uniform way for
-    /// <see cref="MetadataTable"/> to access and materialize cells, regardless of whether
+    /// <see cref="IMetadataTable"/> to access and materialize cells, regardless of whether
     /// the data is backed by an in-memory buffer (<c>InMemoryStore</c>) or a memory-mapped
     /// file (<c>MappedStore</c>).
     /// </para>
@@ -24,7 +24,7 @@ namespace Extend0.Metadata.Storage
     /// <para>
     /// <see cref="ICellStore"/> instances are <see cref="IDisposable"/> and typically own
     /// unmanaged resources (e.g., memory-mapped views), so callers must dispose them when
-    /// the associated <see cref="MetadataTable"/> is no longer needed.
+    /// the associated <see cref="IMetadataTable"/> is no longer needed.
     /// </para>
     /// </remarks>
     internal interface ICellStore : IDisposable, IEnumerable<CellRowColumnValueEntry>

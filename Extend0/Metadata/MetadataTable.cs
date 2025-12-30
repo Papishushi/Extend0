@@ -2,6 +2,7 @@
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal.BuiltIn;
 using Extend0.Metadata.Indexing.Registries;
+using Extend0.Metadata.Indexing.Registries.Contract;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using System.Collections.Frozen;
@@ -39,7 +40,7 @@ namespace Extend0.Metadata
     /// <see cref="Dispose"/> when no longer needed.
     /// </para>
     /// </remarks>
-    public sealed class MetadataTable : IDisposable
+    public sealed class MetadataTable : IMetadataTable
     {
         private static readonly UTF8Encoding Utf8Strict = new(false, true);
 
@@ -56,7 +57,7 @@ namespace Extend0.Metadata
         /// <summary>
         /// Gets the registry of indexes associated with this table.
         /// </summary>
-        public TableIndexesRegistry Indexes { get; } = new TableIndexesRegistry();
+        public ITableIndexesRegistry Indexes { get; } = new TableIndexesRegistry();
 
         /// <summary>
         /// Gets the total number of columns defined in this table.
@@ -132,14 +133,14 @@ namespace Extend0.Metadata
         /// The table specification containing the name, path and column definitions.
         /// </param>
         /// <returns>
-        /// A new <see cref="MetadataTable"/> instance backed by a <see cref="MappedStore"/>
+        /// A new <see cref="IMetadataTable"/> instance backed by a <see cref="MappedStore"/>
         /// using the columns discovered in the on-disk file.
         /// </returns>
         /// <exception cref="InvalidOperationException">
         /// Thrown when the file at <see cref="TableSpec.MapPath"/> does not contain a valid
         /// metadata table header.
         /// </exception>
-        public static MetadataTable Open(TableSpec spec)
+        public static IMetadataTable Open(TableSpec spec)
         {
             if (!MappedStore.TryLoadColumns(spec.MapPath, out var columns))
                 throw new InvalidOperationException("File is not a valid metadata table.");
@@ -147,7 +148,7 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Opens a new <see cref="MetadataTable"/> instance using the
+        /// Opens a new <see cref="IMetadataTable"/> instance using the
         /// <see cref="TableSpec"/> associated with this table.
         /// </summary>
         /// <remarks>
@@ -155,14 +156,14 @@ namespace Extend0.Metadata
         /// <see cref="TableSpec.MapPath"/> using the column layout found on disk.
         /// </remarks>
         /// <returns>
-        /// A new <see cref="MetadataTable"/> that reflects the current on-disk column
+        /// A new <see cref="IMetadataTable"/> that reflects the current on-disk column
         /// configuration.
         /// </returns>
         /// <exception cref="InvalidOperationException">
         /// Thrown when the file at the stored <see cref="_spec"/> path does not contain
         /// a valid metadata table header.
         /// </exception>
-        public MetadataTable Open()
+        public IMetadataTable Open()
         {
             if (!MappedStore.TryLoadColumns(_spec.MapPath, out var columns))
                 throw new InvalidOperationException("File is not a valid metadata table.");
@@ -479,11 +480,6 @@ namespace Extend0.Metadata
         /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
         /// If the index is empty or stale, the lookup may return <see langword="false"/>
         /// even if the key exists in the underlying storage.
-        /// </para>
-        /// <para>
-        /// This overload allocates a new <see cref="byte"/> array per call to match the index
-        /// key type (<see cref="byte"/>[]). If you already have a <see cref="byte"/>[] key,
-        /// consider using the overload to avoid this allocation.
         /// </para>
         /// </remarks>
         public bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out (uint col, uint row) hit)
