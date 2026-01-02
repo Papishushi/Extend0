@@ -61,7 +61,7 @@ namespace Extend0.Metadata.Indexing.Definitions
         /// <summary>
         /// The equality comparer used for all inner dictionaries and key comparisons.
         /// </summary>
-        protected IEqualityComparer<TInnerKey> InnerKeyComparer { get; } =  keyComparer ?? EqualityComparer<TInnerKey>.Default;
+        protected IEqualityComparer<TInnerKey> InnerKeyComparer { get; } = keyComparer ?? EqualityComparer<TInnerKey>.Default;
 
         private readonly Dictionary<Guid, IDictionary<TInnerKey, TInnerValue>> _index = tablesCapacity > 0
             ? new Dictionary<Guid, IDictionary<TInnerKey, TInnerValue>>(tablesCapacity) : [];
@@ -185,8 +185,8 @@ namespace Extend0.Metadata.Indexing.Definitions
         {
             ThrowIfDisposed();
             Rwls.EnterWriteLock();
-            try 
-            { 
+            try
+            {
                 Index.Remove(tableId);
             }
             finally { Rwls.ExitWriteLock(); }
@@ -316,12 +316,12 @@ namespace Extend0.Metadata.Indexing.Definitions
 
                 return result;
             }
-            finally 
+            finally
             {
                 if (rentedIds is not null)
                     ArrayPool<Guid>.Shared.Return(rentedIds, clearArray: false);
 
-                Rwls.ExitReadLock(); 
+                Rwls.ExitReadLock();
             }
         }
 
@@ -418,7 +418,7 @@ namespace Extend0.Metadata.Indexing.Definitions
                 value = outVals;
                 return outIds;
             }
-            finally 
+            finally
             {
                 if (rentedIds is not null)
                     ArrayPool<Guid>.Shared.Return(rentedIds, clearArray: false);
@@ -428,7 +428,7 @@ namespace Extend0.Metadata.Indexing.Definitions
                         rentedVals,
                         clearArray: RuntimeHelpers.IsReferenceOrContainsReferences<TInnerValue>());
 
-                Rwls.ExitReadLock(); 
+                Rwls.ExitReadLock();
             }
         }
 

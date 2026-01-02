@@ -38,14 +38,6 @@ public interface IMetaDBManagerCommon : IDisposable, IAsyncDisposable
     Guid RegisterTable(TableSpec spec, bool createNow = false);
 
     /// <summary>
-    /// Attempts to resolve a table id from a registered <paramref name="name"/>.
-    /// </summary>
-    /// <param name="name">Registered table name.</param>
-    /// <param name="id">When this method returns, contains the resolved id if found.</param>
-    /// <returns><see langword="true"/> if the name was found; otherwise <see langword="false"/>.</returns>
-    bool TryGetIdByName(string name, out Guid id);
-
-    /// <summary>
     /// Closes a managed table identified by <paramref name="tableId"/> using strict semantics.
     /// </summary>
     /// <param name="tableId">Identifier of the table to close.</param>

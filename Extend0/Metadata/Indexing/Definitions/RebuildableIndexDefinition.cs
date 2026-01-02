@@ -33,8 +33,8 @@ namespace Extend0.Metadata.Indexing.Definitions;
 /// </list>
 /// </para>
 /// </remarks>
-public abstract class RebuildableIndexDefinition<TKey, TValue>(string name, IEqualityComparer<TKey>? comparer = null, int capacity = 0) : 
-    IndexBase<TKey, TValue>(name, comparer, capacity), 
+public abstract class RebuildableIndexDefinition<TKey, TValue>(string name, IEqualityComparer<TKey>? comparer = null, int capacity = 0) :
+    IndexBase<TKey, TValue>(name, comparer, capacity),
     IRebuildableIndex<TKey, TValue> where TKey : notnull
 {
     private readonly IndexFixedSizeByteArrayPool _pool = new();

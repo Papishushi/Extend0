@@ -6,6 +6,7 @@ using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Schema;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
+using static Extend0.Metadata.CrossProcess.MetaDBManagerRPCCompatibleHelpers;
 
 namespace Extend0.Metadata.CrossProcess
 {
@@ -75,8 +76,44 @@ namespace Extend0.Metadata.CrossProcess
         /// </summary>
         private bool _disposed;
 
+        /// <summary>
+        /// Throws if this RPC-compatible facade (or its underlying in-proc manager) has already been disposed.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This method checks both disposal sources:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item><description>
+        ///   The wrapper itself (<c>_disposed</c>) which represents the lifetime of this RPC service instance.
+        ///   </description></item>
+        ///   <item><description>
+        ///   The underlying <c>MetaDBManager</c> (<c>_innerManager.Disposed</c>) which may be disposed independently
+        ///   (e.g., shutdown, explicit disposal, or external lifetime management).
+        ///   </description></item>
+        /// </list>
+        /// <para>
+        /// <c>_innerManager.Disposed</c> is read using <see cref="Volatile.Read(ref int)"/> to ensure the latest value is observed
+        /// across threads without requiring a lock.
+        /// </para>
+        /// <para>
+        /// If the inner manager is found disposed, this wrapper proactively calls <see cref="Dispose"/> to synchronize lifetimes,
+        /// then throws <see cref="ObjectDisposedException"/> using <see cref="ObjectDisposedException.ThrowIf(bool, string?)"/>.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">
+        /// Thrown when the facade instance has been disposed or when the underlying manager has been disposed.
+        /// </exception>
+        private void ThrowIfDisposed()
+        {
+            var innerDisposed = false;
+            if (Volatile.Read(ref _innerManager.Disposed) != 0) innerDisposed = true;
+            if (innerDisposed) Dispose();
+            ObjectDisposedException.ThrowIf(_disposed || innerDisposed, nameof(MetaDBManagerRPCCompatible));
+        }
+
         // -----------------------------
-        // Shared methods (already wired)
+        // Shared methods (RPC-wrapped)
         // -----------------------------
 
         /// <summary>
@@ -87,7 +124,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="columns">Column layout definitions.</param>
         /// <returns>The table identifier.</returns>
         public Guid RegisterTable(string name, string mapPath, params ColumnConfiguration[] columns)
-            => _innerManager.RegisterTable(name, mapPath, columns);
+            => Rpc(RpcOp.RegisterTable_NamePathColumns, () => _innerManager.RegisterTable(name, mapPath, columns), ThrowIfDisposed);
 
         /// <summary>
         /// Registers a table from a <see cref="TableSpec"/> definition.
@@ -98,16 +135,15 @@ namespace Extend0.Metadata.CrossProcess
         /// </param>
         /// <returns>The table identifier.</returns>
         public Guid RegisterTable(TableSpec spec, bool createNow = false)
-            => _innerManager.RegisterTable(spec, createNow);
+            => Rpc(RpcOp.RegisterTable_Spec, () => _innerManager.RegisterTable(spec, createNow), ThrowIfDisposed);
 
         /// <summary>
-        /// Tries to resolve a table id by its registered name.
+        /// Attempts to resolve a table id from a registered <paramref name="name"/>.
         /// </summary>
         /// <param name="name">Registered table name.</param>
-        /// <param name="id">Receives the resolved table id when found.</param>
-        /// <returns><see langword="true"/> if found; otherwise <see langword="false"/>.</returns>
-        public bool TryGetIdByName(string name, out Guid id)
-            => _innerManager.TryGetIdByName(name, out id);
+        /// <returns>When this method returns, contains the resolved id if found.</returns>
+        public Guid? TryGetIdByName(string name)
+            => Rpc<Guid?>(RpcOp.TryGetIdByName, () => !_innerManager.TryGetIdByName(name, out var id) ? null : id, ThrowIfDisposed);
 
         /// <summary>
         /// Closes (and disposes) a managed table instance using strict semantics.
@@ -115,7 +151,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="tableId">Table identifier.</param>
         /// <returns><see langword="true"/> if the table was closed; otherwise <see langword="false"/>.</returns>
         public bool CloseStrict(Guid tableId)
-            => _innerManager.CloseStrict(tableId);
+            => Rpc(RpcOp.CloseStrict_ById, () => _innerManager.CloseStrict(tableId), ThrowIfDisposed);
 
         /// <summary>
         /// Closes (and disposes) a managed table instance by name using strict semantics.
@@ -123,19 +159,19 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="name">Registered table name.</param>
         /// <returns><see langword="true"/> if the table was closed; otherwise <see langword="false"/>.</returns>
         public bool CloseStrict(string name)
-            => _innerManager.CloseStrict(name);
+            => Rpc(RpcOp.CloseStrict_ByName, () => _innerManager.CloseStrict(name), ThrowIfDisposed);
 
         /// <summary>
         /// Closes all managed tables using best-effort semantics.
         /// </summary>
         public void CloseAll()
-            => _innerManager.CloseAll();
+            => RpcVoid(RpcOp.CloseAll, _innerManager.CloseAll, ThrowIfDisposed);
 
         /// <summary>
         /// Closes all managed tables using strict semantics (fail-fast on inconsistencies).
         /// </summary>
         public void CloseAllStrict()
-            => _innerManager.CloseAllStrict();
+            => RpcVoid(RpcOp.CloseAllStrict, _innerManager.CloseAllStrict, ThrowIfDisposed);
 
         /// <summary>
         /// Rebuilds indexes for a single table.
@@ -143,21 +179,21 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="tableId">Table identifier.</param>
         /// <param name="includeGlobal">Whether to rebuild the global key index.</param>
         public void RebuildIndexes(Guid tableId, bool includeGlobal = true)
-            => _innerManager.RebuildIndexes(tableId, includeGlobal);
+            => RpcVoid(RpcOp.RebuildIndexes, () => _innerManager.RebuildIndexes(tableId, includeGlobal), ThrowIfDisposed);
 
         /// <summary>
         /// Rebuilds indexes for all managed tables.
         /// </summary>
         /// <param name="includeGlobal">Whether to rebuild the global key index.</param>
         public void RebuildAllIndexes(bool includeGlobal = true)
-            => _innerManager.RebuildAllIndexes(includeGlobal);
+            => RpcVoid(RpcOp.RebuildAllIndexes, () => _innerManager.RebuildAllIndexes(includeGlobal), ThrowIfDisposed);
 
         /// <summary>
         /// Restarts the background delete worker responsible for deleting queued table files.
         /// </summary>
         /// <param name="deleteQueuePath">Optional override queue path; when null, uses the configured default.</param>
         public Task RestartDeleteWorker(string? deleteQueuePath = null)
-            => _innerManager.RestartDeleteWorker(deleteQueuePath);
+            => RpcAsync(RpcOp.RestartDeleteWorker, () => _innerManager.RestartDeleteWorker(deleteQueuePath), ThrowIfDisposed);
 
         /// <summary>
         /// Copies a contiguous range of rows from one column to another column.
@@ -170,7 +206,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="dstPolicy">Capacity policy for the destination column.</param>
         public void CopyColumn(Guid srcTableId, uint srcCol, Guid dstTableId, uint dstCol, uint rows,
             CapacityPolicy dstPolicy = CapacityPolicy.None)
-            => _innerManager.CopyColumn(srcTableId, srcCol, dstTableId, dstCol, rows, dstPolicy);
+            => RpcVoid(RpcOp.CopyColumn, () => _innerManager.CopyColumn(srcTableId, srcCol, dstTableId, dstCol, rows, dstPolicy), ThrowIfDisposed);
 
         /// <summary>
         /// Ensures the reference vector entry exists for a given parent row.
@@ -181,7 +217,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="policy">Capacity policy.</param>
         public void EnsureRefVec(Guid parentTableId, uint refsCol, uint parentRow,
             CapacityPolicy policy = CapacityPolicy.None)
-            => _innerManager.EnsureRefVec(parentTableId, refsCol, parentRow, policy);
+            => RpcVoid(RpcOp.EnsureRefVec, () => _innerManager.EnsureRefVec(parentTableId, refsCol, parentRow, policy), ThrowIfDisposed);
 
         /// <summary>
         /// Links a parent row to a child entry by writing a reference into the parent's reference vector.
@@ -195,10 +231,10 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="policy">Capacity policy.</param>
         public void LinkRef(Guid parentTableId, uint refsCol, uint parentRow, Guid childTableId,
             uint childCol = 0, uint childRow = 0, CapacityPolicy policy = CapacityPolicy.None)
-            => _innerManager.LinkRef(parentTableId, refsCol, parentRow, childTableId, childCol, childRow, policy);
+            => RpcVoid(RpcOp.LinkRef, () => _innerManager.LinkRef(parentTableId, refsCol, parentRow, childTableId, childCol, childRow, policy), ThrowIfDisposed);
 
         // -----------------------------
-        // RPC-only methods (implemented)
+        // RPC-only methods (RPC-wrapped)
         // -----------------------------
 
         /// <summary>
@@ -210,19 +246,19 @@ namespace Extend0.Metadata.CrossProcess
         /// Intended for diagnostics and UI inspection rather than hot paths.
         /// </remarks>
         public uint GetRowCount(Guid tableId)
-            => _innerManager.WithTable(tableId, t => t.GetLogicalRowCount());
+            => Rpc(RpcOp.GetRowCount, () => _innerManager.WithTable(tableId, t => t.GetLogicalRowCount()), ThrowIfDisposed);
 
         /// <summary>
         /// Returns the number of columns defined in the table spec.
         /// </summary>
         public int GetColumnCount(Guid tableId)
-            => _innerManager.WithTable(tableId, t => t.ColumnCount);
+            => Rpc(RpcOp.GetColumnCount, () => _innerManager.WithTable(tableId, t => t.ColumnCount), ThrowIfDisposed);
 
         /// <summary>
         /// Returns column names in their declared order.
         /// </summary>
         public string[] GetColumnNames(Guid tableId)
-            => _innerManager.WithTable(tableId, t => t.Spec.Columns.Select(c => c.Name).ToArray());
+            => Rpc(RpcOp.GetColumnNames, () => _innerManager.WithTable(tableId, t => t.Spec.Columns.Select(c => c.Name).ToArray()), ThrowIfDisposed);
 
         /// <summary>
         /// Produces a human-readable preview of the table content (best-effort).
@@ -230,7 +266,7 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="tableId">Table identifier.</param>
         /// <param name="maxRows">Maximum number of rows to render in the preview.</param>
         public string PreviewTable(Guid tableId, uint maxRows = 32)
-            => _innerManager.WithTable(tableId, t => t.ToString(maxRows));
+            => Rpc(RpcOp.PreviewTable, () => _innerManager.WithTable(tableId, t => t.ToString(maxRows)), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a single cell snapshot as a <see cref="CellResultDTO"/> suitable for IPC boundaries.
@@ -243,7 +279,7 @@ namespace Extend0.Metadata.CrossProcess
         /// A DTO snapshot. When the cell is missing/unreadable, <see cref="CellResultDTO.HasCell"/> is <see langword="false"/>.
         /// </returns>
         public CellResultDTO? ReadCell(Guid tableId, uint column, uint row, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
-            => _innerManager.WithTable(tableId, t => MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, column, row, cellPayloadMode));
+            => Rpc(RpcOp.ReadCell, () => _innerManager.WithTable(tableId, t => BuildCellDto(t, column, row, cellPayloadMode)), ThrowIfDisposed);
 
         /// <summary>
         /// Reads the VALUE payload of a cell as a raw byte copy.
@@ -253,7 +289,7 @@ namespace Extend0.Metadata.CrossProcess
         /// and returns <see cref="CellResultDTO.ValueRaw"/>.
         /// </remarks>
         public byte[]? ReadCellRaw(Guid tableId, uint column, uint row)
-            => _innerManager.WithTable(tableId, t => MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, column, row, CellPayloadModeDTO.RawOnly)?.ValueRaw);
+            => Rpc(RpcOp.ReadCellRaw, () => _innerManager.WithTable(tableId, t => BuildCellDto(t, column, row, CellPayloadModeDTO.RawOnly)?.ValueRaw), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a row and returns a dictionary keyed by column name with per-cell DTO snapshots.
@@ -262,14 +298,14 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="row">Row index.</param>
         /// <param name="cellPayloadMode">Payload selection strategy.</param>
         public Dictionary<string, CellResultDTO?> ReadRow(Guid tableId, uint row, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
-            => _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.ReadRow, () => _innerManager.WithTable(tableId, t =>
             {
                 var cols = t.Spec.Columns;
                 var dict = new Dictionary<string, CellResultDTO?>(cols.Length, StringComparer.Ordinal);
                 for (uint c = 0; c < (uint)cols.Length; c++)
-                    dict[cols[c].Name] = MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, c, row, cellPayloadMode);
+                    dict[cols[c].Name] = BuildCellDto(t, c, row, cellPayloadMode);
                 return dict;
-            });
+            }), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a row and returns a dictionary keyed by column name with raw VALUE payloads.
@@ -277,14 +313,14 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="tableId">Table identifier.</param>
         /// <param name="row">Row index.</param>
         public Dictionary<string, byte[]?> ReadRowRaw(Guid tableId, uint row)
-            => _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.ReadRowRaw, () => _innerManager.WithTable(tableId, t =>
             {
                 var cols = t.Spec.Columns;
                 var dict = new Dictionary<string, byte[]?>(cols.Length, StringComparer.Ordinal);
                 for (uint c = 0; c < (uint)cols.Length; c++)
-                    dict[cols[c].Name] = MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, c, row, CellPayloadModeDTO.RawOnly)?.ValueRaw;
+                    dict[cols[c].Name] = BuildCellDto(t, c, row, CellPayloadModeDTO.RawOnly)?.ValueRaw;
                 return dict;
-            });
+            }), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a contiguous slice of a column as DTO snapshots.
@@ -295,13 +331,13 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="rowCount">Number of rows to read.</param>
         /// <param name="cellPayloadMode">Payload selection strategy.</param>
         public CellResultDTO?[] ReadColumn(Guid tableId, uint column, uint startRow, uint rowCount, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
-            => _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.ReadColumn, () => _innerManager.WithTable(tableId, t =>
             {
                 var arr = new CellResultDTO?[rowCount];
                 for (uint i = 0; i < rowCount; i++)
-                    arr[i] = MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, column, startRow + i, cellPayloadMode);
+                    arr[i] = BuildCellDto(t, column, startRow + i, cellPayloadMode);
                 return arr;
-            });
+            }), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a contiguous slice of a column as raw VALUE payload copies.
@@ -311,13 +347,13 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="startRow">First row to read.</param>
         /// <param name="rowCount">Number of rows to read.</param>
         public byte[]?[] ReadColumnRaw(Guid tableId, uint column, uint startRow, uint rowCount)
-            => _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.ReadColumnRaw, () => _innerManager.WithTable(tableId, t =>
             {
                 var arr = new byte[]?[rowCount];
                 for (uint i = 0; i < rowCount; i++)
-                    arr[i] = MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, column, startRow + i, CellPayloadModeDTO.RawOnly)?.ValueRaw;
+                    arr[i] = BuildCellDto(t, column, startRow + i, CellPayloadModeDTO.RawOnly)?.ValueRaw;
                 return arr;
-            });
+            }), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a rectangular block defined by a column set and a contiguous row range, returning DTO snapshots.
@@ -328,18 +364,18 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="rowCount">Number of rows to read.</param>
         /// <param name="cellPayloadMode">Payload selection strategy.</param>
         public CellResultDTO?[][] ReadBlock(Guid tableId, uint[] columns, uint startRow, uint rowCount, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
-            => _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.ReadBlock, () => _innerManager.WithTable(tableId, t =>
             {
                 var rows = new CellResultDTO?[rowCount][];
                 for (uint r = 0; r < rowCount; r++)
                 {
                     var line = new CellResultDTO?[columns.Length];
                     for (int ci = 0; ci < columns.Length; ci++)
-                        line[ci] = MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, columns[ci], startRow + r, cellPayloadMode);
+                        line[ci] = BuildCellDto(t, columns[ci], startRow + r, cellPayloadMode);
                     rows[r] = line;
                 }
                 return rows;
-            });
+            }), ThrowIfDisposed);
 
         /// <summary>
         /// Reads a rectangular block as raw VALUE payload copies.
@@ -349,32 +385,34 @@ namespace Extend0.Metadata.CrossProcess
         /// <param name="startRow">First row to read.</param>
         /// <param name="rowCount">Number of rows to read.</param>
         public byte[]?[][] ReadBlockRaw(Guid tableId, uint[] columns, uint startRow, uint rowCount)
-            => _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.ReadBlockRaw, () => _innerManager.WithTable(tableId, t =>
             {
                 var rows = new byte[]?[rowCount][];
                 for (uint r = 0; r < rowCount; r++)
                 {
                     var line = new byte[]?[columns.Length];
                     for (int ci = 0; ci < columns.Length; ci++)
-                        line[ci] = MetaDBManagerRPCCompatibleHelpers.BuildCellDto(t, columns[ci], startRow + r, CellPayloadModeDTO.RawOnly)?.ValueRaw;
+                        line[ci] = BuildCellDto(t, columns[ci], startRow + r, CellPayloadModeDTO.RawOnly)?.ValueRaw;
                     rows[r] = line;
                 }
                 return rows;
-            });
+            }), ThrowIfDisposed);
 
         /// <summary>
         /// Creates (or opens) a child table from <paramref name="childSpec"/>, links it under the parent reference vector,
         /// and returns the child table id.
         /// </summary>
         public Guid GetOrCreateAndLinkChild(Guid parentTableId, uint refsCol, uint parentRow, TableSpec childSpec, uint childCol = 0, uint childRow = 0)
-            => _innerManager.GetOrCreateAndLinkChild(parentTableId, refsCol, parentRow, _ => childSpec, childCol, childRow);
+            => Rpc(RpcOp.GetOrCreateAndLinkChild, () =>
+                _innerManager.GetOrCreateAndLinkChild(parentTableId, refsCol, parentRow, _ => childSpec, childCol, childRow), ThrowIfDisposed);
 
         /// <summary>
         /// Creates (or opens) a child table from <paramref name="childSpec"/> using an explicit child key, links it under the parent,
         /// and returns the child table id.
         /// </summary>
         public Guid GetOrCreateAndLinkChild(Guid parentTableId, uint refsCol, uint parentRow, uint childKey, TableSpec childSpec, uint childCol = 0, uint childRow = 0)
-            => _innerManager.GetOrCreateAndLinkChild(parentTableId, refsCol, parentRow, childKey, _ => childSpec, childCol, childRow);
+            => Rpc(RpcOp.GetOrCreateAndLinkChild_WithKey, () =>
+                _innerManager.GetOrCreateAndLinkChild(parentTableId, refsCol, parentRow, childKey, _ => childSpec, childCol, childRow), ThrowIfDisposed);
 
         /// <summary>
         /// Writes a contiguous sequence of cells into a column using <see cref="CellResultDTO"/> snapshots.
@@ -401,51 +439,59 @@ namespace Extend0.Metadata.CrossProcess
         /// If no key payload is provided, the KEY segment remains empty (which usually means "not present").
         /// </para>
         /// </remarks>
-        public void FillColumn(Guid tableId, uint column, uint startRow, CellResultDTO?[] values,
-            CapacityPolicy policy = CapacityPolicy.None, CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
-            => _innerManager.WithTable(tableId, t =>
-            {
-                var meta = t.Spec.Columns[(int)column];
-                int keyCap = meta.Size.GetKeySize();
-                int valCap = meta.Size.GetValueSize();
-
-                for (int i = 0; i < values.Length; i++)
+        public void FillColumn(
+            Guid tableId,
+            uint column,
+            uint startRow,
+            CellResultDTO?[] values,
+            CapacityPolicy policy = CapacityPolicy.None,
+            CellPayloadModeDTO cellPayloadMode = CellPayloadModeDTO.Both)
+            => RpcVoid(RpcOp.FillColumn, () =>
+                _innerManager.WithTable(tableId, t =>
                 {
-                    uint row = startRow + (uint)i;
+                    var meta = t.Spec.Columns[(int)column];
+                    int keyCap = meta.Size.GetKeySize();
+                    int valCap = meta.Size.GetValueSize();
 
-                    // best-effort growth depending on policy
-                    if (!MetaDBManagerRPCCompatibleHelpers.EnsureCapacityBestEffort(t, column, row, policy))
-                        continue;
-
-                    var cell = t.GetOrCreateCell(column, row);
-                    unsafe
+                    for (int i = 0; i < values.Length; i++)
                     {
-                        byte* valuePtr = cell.GetValuePointer();
-                        byte* keyPtr = keyCap == 0 ? valuePtr : valuePtr - keyCap;
+                        uint row = startRow + (uint)i;
 
-                        var dtoNullable = values[i];
-
-                        if (dtoNullable is null)
-                        {
-                            // Treat null as "clear cell"
-                            MetaDBManagerRPCCompatibleHelpers.ZeroFill(keyPtr, keyCap + valCap);
+                        // best-effort growth depending on policy
+                        if (!EnsureCapacityBestEffort(t, column, row, policy))
                             continue;
-                        }
 
-                        CellResultDTO dto = dtoNullable.Value;
-
-                        if (keyCap == 0)
-                            // VALUE-ONLY: write VALUE only
-                            MetaDBManagerRPCCompatibleHelpers.WriteValueSegment(valuePtr, valCap, dto.ValueRaw, dto.ValueUtf8, cellPayloadMode);
-                        else
+                        var cell = t.GetOrCreateCell(column, row);
+                        unsafe
                         {
-                            // KEY/VALUE: write KEY + VALUE
-                            MetaDBManagerRPCCompatibleHelpers.WriteKeySegment(keyPtr, keyCap, dto.KeyRaw, dto.KeyUtf8, cellPayloadMode);
-                            MetaDBManagerRPCCompatibleHelpers.WriteValueSegment(valuePtr, valCap, dto.ValueRaw, dto.ValueUtf8, cellPayloadMode);
+                            byte* valuePtr = cell.GetValuePointer();
+                            byte* keyPtr = keyCap == 0 ? valuePtr : valuePtr - keyCap;
+
+                            var dtoNullable = values[i];
+
+                            if (dtoNullable is null)
+                            {
+                                // Treat null as "clear cell"
+                                ZeroFill(keyPtr, keyCap + valCap);
+                                continue;
+                            }
+
+                            CellResultDTO dto = dtoNullable.Value;
+
+                            if (keyCap == 0)
+                            {
+                                // VALUE-ONLY: write VALUE only
+                                WriteValueSegment(valuePtr, valCap, dto.ValueRaw, dto.ValueUtf8, cellPayloadMode);
+                            }
+                            else
+                            {
+                                // KEY/VALUE: write KEY + VALUE
+                                WriteKeySegment(keyPtr, keyCap, dto.KeyRaw, dto.KeyUtf8, cellPayloadMode);
+                                WriteValueSegment(valuePtr, valCap, dto.ValueRaw, dto.ValueUtf8, cellPayloadMode);
+                            }
                         }
                     }
-                }
-            });
+                }), ThrowIfDisposed);
 
         /// <summary>
         /// Writes a contiguous sequence of raw VALUE payloads into a column.
@@ -461,35 +507,41 @@ namespace Extend0.Metadata.CrossProcess
         /// This method writes only the VALUE segment. For key/value columns it does not synthesize or modify the KEY segment.
         /// Use <see cref="FillColumn"/> when you need to write keys.
         /// </remarks>
-        public void FillColumnRaw(Guid tableId, uint column, uint startRow, byte[]?[] valuesRaw,
+        public void FillColumnRaw(
+            Guid tableId,
+            uint column,
+            uint startRow,
+            byte[]?[] valuesRaw,
             CapacityPolicy policy = CapacityPolicy.None)
-            => _innerManager.WithTable(tableId, t =>
-            {
-                var meta = t.Spec.Columns[(int)column];
-                int valCap = meta.Size.GetValueSize();
-
-                for (int i = 0; i < valuesRaw.Length; i++)
+            => RpcVoid(RpcOp.FillColumnRaw, () =>
+                _innerManager.WithTable(tableId, t =>
                 {
-                    uint row = startRow + (uint)i;
+                    var meta = t.Spec.Columns[(int)column];
+                    int valCap = meta.Size.GetValueSize();
 
-                    if (!MetaDBManagerRPCCompatibleHelpers.EnsureCapacityBestEffort(t, column, row, policy))
-                        continue;
-
-                    var cell = t.GetOrCreateCell(column, row);
-                    unsafe
+                    for (int i = 0; i < valuesRaw.Length; i++)
                     {
-                        byte* valuePtr = cell.GetValuePointer();
-                        var temp = valuesRaw[i];
-                        if (temp is null)
-                        {
-                            MetaDBManagerRPCCompatibleHelpers.ZeroFill(valuePtr, valCap); // only VALUE cleared
-                            continue;
-                        }
+                        uint row = startRow + (uint)i;
 
-                        MetaDBManagerRPCCompatibleHelpers.WriteFixed(valuePtr, valCap, temp);
+                        if (!EnsureCapacityBestEffort(t, column, row, policy))
+                            continue;
+
+                        var cell = t.GetOrCreateCell(column, row);
+                        unsafe
+                        {
+                            byte* valuePtr = cell.GetValuePointer();
+                            var temp = valuesRaw[i];
+
+                            if (temp is null)
+                            {
+                                ZeroFill(valuePtr, valCap); // only VALUE cleared
+                                continue;
+                            }
+
+                            WriteFixed(valuePtr, valCap, temp);
+                        }
                     }
-                }
-            });
+                }), ThrowIfDisposed);
 
         /// <summary>
         /// Returns a snapshot of the indexes currently registered for the specified table.
@@ -509,29 +561,29 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public IndexInfoDTO[] GetIndexes(Guid tableId)
-        {
-            if (tableId == Guid.Empty) return [];
-
-            return _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.GetIndexes_Table, () =>
             {
-                return t.Indexes
-                    .Enumerate()
-                    .Select(idx => new IndexInfoDTO(
-                        Name: idx.Name,
-                        Kind: idx switch
-                        {
-                            Indexing.Internal.BuiltIn.ColumnKeyIndex => IndexKindDTO.BuiltIn_ColumnKey,
-                            Indexing.Internal.BuiltIn.GlobalKeyIndex => IndexKindDTO.BuiltIn_GlobalKey,
-                            _ => IndexKindDTO.Custom_InTable
-                        },
-                        IsRebuildable: idx is IRebuildableIndex,
-                        IsBuiltIn: idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
-                                     || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex,
-                        Notes: null
-                    ))
-                    .ToArray();
-            });
-        }
+                if (tableId == Guid.Empty) return [];
+
+                return _innerManager.WithTable(tableId, t =>
+                    t.Indexes
+                     .Enumerate()
+                     .Select(idx => new IndexInfoDTO(
+                         Name: idx.Name,
+                         Kind: idx switch
+                         {
+                             Indexing.Internal.BuiltIn.ColumnKeyIndex => IndexKindDTO.BuiltIn_ColumnKey,
+                             Indexing.Internal.BuiltIn.GlobalKeyIndex => IndexKindDTO.BuiltIn_GlobalKey,
+                             _ => IndexKindDTO.Custom_InTable
+                         },
+                         IsRebuildable: idx is IRebuildableIndex,
+                         IsBuiltIn: idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
+                                  || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex,
+                         Notes: null
+                     ))
+                     .ToArray()
+                );
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Returns a snapshot of the indexes registered at the manager (cross-table) level.
@@ -549,8 +601,8 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public IndexInfoDTO[] GetIndexes()
-        {
-            return [.. _innerManager.Indexes
+            => Rpc<IndexInfoDTO[]>(RpcOp.GetIndexes_Manager, () =>
+                [.. _innerManager.Indexes
                     .Enumerate()
                     .Select(idx => new IndexInfoDTO(
                         Name: idx.Name,
@@ -562,8 +614,7 @@ namespace Extend0.Metadata.CrossProcess
                         IsRebuildable: idx is ICrossTableRebuildableIndex,
                         IsBuiltIn: idx is Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex,
                         Notes: null
-                    ))];
-        }
+            ))], ThrowIfDisposed);
 
         /// <summary>
         /// Registers a new index in the specified table’s index registry, optionally replacing an existing index
@@ -633,76 +684,77 @@ namespace Extend0.Metadata.CrossProcess
         /// If removal occurs and adding the new index fails, the method attempts a best-effort rollback by re-adding the previous instance.
         /// </para>
         /// <para>
-        /// Index instantiation is delegated to <c>MetaDBManagerRPCCompatibleHelpers.TryCreateCustomIndex(...)</c>, which is backend-specific.
+        /// Index instantiation is delegated to <c>TryCreateCustomIndex(...)</c>, which is backend-specific.
         /// </para>
         /// </remarks>
         public IndexMutationResultDTO AddIndex(Guid tableId, AddIndexRequestDTO request)
-        {
-            if (tableId == Guid.Empty)
-                return new(IndexMutationStatusDTO.TableNotOpen, null, "Empty tableId.");
-
-            if (string.IsNullOrWhiteSpace(request.Name))
-                return new(IndexMutationStatusDTO.InvalidName, null, "Invalid index name.");
-
-            if (request.Kind == IndexKindDTO.Unknown)
-                return new(IndexMutationStatusDTO.InvalidKind, null, "Invalid/unknown index kind.");
-
-            // Built-ins are protected (cannot be created/replaced manually).
-            if (request.Kind is IndexKindDTO.BuiltIn_ColumnKey or IndexKindDTO.BuiltIn_GlobalKey or IndexKindDTO.BuiltIn_GlobalMultiTableKey)
-                return new(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be added manually.");
-
-            return _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.AddIndex_Table, () =>
             {
-                // 1) Detect existing index (if any)
-                bool exists = t.Indexes.TryGet(request.Name, out ITableIndex? existing) && existing is not null;
+                if (tableId == Guid.Empty)
+                    return new(IndexMutationStatusDTO.TableNotOpen, null, "Empty tableId.");
 
-                if (exists)
+                if (string.IsNullOrWhiteSpace(request.Name))
+                    return new(IndexMutationStatusDTO.InvalidName, null, "Invalid index name.");
+
+                if (request.Kind == IndexKindDTO.Unknown)
+                    return new(IndexMutationStatusDTO.InvalidKind, null, "Invalid/unknown index kind.");
+
+                // Built-ins are protected (cannot be created/replaced manually).
+                if (request.Kind is IndexKindDTO.BuiltIn_ColumnKey or IndexKindDTO.BuiltIn_GlobalKey or IndexKindDTO.BuiltIn_GlobalMultiTableKey)
+                    return new(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be added manually.");
+
+                return _innerManager.WithTable(tableId, t =>
                 {
-                    // Never allow mutating built-ins even if someone named-collides.
-                    if (MetaDBManagerRPCCompatibleHelpers.IsBuiltIn(existing!))
-                        return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be replaced/removed.");
+                    // 1) Detect existing index (if any)
+                    bool exists = t.Indexes.TryGet(request.Name, out ITableIndex? existing) && existing is not null;
 
-                    if (!request.ReplaceIfExists)
-                        return new(IndexMutationStatusDTO.AlreadyExists, null, request.Notes);
-                }
-
-                // 2) Create the new index instance (backend-specific)
-                //    IMPORTANT: do NOT remove the old one until we have a valid new instance.
-                var create = MetaDBManagerRPCCompatibleHelpers.TryCreateCustomIndex(request, out ITableIndex? created, out var createNotes);
-
-                if (create != IndexMutationStatusDTO.Ok || created is null)
-                    return new(create, null, createNotes ?? request.Notes);
-
-                // 3) Swap (safe replace)
-                try
-                {
                     if (exists)
-                        t.Indexes.Remove(request.Name);
+                    {
+                        // Never allow mutating built-ins even if someone named-collides.
+                        if (IsBuiltIn(existing!))
+                            return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be replaced/removed.");
 
-                    t.Indexes.Add(created);
+                        if (!request.ReplaceIfExists)
+                            return new(IndexMutationStatusDTO.AlreadyExists, null, request.Notes);
+                    }
 
-                    // Optional: if the index is rebuildable and you want it "ready" immediately, uncomment:
-                    // if (created is IRebuildableIndex r) r.Rebuild(t);
+                    // 2) Create the new index instance (backend-specific)
+                    //    IMPORTANT: do NOT remove the old one until we have a valid new instance.
+                    var create = TryCreateCustomIndex(request, out ITableIndex? created, out var createNotes);
 
-                    var info = MetaDBManagerRPCCompatibleHelpers.ToIndexInfoDTO(created);
-                    return new(IndexMutationStatusDTO.Ok, info, request.Notes);
-                }
-                catch (Exception ex)
-                {
-                    // Best-effort rollback if we removed the previous one
+                    if (create != IndexMutationStatusDTO.Ok || created is null)
+                        return new(create, null, createNotes ?? request.Notes);
+
+                    // 3) Swap (safe replace)
                     try
                     {
-                        if (exists) t.Indexes.Add(existing!);
-                    }
-                    catch
-                    {
-                        // swallow: we already have an error to report
-                    }
+                        if (exists)
+                            t.Indexes.Remove(request.Name);
 
-                    return new(IndexMutationStatusDTO.Error, null, ex.Message);
-                }
-            });
-        }
+                        t.Indexes.Add(created);
+
+                        // Optional: if the index is rebuildable and you want it "ready" immediately, uncomment:
+                        // if (created is IRebuildableIndex r) r.Rebuild(t);
+
+                        var info = ToIndexInfoDTO(created);
+                        return new(IndexMutationStatusDTO.Ok, info, request.Notes);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Best-effort rollback if we removed the previous one
+                        try
+                        {
+                            if (exists) t.Indexes.Add(existing!);
+                        }
+                        catch
+                        {
+                            // swallow: we already have an error to report
+                        }
+
+                        return new(IndexMutationStatusDTO.Error, null, ex.Message);
+                    }
+                });
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Registers a new cross-table index in the manager-level index registry, optionally replacing an existing
@@ -736,63 +788,64 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public IndexMutationResultDTO AddIndex(AddIndexRequestDTO request)
-        {
-            if (string.IsNullOrWhiteSpace(request.Name))
-                return new(IndexMutationStatusDTO.InvalidName, null, "Invalid index name.");
-
-            if (request.Kind == IndexKindDTO.Unknown)
-                return new(IndexMutationStatusDTO.InvalidKind, null, "Invalid/unknown index kind.");
-
-            // Built-ins are protected (cannot be created/replaced manually).
-            if (request.Kind is IndexKindDTO.BuiltIn_ColumnKey or IndexKindDTO.BuiltIn_GlobalKey or IndexKindDTO.BuiltIn_GlobalMultiTableKey)
-                return new(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be added manually.");
-
-            // 1) Detect existing index (if any)
-            bool exists = _innerManager.Indexes.TryGet(request.Name, out ICrossTableIndex? existing) && existing is not null;
-
-            if (exists)
+            => Rpc(RpcOp.AddIndex_Manager, () =>
             {
-                // Never allow mutating built-ins even if someone named-collides.
-                if (MetaDBManagerRPCCompatibleHelpers.IsBuiltIn(existing!))
-                    return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be replaced/removed.");
+                if (string.IsNullOrWhiteSpace(request.Name))
+                    return new(IndexMutationStatusDTO.InvalidName, null, "Invalid index name.");
 
-                if (!request.ReplaceIfExists)
-                    return new(IndexMutationStatusDTO.AlreadyExists, null, request.Notes);
-            }
+                if (request.Kind == IndexKindDTO.Unknown)
+                    return new(IndexMutationStatusDTO.InvalidKind, null, "Invalid/unknown index kind.");
 
-            // 2) Create the new index instance (backend-specific)
-            //    IMPORTANT: do NOT remove the old one until we have a valid new instance.
-            var create = MetaDBManagerRPCCompatibleHelpers.TryCreateCustomIndex(request, out ICrossTableIndex? created, out var createNotes);
+                // Built-ins are protected (cannot be created/replaced manually).
+                if (request.Kind is IndexKindDTO.BuiltIn_ColumnKey or IndexKindDTO.BuiltIn_GlobalKey or IndexKindDTO.BuiltIn_GlobalMultiTableKey)
+                    return new(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be added manually.");
 
-            if (create != IndexMutationStatusDTO.Ok || created is null)
-                return new(create, null, createNotes ?? request.Notes);
+                // 1) Detect existing index (if any)
+                bool exists = _innerManager.Indexes.TryGet(request.Name, out ICrossTableIndex? existing) && existing is not null;
 
-            // 3) Swap (safe replace)
-            try
-            {
                 if (exists)
-                    _innerManager.Indexes.Remove(request.Name);
+                {
+                    // Never allow mutating built-ins even if someone named-collides.
+                    if (IsBuiltIn(existing!))
+                        return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null, "Built-in indexes cannot be replaced/removed.");
 
-                _innerManager.Indexes.Add(created);
+                    if (!request.ReplaceIfExists)
+                        return new(IndexMutationStatusDTO.AlreadyExists, null, request.Notes);
+                }
 
-                var info = MetaDBManagerRPCCompatibleHelpers.ToIndexInfoDTO(created);
-                return new(IndexMutationStatusDTO.Ok, info, request.Notes);
-            }
-            catch (Exception ex)
-            {
-                // Best-effort rollback if we removed the previous one
+                // 2) Create the new index instance (backend-specific)
+                //    IMPORTANT: do NOT remove the old one until we have a valid new instance.
+                var create = TryCreateCustomIndex(request, out ICrossTableIndex? created, out var createNotes);
+
+                if (create != IndexMutationStatusDTO.Ok || created is null)
+                    return new(create, null, createNotes ?? request.Notes);
+
+                // 3) Swap (safe replace)
                 try
                 {
-                    if (exists) _innerManager.Indexes.Add(existing!);
-                }
-                catch
-                {
-                    // swallow: we already have an error to report
-                }
+                    if (exists)
+                        _innerManager.Indexes.Remove(request.Name);
 
-                return new(IndexMutationStatusDTO.Error, null, ex.Message);
-            }
-        }
+                    _innerManager.Indexes.Add(created);
+
+                    var info = ToIndexInfoDTO(created);
+                    return new(IndexMutationStatusDTO.Ok, info, request.Notes);
+                }
+                catch (Exception ex)
+                {
+                    // Best-effort rollback if we removed the previous one
+                    try
+                    {
+                        if (exists) _innerManager.Indexes.Add(existing!);
+                    }
+                    catch
+                    {
+                        // swallow: we already have an error to report
+                    }
+
+                    return new(IndexMutationStatusDTO.Error, null, ex.Message);
+                }
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Removes an index from the table registry by name.
@@ -811,26 +864,27 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public IndexMutationResultDTO RemoveIndex(Guid tableId, string name)
-        {
-            if (tableId == Guid.Empty)
-                return new(IndexMutationStatusDTO.TableNotOpen, null);
-
-            if (string.IsNullOrWhiteSpace(name))
-                return new(IndexMutationStatusDTO.InvalidName, null);
-
-            return _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.RemoveIndex_Table, () =>
             {
-                if (!t.Indexes.TryGet(name, out var idx))
-                    return new IndexMutationResultDTO(IndexMutationStatusDTO.NotFound, null);
+                if (tableId == Guid.Empty)
+                    return new(IndexMutationStatusDTO.TableNotOpen, null);
 
-                if (idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
-                    || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex)
-                    return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null);
+                if (string.IsNullOrWhiteSpace(name))
+                    return new(IndexMutationStatusDTO.InvalidName, null);
 
-                t.Indexes.Remove(name);
-                return new IndexMutationResultDTO(IndexMutationStatusDTO.Ok, null);
-            });
-        }
+                return _innerManager.WithTable(tableId, t =>
+                {
+                    if (!t.Indexes.TryGet(name, out var idx))
+                        return new IndexMutationResultDTO(IndexMutationStatusDTO.NotFound, null);
+
+                    if (idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
+                        || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex)
+                        return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null);
+
+                    t.Indexes.Remove(name);
+                    return new IndexMutationResultDTO(IndexMutationStatusDTO.Ok, null);
+                });
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Removes a manager-level (cross-table) index from the registry by name.
@@ -852,19 +906,20 @@ namespace Extend0.Metadata.CrossProcess
         /// Built-in indexes are protected and cannot be removed via this API.
         /// </remarks>
         public IndexMutationResultDTO RemoveIndex(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-                return new(IndexMutationStatusDTO.InvalidName, null);
+            => Rpc(RpcOp.RemoveIndex_Manager, () =>
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                    return new(IndexMutationStatusDTO.InvalidName, null);
 
-            if (!_innerManager.Indexes.TryGet(name, out var idx))
-                return new IndexMutationResultDTO(IndexMutationStatusDTO.NotFound, null);
+                if (!_innerManager.Indexes.TryGet(name, out var idx))
+                    return new IndexMutationResultDTO(IndexMutationStatusDTO.NotFound, null);
 
-            if (idx is Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex)
-                return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null);
+                if (idx is Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex)
+                    return new IndexMutationResultDTO(IndexMutationStatusDTO.BuiltInProtected, null);
 
-            _innerManager.Indexes.Remove(name);
-            return new IndexMutationResultDTO(IndexMutationStatusDTO.Ok, null);
-        }
+                _innerManager.Indexes.Remove(name);
+                return new IndexMutationResultDTO(IndexMutationStatusDTO.Ok, null);
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Attempts to locate the row index for a given key in a specific column using the built-in column-key index.
@@ -879,12 +934,13 @@ namespace Extend0.Metadata.CrossProcess
         /// This overload encodes <paramref name="keyUtf8"/> to UTF-8 and forwards the lookup to the byte[] overload.
         /// </remarks>
         public IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, string keyUtf8)
-        {
-            if (string.IsNullOrEmpty(keyUtf8))
-                return new(IndexLookupStatusDTO.InvalidKey, default);
+            => Rpc(RpcOp.FindRowByKey_String, () =>
+            {
+                if (string.IsNullOrEmpty(keyUtf8))
+                    return new(IndexLookupStatusDTO.InvalidKey, default);
 
-            return MetaDBManagerRPCCompatibleHelpers.WithUtf8(keyUtf8, bytes => FindRowByKey(tableId, column, bytes));
-        }
+                return WithUtf8(keyUtf8, bytes => FindRowByKey(tableId, column, bytes));
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Attempts to locate the row index for a given UTF-8 key in a specific column using the built-in column-key index.
@@ -911,28 +967,29 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public IndexLookupResultDTO FindRowByKey(Guid tableId, uint column, byte[] keyUtf8)
-        {
-            if (tableId == Guid.Empty)
-                return new(IndexLookupStatusDTO.TableNotOpen, default);
-
-            return _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.FindRowByKey_Bytes, () =>
             {
-                if (column >= t.ColumnCount)
-                    return new IndexLookupResultDTO(IndexLookupStatusDTO.InvalidColumn, default);
+                if (tableId == Guid.Empty)
+                    return new(IndexLookupStatusDTO.TableNotOpen, default);
 
-                var keySize = t.Spec.Columns[(int)column].Size.GetKeySize();
-                if (keySize == 0)
-                    return new(IndexLookupStatusDTO.ValueOnlyColumn, default);
+                return _innerManager.WithTable(tableId, t =>
+                {
+                    if (column >= t.ColumnCount)
+                        return new IndexLookupResultDTO(IndexLookupStatusDTO.InvalidColumn, default);
 
-                if (!t.TryFindRowByKey(column, keyUtf8, out var row))
-                    return new(IndexLookupStatusDTO.NotFound, new(false, 0, 0, t.Spec.Name));
+                    var keySize = t.Spec.Columns[(int)column].Size.GetKeySize();
+                    if (keySize == 0)
+                        return new(IndexLookupStatusDTO.ValueOnlyColumn, default);
 
-                return new(
-                    IndexLookupStatusDTO.Ok,
-                    new IndexHitDTO(true, column, row, t.Spec.Name)
-                );
-            });
-        }
+                    if (!t.TryFindRowByKey(column, keyUtf8, out var row))
+                        return new(IndexLookupStatusDTO.NotFound, new(false, 0, 0, t.Spec.Name));
+
+                    return new(
+                        IndexLookupStatusDTO.Ok,
+                        new IndexHitDTO(true, column, row, t.Spec.Name)
+                    );
+                });
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Attempts to locate a (column,row) hit for a given global key using the built-in global key index.
@@ -946,12 +1003,13 @@ namespace Extend0.Metadata.CrossProcess
         /// This overload encodes <paramref name="keyUtf8"/> to UTF-8 and forwards the lookup to the byte[] overload.
         /// </remarks>
         public IndexLookupResultDTO FindGlobal(Guid tableId, string keyUtf8)
-        {
-            if (string.IsNullOrEmpty(keyUtf8))
-                return new(IndexLookupStatusDTO.InvalidKey, default);
+            => Rpc(RpcOp.FindGlobal_Table_String, () =>
+            {
+                if (string.IsNullOrEmpty(keyUtf8))
+                    return new(IndexLookupStatusDTO.InvalidKey, default);
 
-            return MetaDBManagerRPCCompatibleHelpers.WithUtf8(keyUtf8, bytes => FindGlobal(tableId, bytes));
-        }
+                return WithUtf8(keyUtf8, bytes => FindGlobal(tableId, bytes));
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Attempts to locate a (column,row) hit for a given global UTF-8 key using the built-in global key index.
@@ -970,21 +1028,22 @@ namespace Extend0.Metadata.CrossProcess
         /// The global index typically maps a unique key to the corresponding (column,row) location within the table.
         /// </remarks>
         public IndexLookupResultDTO FindGlobal(Guid tableId, byte[] keyUtf8)
-        {
-            if (tableId == Guid.Empty)
-                return new(IndexLookupStatusDTO.TableNotOpen, default);
-
-            return _innerManager.WithTable(tableId, t =>
+            => Rpc(RpcOp.FindGlobal_Table_Bytes, () =>
             {
-                if (!t.TryFindGlobal(keyUtf8, out var hit))
-                    return new IndexLookupResultDTO(IndexLookupStatusDTO.NotFound, new(false, 0, 0, t.Spec.Name));
+                if (tableId == Guid.Empty)
+                    return new(IndexLookupStatusDTO.TableNotOpen, default);
 
-                return new(
-                    IndexLookupStatusDTO.Ok,
-                    new IndexHitDTO(true, hit.col, hit.row, t.Spec.Name)
-                );
-            });
-        }
+                return _innerManager.WithTable(tableId, t =>
+                {
+                    if (!t.TryFindGlobal(keyUtf8, out var hit))
+                        return new IndexLookupResultDTO(IndexLookupStatusDTO.NotFound, new(false, 0, 0, t.Spec.Name));
+
+                    return new(
+                        IndexLookupStatusDTO.Ok,
+                        new IndexHitDTO(true, hit.col, hit.row, t.Spec.Name)
+                    );
+                });
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Attempts to locate a (column,row) hit for a given global key using the built-in global key index.
@@ -997,12 +1056,13 @@ namespace Extend0.Metadata.CrossProcess
         /// This overload encodes <paramref name="keyUtf8"/> to UTF-8 and forwards the lookup to the byte[] overload.
         /// </remarks>
         public IndexLookupResultDTO FindGlobal(string keyUtf8)
-        {
-            if (string.IsNullOrEmpty(keyUtf8))
-                return new(IndexLookupStatusDTO.InvalidKey, default);
+            => Rpc(RpcOp.FindGlobal_Manager_String, () =>
+            {
+                if (string.IsNullOrEmpty(keyUtf8))
+                    return new(IndexLookupStatusDTO.InvalidKey, default);
 
-            return MetaDBManagerRPCCompatibleHelpers.WithUtf8(keyUtf8, FindGlobal);
-        }
+                return WithUtf8(keyUtf8, FindGlobal);
+            }, ThrowIfDisposed);
 
         /// <summary>
         /// Attempts to locate a (column,row) hit for a given global UTF-8 key across all tables using the global multi-table index.
@@ -1028,15 +1088,16 @@ namespace Extend0.Metadata.CrossProcess
         /// </para>
         /// </remarks>
         public IndexLookupResultDTO FindGlobal(byte[] keyUtf8)
-        {
-            if (!_innerManager.TryFindGlobal(keyUtf8, out var hit))
-                return new IndexLookupResultDTO(IndexLookupStatusDTO.NotFound, new(false, 0, 0, string.Empty));
+            => Rpc(RpcOp.FindGlobal_Manager_Bytes, () =>
+            {
+                if (!_innerManager.TryFindGlobal(keyUtf8, out var hit))
+                    return new IndexLookupResultDTO(IndexLookupStatusDTO.NotFound, new(false, 0, 0, string.Empty));
 
-            return new(
-                IndexLookupStatusDTO.Ok,
-                new IndexHitDTO(true, hit.col, hit.row, hit.tableName)
-            );
-        }
+                return new(
+                    IndexLookupStatusDTO.Ok,
+                    new IndexHitDTO(true, hit.col, hit.row, hit.tableName)
+                );
+            }, ThrowIfDisposed);
 
         // -----------------------------
         // Dispose

@@ -266,7 +266,7 @@ namespace Extend0.Lifecycle.CrossProcess
             }
             catch
             {
-                await WriteErr("Bad JSON", writer).ConfigureAwait(false);
+                await WriteErr("Bad JSON", 0xBADC0FF, writer).ConfigureAwait(false);
                 return;
             }
 
@@ -276,7 +276,7 @@ namespace Extend0.Lifecycle.CrossProcess
 
                 if (!TryResolveMethod(root, methodsByName, out var target, out var argsElem, out var error))
                 {
-                    await WriteErr(error, writer).ConfigureAwait(false);
+                    await WriteErr(error, 0xBADE110, writer).ConfigureAwait(false);
                     return;
                 }
 
@@ -367,11 +367,11 @@ namespace Extend0.Lifecycle.CrossProcess
             }
             catch (TargetInvocationException tex)
             {
-                await WriteErr(tex.InnerException?.Message ?? tex.Message, writer).ConfigureAwait(false);
+                await WriteErr(tex.InnerException?.Message ?? tex.Message, tex.InnerException?.HResult ?? tex.HResult, writer).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                await WriteErr(ex.Message, writer).ConfigureAwait(false);
+                await WriteErr(ex.Message, ex.HResult, writer).ConfigureAwait(false);
             }
         }
 
@@ -399,14 +399,33 @@ namespace Extend0.Lifecycle.CrossProcess
             }
 
             var retType = target.ReturnType;
-            var callRes = target.Invoke(_impl, argVals) as Task;
 
+            // IMPORTANT: keep the real return value (Guid, bool, DTO, etc.)
+            object? rawRes = target.Invoke(_impl, argVals);
+
+            // void → ok + null
+            if (retType == typeof(void))
+            {
+                await WriteOk(null, writer).ConfigureAwait(false);
+                return;
+            }
+
+            // Task → await + ok + null
             if (retType == typeof(Task))
-                await InvokeTargetTask(writer, callRes).ConfigureAwait(false);
-            else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
-                await InvokeTargetGenericTask(writer, callRes).ConfigureAwait(false);
-            else
-                await WriteOk(callRes, writer).ConfigureAwait(false);
+            {
+                await InvokeTargetTask(writer, (Task)rawRes!).ConfigureAwait(false);
+                return;
+            }
+
+            // Task<T> → await + ok + T
+            if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                await InvokeTargetGenericTask(writer, (Task)rawRes!).ConfigureAwait(false);
+                return;
+            }
+
+            // Any sync return type → ok + value
+            await WriteOk(rawRes, writer).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -420,12 +439,11 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A task that completes when the underlying task has finished and the result has been written.
         /// </returns>
-        private static async Task InvokeTargetGenericTask(StreamWriter writer, Task? callRes)
+        private static async Task InvokeTargetGenericTask(StreamWriter writer, Task callRes)
         {
-            var t = callRes!;
-            await t.ConfigureAwait(false);
-            var resProp = t.GetType().GetProperty("Result")!;
-            await WriteOk(resProp.GetValue(t), writer).ConfigureAwait(false);
+            await callRes.ConfigureAwait(false);
+            var resProp = callRes.GetType().GetProperty("Result")!;
+            await WriteOk(resProp.GetValue(callRes), writer).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -439,9 +457,9 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A task that completes when the underlying task has finished and the response has been written.
         /// </returns>
-        private static async Task InvokeTargetTask(StreamWriter writer, Task? callRes)
+        private static async Task InvokeTargetTask(StreamWriter writer, Task callRes)
         {
-            await callRes!;
+            await callRes.ConfigureAwait(false);
             await WriteOk(null, writer).ConfigureAwait(false);
         }
 
@@ -453,9 +471,9 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A task that completes when the error payload has been written.
         /// </returns>
-        private static async Task WriteErr(string e, StreamWriter writer)
+        private static async Task WriteErr(string e, int hr, StreamWriter writer)
         {
-            var payload = JsonSerializer.Serialize(new { ok = false, e });
+            var payload = JsonSerializer.Serialize(new { ok = false, e, hr });
             await writer.WriteLineAsync(payload).ConfigureAwait(false);
         }
 

@@ -65,6 +65,14 @@ public interface IMetaDBManager : IMetaDBManagerCommon
     IMetadataTable GetOrCreate(Guid tableId);
 
     /// <summary>
+    /// Attempts to resolve a table id from a registered <paramref name="name"/>.
+    /// </summary>
+    /// <param name="name">Registered table name.</param>
+    /// <param name="id">When this method returns, contains the resolved id if found.</param>
+    /// <returns><see langword="true"/> if the name was found; otherwise <see langword="false"/>.</returns>
+    bool TryGetIdByName(string name, out Guid id);
+
+    /// <summary>
     /// Ensures a child table exists and links it into a parent ref-vector, creating the child from a spec factory if needed.
     /// </summary>
     /// <param name="parentTableId">Parent table id.</param>

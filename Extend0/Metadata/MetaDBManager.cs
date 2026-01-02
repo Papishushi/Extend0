@@ -169,6 +169,15 @@ namespace Extend0.Metadata
         private int _disposed;
 
         /// <summary>
+        /// Disposal state flag for this manager.
+        /// </summary>
+        /// <remarks>
+        /// Stored as an <see cref="int"/> to support atomic transitions (e.g. via <see cref="System.Threading.Interlocked"/>),
+        /// making disposal idempotent and thread-safe. Conventionally: 0 = not disposed, 1 = disposed.
+        /// </remarks>
+        internal ref int Disposed => ref _disposed;
+
+        /// <summary>
         /// Factory that creates <see cref="IMetadataTable"/> instances from a <see cref="TableSpec"/>.
         /// Injectable for testing; invoked lazily on first access.
         /// </summary>

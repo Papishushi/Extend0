@@ -40,6 +40,13 @@ namespace Extend0.Metadata.CrossProcess.Contract;
 public interface IMetaDBManagerRPCCompatible : IMetaDBManagerCommon, ICrossProcessService
 {
     /// <summary>
+    /// Attempts to resolve a table id from a registered <paramref name="name"/>.
+    /// </summary>
+    /// <param name="name">Registered table name.</param>
+    /// <returns>When this method returns, contains the resolved id if found.</returns>
+    Guid? TryGetIdByName(string name);
+
+    /// <summary>
     /// Gets the logical row count for the table identified by <paramref name="tableId"/>.
     /// </summary>
     /// <param name="tableId">Target table id.</param>

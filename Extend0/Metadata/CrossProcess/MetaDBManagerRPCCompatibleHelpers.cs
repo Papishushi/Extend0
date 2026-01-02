@@ -2,13 +2,13 @@
 using Extend0.Metadata.CrossProcess.DTO;
 using Extend0.Metadata.Indexing.Contract;
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Extend0.Metadata.CrossProcess
 {
-    internal static class MetaDBManagerRPCCompatibleHelpers
+    internal static partial class MetaDBManagerRPCCompatibleHelpers
     {
-
         /// <summary>
         /// Encodes a managed string to an exact-length UTF-8 byte array and invokes a callback with the result.
         /// </summary>
@@ -25,7 +25,6 @@ namespace Extend0.Metadata.CrossProcess
         /// (<c>Func&lt;byte[], ...&gt;</c>) safe and simple.
         /// </para>
         /// </remarks>
-
         internal static IndexLookupResultDTO WithUtf8(string s, Func<byte[], IndexLookupResultDTO> fn)
         {
             const int STACK_LIMIT = 512;
@@ -59,7 +58,6 @@ namespace Extend0.Metadata.CrossProcess
         /// <summary>
         /// Returns whether the provided byte span contains any non-zero byte.
         /// </summary>
-
         private static bool AnyNonZero(ReadOnlySpan<byte> data)
         {
             foreach (var b in data) if (b != 0) return true;
@@ -71,28 +69,42 @@ namespace Extend0.Metadata.CrossProcess
         // -----------------------------
 
         /// <summary>
-        /// Builds a cross-process safe snapshot (<see cref="CellResultDTO"/>) of the specified cell.
+        /// Builds a cross-process safe snapshot (<see cref="CellResultDTO"/>) of a single cell.
         /// </summary>
-        /// <param name="t">Resolved table instance.</param>
-        /// <param name="column">Column index.</param>
-        /// <param name="row">Row index.</param>
-        /// <param name="mode">Payload selection strategy (UTF-8, raw, or both).</param>
+        /// <param name="t">The resolved table instance used to read the cell.</param>
+        /// <param name="column">Zero-based column index.</param>
+        /// <param name="row">Zero-based row index.</param>
+        /// <param name="mode">
+        /// Controls which payload representations are materialized:
+        /// raw bytes (<see cref="CellPayloadModeDTO.RawOnly"/>), UTF-8 strings (<see cref="CellPayloadModeDTO.Utf8Only"/>),
+        /// or both (<see cref="CellPayloadModeDTO.Both"/>).
+        /// </param>
         /// <returns>
-        /// A populated DTO. When the cell is missing/unreadable, returns a DTO with <see cref="CellResultDTO.HasCell"/> = false.
+        /// A populated DTO snapshot. When the cell cannot be resolved (missing/unreadable),
+        /// returns a DTO with <see cref="CellResultDTO.HasCell"/> set to <see langword="false"/>.
         /// </returns>
         /// <remarks>
         /// <para>
-        /// For value-only columns, VALUE bytes are read directly and <see cref="CellResultDTO.HasAnyValue"/> is computed by scanning for
-        /// any non-zero byte.
+        /// This helper is intended for IPC boundaries: it converts the underlying mapped storage representation
+        /// into a stable DTO that can be serialized without exposing internal types.
         /// </para>
         /// <para>
-        /// For key/value columns, KEY is read via <c>TryGetKey</c>; when present, VALUE is read via <c>TryGetValue(key,...)</c>.
+        /// <b>Value-only columns:</b> VALUE bytes are read directly from the fixed VALUE segment and
+        /// <see cref="CellResultDTO.HasAnyValue"/> is computed by scanning for any non-zero byte.
         /// </para>
         /// <para>
-        /// Payload copies are created only according to <paramref name="mode"/> to minimize allocations in bulk reads.
+        /// <b>Key/value columns:</b> KEY is read via <see cref="MetadataCell.TryGetKey(out ReadOnlySpan{byte})"/>; when present,
+        /// VALUE is read via <see cref="MetadataCell.TryGetValue(ReadOnlySpan{byte}, out ReadOnlySpan{byte})"/> using that KEY.
+        /// </para>
+        /// <para>
+        /// Copies (raw arrays and/or UTF-8 strings) are created only according to <paramref name="mode"/> to avoid
+        /// unnecessary allocations during bulk reads.
+        /// </para>
+        /// <para>
+        /// The <see cref="CellResultDTO.Preview"/> field is a best-effort, human-readable snippet:
+        /// it prefers VALUE, falls back to KEY, and is <see langword="null"/> when neither is present.
         /// </para>
         /// </remarks>
-
         internal static CellResultDTO? BuildCellDto(IMetadataTable t, uint column, uint row, CellPayloadModeDTO mode)
         {
             var meta = t.Spec.Columns[(int)column];
@@ -119,60 +131,15 @@ namespace Extend0.Metadata.CrossProcess
                     Preview: null
                 );
 
-            ReadOnlySpan<byte> key = default;
-            ReadOnlySpan<byte> value = default;
-            bool hasKey = false;
-            bool hasAnyValue = false;
+            var result = ReadCellUnsafe(valCap, isKeyValue, cell);
 
-            unsafe
-            {
-                if (!isKeyValue)
-                {
-                    // value-only: VALUE is direct segment
-                    var raw = new ReadOnlySpan<byte>(cell.GetValuePointer(), valCap);
-                    hasAnyValue = AnyNonZero(raw);
-                    if (hasAnyValue) value = raw;
-                }
-                else
-                {
-                    if (cell.TryGetKey(out ReadOnlySpan<byte> k) && k.Length != 0)
-                    {
-                        hasKey = true;
-                        key = k;
+            var (keyLenHint, valLenHint) = GetLenghtHints(keyCap, valCap, result);
 
-                        // classic: value obtained using key
-                        if (cell.TryGetValue(k, out var v) && v.Length != 0)
-                        {
-                            value = v;
-                            hasAnyValue = AnyNonZero(v); // optional signal
-                        }
-                    }
-                }
-            }
-
-            int keyLenHint = hasKey && !key.IsEmpty ? CStrLenHint(key, keyCap) : 0;
-            int valLenHint = !value.IsEmpty ? CStrLenHint(value, valCap) : 0;
-
-            byte[]? keyRaw = null;
-            byte[]? valRaw = null;
-            string? keyUtf8 = null;
-            string? valUtf8 = null;
-
-            if (mode is CellPayloadModeDTO.Both or CellPayloadModeDTO.RawOnly)
-            {
-                if (hasKey && !key.IsEmpty) keyRaw = key.ToArray();
-                if (!value.IsEmpty) valRaw = value.ToArray();
-            }
-
-            if (mode is CellPayloadModeDTO.Both or CellPayloadModeDTO.Utf8Only)
-            {
-                if (hasKey && !key.IsEmpty) keyUtf8 = TryDecodePrintableUtf8(key, keyLenHint);
-                if (!value.IsEmpty) valUtf8 = TryDecodePrintableUtf8(value, valLenHint);
-            }
+            var (keyRaw, valRaw, keyUtf8, valUtf8) = NormalizeMode(mode, result, keyLenHint, valLenHint);
 
             // preview prefers VALUE, fallback to KEY, else null
             string? preview = null;
-            var prevSource = !value.IsEmpty ? value : hasKey ? key : default;
+            var prevSource = !result.Value.IsEmpty ? result.Value : result.HasKey ? result.Key : default;
             if (!prevSource.IsEmpty)
                 preview = MakePreview(prevSource, 48);
 
@@ -182,8 +149,8 @@ namespace Extend0.Metadata.CrossProcess
                 KeyCapacity: keyCap,
                 ValueCapacity: valCap,
                 IsKeyValue: isKeyValue,
-                HasKey: hasKey,
-                HasAnyValue: hasAnyValue,
+                HasKey: result.HasKey,
+                HasAnyValue: result.HasAnyValue,
                 KeyUtf8LengthHint: keyLenHint,
                 ValueUtf8LengthHint: valLenHint,
                 Mode: mode,
@@ -196,9 +163,137 @@ namespace Extend0.Metadata.CrossProcess
         }
 
         /// <summary>
+        /// Computes best-effort UTF-8 length hints for KEY and VALUE payloads.
+        /// </summary>
+        /// <param name="keyCap">Maximum KEY capacity in bytes for the column (0 for value-only columns).</param>
+        /// <param name="valCap">Maximum VALUE capacity in bytes for the column.</param>
+        /// <param name="result">The low-level read result returned by <see cref="ReadCellUnsafe(int, bool, MetadataCell)"/>.</param>
+        /// <returns>
+        /// A pair of length hints (<c>keyLenHint</c>, <c>valLenHint</c>) suitable for faster UTF-8 decoding attempts.
+        /// Values are 0 when the corresponding payload is not present.
+        /// </returns>
+        /// <remarks>
+        /// Hints are computed using <c>CStrLenHint</c> and are bounded by the segment capacities.
+        /// They are only heuristics intended to reduce work when generating preview strings.
+        /// </remarks>
+        private static (int keyLenHint, int valLenHint) GetLenghtHints(int keyCap, int valCap, ReadCellUnsafeResult result)
+        {
+            int keyLenHint = result.HasKey && !result.Key.IsEmpty ? CStrLenHint(result.Key, keyCap) : 0;
+            int valLenHint = result.HasAnyValue && !result.Value.IsEmpty ? CStrLenHint(result.Value, valCap) : 0;
+            return (keyLenHint, valLenHint);
+        }
+
+        /// <summary>
+        /// Materializes raw and/or UTF-8 payload copies from a low-level cell read according to a requested mode.
+        /// </summary>
+        /// <param name="mode">The payload selection mode.</param>
+        /// <param name="result">The low-level read result containing span views of KEY/VALUE.</param>
+        /// <param name="keyLenHint">Optional UTF-8 length hint for KEY (0 means unknown).</param>
+        /// <param name="valLenHint">Optional UTF-8 length hint for VALUE (0 means unknown).</param>
+        /// <returns>
+        /// A tuple containing optional materialized payloads:
+        /// <c>(keyRaw, valRaw, keyUtf8, valUtf8)</c>. Each element may be <see langword="null"/> depending on <paramref name="mode"/>
+        /// and payload presence.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// When <paramref name="mode"/> includes raw output, spans are copied using <see cref="ReadOnlySpan{T}.ToArray"/>.
+        /// </para>
+        /// <para>
+        /// When <paramref name="mode"/> includes UTF-8 output, decoding is attempted via <c>TryDecodePrintableUtf8</c>
+        /// using the provided length hints.
+        /// </para>
+        /// </remarks>
+        private static (byte[]? keyRaw, byte[]? valRaw, string? keyUtf8, string? valUtf8) NormalizeMode(
+            CellPayloadModeDTO mode,
+            ReadCellUnsafeResult result,
+            int keyLenHint,
+            int valLenHint)
+        {
+            byte[]? keyRaw = null;
+            byte[]? valRaw = null;
+            string? keyUtf8 = null;
+            string? valUtf8 = null;
+
+            if (mode is CellPayloadModeDTO.Both or CellPayloadModeDTO.RawOnly)
+            {
+                if (result.HasKey && !result.Key.IsEmpty) keyRaw = result.Key.ToArray();
+                if (result.HasAnyValue && !result.Value.IsEmpty) valRaw = result.Value.ToArray();
+            }
+
+            if (mode is CellPayloadModeDTO.Both or CellPayloadModeDTO.Utf8Only)
+            {
+                if (result.HasKey && !result.Key.IsEmpty) keyUtf8 = TryDecodePrintableUtf8(result.Key, keyLenHint);
+                if (result.HasAnyValue && !result.Value.IsEmpty) valUtf8 = TryDecodePrintableUtf8(result.Value, valLenHint);
+            }
+
+            return (keyRaw, valRaw, keyUtf8, valUtf8);
+        }
+
+        /// <summary>
+        /// Reads KEY/VALUE data from a <see cref="MetadataCell"/> and returns span views without allocations.
+        /// </summary>
+        /// <param name="valCap">
+        /// The fixed VALUE segment capacity in bytes for the target column (used for value-only columns).
+        /// </param>
+        /// <param name="isKeyValue">
+        /// <see langword="true"/> for key/value columns; <see langword="false"/> for value-only columns.
+        /// </param>
+        /// <param name="cell">The cell to read.</param>
+        /// <returns>
+        /// A <see cref="ReadCellUnsafeResult"/> containing span views of KEY and VALUE (when present) and presence flags.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a hot-path helper that returns spans aliasing the underlying mapped storage. Do not store the returned spans
+        /// beyond the immediate call site, and do not use them after the table/cell has been disposed or remapped.
+        /// </para>
+        /// <para>
+        /// For value-only columns, VALUE is treated as a fixed blob starting at <see cref="MetadataCell.GetValuePointer"/>
+        /// with length <paramref name="valCap"/>; presence is detected via <c>AnyNonZero</c>.
+        /// </para>
+        /// <para>
+        /// For key/value columns, KEY is obtained via <see cref="MetadataCell.TryGetKey(out ReadOnlySpan{byte})"/> and, when present,
+        /// VALUE is obtained via <see cref="MetadataCell.TryGetValue(ReadOnlySpan{byte}, out ReadOnlySpan{byte})"/>.
+        /// </para>
+        /// </remarks>
+        private static unsafe ReadCellUnsafeResult ReadCellUnsafe(int valCap, bool isKeyValue, MetadataCell cell)
+        {
+            ReadOnlySpan<byte> key = default;
+            ReadOnlySpan<byte> value = default;
+            bool hasKey = false;
+            bool hasAnyValue = false;
+
+            if (!isKeyValue)
+            {
+                // value-only: VALUE is direct segment
+                var raw = new ReadOnlySpan<byte>(cell.GetValuePointer(), valCap);
+                hasAnyValue = AnyNonZero(raw);
+                if (hasAnyValue) value = raw;
+            }
+            else
+            {
+                if (cell.TryGetKey(out ReadOnlySpan<byte> k) && k.Length != 0)
+                {
+                    hasKey = true;
+                    key = k;
+
+                    // classic: value obtained using key
+                    if (cell.TryGetValue(k, out var v) && v.Length != 0)
+                    {
+                        value = v;
+                        hasAnyValue = AnyNonZero(v); // optional signal
+                    }
+                }
+            }
+
+            return new ReadCellUnsafeResult(key, value, hasKey, hasAnyValue);
+        }
+
+        /// <summary>
         /// Computes a best-effort length hint up to the first <c>0</c> terminator, capped to <paramref name="cap"/>.
         /// </summary>
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int CStrLenHint(ReadOnlySpan<byte> data, int cap)
         {
             int max = Math.Min(cap, data.Length);
@@ -211,7 +306,7 @@ namespace Extend0.Metadata.CrossProcess
         /// Truncates <paramref name="s"/> to <paramref name="maxChars"/> and appends an ellipsis when needed,
         /// preserving surrogate pairs at the cut boundary.
         /// </summary>
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static string EllipsisSafe(string s, int maxChars)
         {
             if (maxChars <= 0) return string.Empty;
@@ -236,7 +331,6 @@ namespace Extend0.Metadata.CrossProcess
         /// </list>
         /// </param>
         /// <returns><see langword="true"/> if capacity is ensured; otherwise <see langword="false"/>.</returns>
-
         internal static bool EnsureCapacityBestEffort(IMetadataTable t, uint column, uint row, CapacityPolicy policy)
         {
             // Needs capacity >= row+1
@@ -269,7 +363,7 @@ namespace Extend0.Metadata.CrossProcess
         /// </summary>
         /// <param name="idx">Index instance.</param>
         /// <returns><see langword="true"/> if the index is built-in; otherwise <see langword="false"/>.</returns>
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static bool IsBuiltIn(ITableIndex idx)
             => idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
             || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex;
@@ -277,7 +371,6 @@ namespace Extend0.Metadata.CrossProcess
         /// <summary>
         /// Produces a compact preview for diagnostics: printable UTF-8 when possible, otherwise hex, truncated to <paramref name="maxChars"/>.
         /// </summary>
-
         private static string MakePreview(ReadOnlySpan<byte> data, int maxChars)
         {
             var s = TryDecodePrintableUtf8(data, data.Length);
@@ -485,11 +578,210 @@ namespace Extend0.Metadata.CrossProcess
         /// <summary>
         /// Clears <paramref name="bytes"/> bytes starting at <paramref name="ptr"/> by writing zeros.
         /// </summary>
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static unsafe void ZeroFill(byte* ptr, int bytes)
         {
             if (bytes <= 0) return;
             new Span<byte>(ptr, bytes).Clear();
+        }
+
+        /// <summary>
+        /// Builds an <c>HRESULT</c> that encodes both the failing RPC operation and a coarse error category.
+        /// </summary>
+        /// <param name="op">The RPC operation identifier.</param>
+        /// <param name="err">The coarse error classification.</param>
+        /// <returns>
+        /// A failing <c>HRESULT</c> with severity=1, facility=ITF (4), and a 16-bit code packing <paramref name="op"/> and <paramref name="err"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Encoding: Severity=1 (failure), Facility=ITF (4), Code = <c>(opLow8 &lt;&lt; 8) | err</c>.
+        /// This yields a stable, compact signal across IPC boundaries without exposing backend exception types.
+        /// </para>
+        /// <para>
+        /// Note: only the low 8 bits of <paramref name="op"/> are currently stored in the 16-bit code.
+        /// If you need to preserve the full 16-bit operation id, update this encoding and keep compatibility in mind.
+        /// </para>
+        /// </remarks>
+        internal static int MakeRpcHResult(RpcOp op, RpcErr err)
+        {
+            const int FACILITY_ITF = 4;
+            int code16 = (((int)op & 0xFF) << 8) | ((int)err & 0xFF);
+            return unchecked((1 << 31) | (FACILITY_ITF << 16) | (code16 & 0xFFFF));
+        }
+
+        /// <summary>
+        /// Maps an exception to a coarse <see cref="RpcErr"/> category suitable for <c>HRESULT</c> encoding.
+        /// </summary>
+        /// <param name="ex">The exception to classify.</param>
+        /// <returns>A coarse classification for the exception.</returns>
+        /// <remarks>
+        /// <para>
+        /// This is intentionally heuristic. Adjust the pattern matching to your real exception types/messages as the library evolves.
+        /// </para>
+        /// <para>
+        /// Prefer mapping to stable library-defined exception types rather than message parsing when possible.
+        /// </para>
+        /// </remarks>
+        internal static RpcErr ClassifyErr(Exception ex)
+        {
+            // Ajusta esto a tus excepciones reales si tienes tipos propios.
+            return ex switch
+            {
+                ArgumentNullException or ArgumentException or FormatException => RpcErr.InvalidArg,
+                KeyNotFoundException => RpcErr.NotFound,
+                NotSupportedException => RpcErr.NotSupported,
+                UnauthorizedAccessException => RpcErr.Protected,
+                ObjectDisposedException => RpcErr.Disposed,
+
+                // Tu caso real: "already registered"
+                InvalidOperationException ioe when ioe.Message.Contains("already registered", StringComparison.OrdinalIgnoreCase)
+                    => RpcErr.AlreadyExists,
+
+                _ => RpcErr.Unexpected
+            };
+        }
+
+        /// <summary>
+        /// Executes an RPC operation and, on failure, stamps the thrown exception with an operation-aware <c>HRESULT</c>.
+        /// </summary>
+        /// <typeparam name="T">Return type of the operation.</typeparam>
+        /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
+        /// <param name="body">The operation body.</param>
+        /// <returns>The value produced by <paramref name="body"/>.</returns>
+        /// <exception cref="Exception">
+        /// Re-throws the original exception after stamping <see cref="Exception.HResult"/>.
+        /// </exception>
+        /// <remarks>
+        /// Use this for synchronous RPC-exposed methods to preserve the original stack trace while attaching
+        /// a stable cross-process error code.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static T Rpc<T>(RpcOp op, Func<T> body, Action throwIfDisposed)
+        {
+            throwIfDisposed();
+            try { return body(); }
+            catch (Exception ex)
+            {
+                var err = ClassifyErr(ex);
+                ex.HResult = MakeRpcHResult(op, err);
+                throw; // NO "throw ex;"
+            }
+        }
+
+        /// <summary>
+        /// Executes a void RPC operation and, on failure, stamps the thrown exception with an operation-aware <c>HRESULT</c>.
+        /// </summary>
+        /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
+        /// <param name="body">The operation body.</param>
+        /// <remarks>
+        /// Internally calls <see cref="Rpc{T}"/> to reuse error stamping logic.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void RpcVoid(RpcOp op, Action body, Action throwIfDisposed)
+        {
+            Rpc(op, () => { body(); return 0; }, throwIfDisposed);
+        }
+
+        /// <summary>
+        /// Executes an asynchronous RPC operation and, on failure, stamps the thrown exception with an operation-aware <c>HRESULT</c>.
+        /// </summary>
+        /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
+        /// <param name="body">The async operation body.</param>
+        /// <returns>A task representing the operation.</returns>
+        /// <exception cref="Exception">
+        /// Re-throws the original exception after stamping <see cref="Exception.HResult"/>.
+        /// </exception>
+        /// <remarks>
+        /// You must <c>await</c> inside the try/catch; returning the <see cref="Task"/> directly would move the faulting
+        /// exception outside the wrapper and prevent stamping.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static async Task RpcAsync(RpcOp op, Func<Task> body, Action throwIfDisposed)
+        {
+            throwIfDisposed();
+            try
+            {
+                await body().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var err = ClassifyErr(ex);
+                ex.HResult = MakeRpcHResult(op, err);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Executes an asynchronous RPC operation returning a value and, on failure, stamps the thrown exception with an operation-aware <c>HRESULT</c>.
+        /// </summary>
+        /// <typeparam name="T">Return type of the operation.</typeparam>
+        /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
+        /// <param name="body">The async operation body.</param>
+        /// <returns>A task producing the value returned by <paramref name="body"/>.</returns>
+        /// <exception cref="Exception">
+        /// Re-throws the original exception after stamping <see cref="Exception.HResult"/>.
+        /// </exception>
+        /// <remarks>
+        /// You must <c>await</c> inside the try/catch; returning the <see cref="Task{TResult}"/> directly would move the faulting
+        /// exception outside the wrapper and prevent stamping.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static async Task<T> RpcAsync<T>(RpcOp op, Func<Task<T>> body, Action throwIfDisposed)
+        {
+            throwIfDisposed();
+            try
+            {
+                return await body().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var err = ClassifyErr(ex);
+                ex.HResult = MakeRpcHResult(op, err);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Lightweight, stack-only result container produced by <c>ReadCellUnsafe</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is a <see langword="ref struct"/> so it can safely carry <see cref="ReadOnlySpan{T}"/> views
+        /// that may alias mapped/unmanaged storage without accidentally escaping to the heap.
+        /// </para>
+        /// <para>
+        /// The spans are only valid as long as the underlying table/cell memory remains valid and unchanged.
+        /// Do not store this instance, do not capture it in lambdas/async, and do not let it outlive the read scope.
+        /// </para>
+        /// <para>
+        /// <see cref="HasKey"/> indicates that a non-empty KEY payload was found (key/value columns only).
+        /// <see cref="HasAnyValue"/> is a presence signal for VALUE:
+        /// for value-only columns it is computed by scanning the fixed VALUE segment for non-zero bytes;
+        /// for key/value columns it is set when a non-empty VALUE payload is returned by the cell.
+        /// </para>
+        /// </remarks>
+        private ref struct ReadCellUnsafeResult(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value, bool hasKey, bool hasAnyValue)
+        {
+            /// <summary>
+            /// Read-only view of the KEY payload when present; otherwise <see cref="ReadOnlySpan{T}.Empty"/>.
+            /// </summary>
+            public ReadOnlySpan<byte> Key = key;
+
+            /// <summary>
+            /// Read-only view of the VALUE payload when present; otherwise <see cref="ReadOnlySpan{T}.Empty"/>.
+            /// </summary>
+            public ReadOnlySpan<byte> Value = value;
+
+            /// <summary>
+            /// Gets whether a non-empty KEY payload was present for the cell.
+            /// </summary>
+            public bool HasKey = hasKey;
+
+            /// <summary>
+            /// Gets whether a VALUE payload is considered present for the cell.
+            /// </summary>
+            public bool HasAnyValue = hasAnyValue;
         }
     }
 }

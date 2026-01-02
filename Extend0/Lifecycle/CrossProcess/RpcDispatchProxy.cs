@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
 
@@ -218,7 +217,7 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
             // Task-returning (no result value)
             case RetKind.Task:
                 {
-                    return CallTaskAsync(shape, args);
+                    return InvokeTaskAsync(shape, args);
                 }
 
             // Task<T>-returning
@@ -463,7 +462,7 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
         var s = new MethodShape
         {
             Name = m.Name,
-            ParamTypes = pars.Select(p => p.ParameterType).ToArray(),
+            ParamTypes = [.. pars.Select(p => p.ParameterType)],
             Kind = RetKind.SyncResult
         };
 
@@ -489,9 +488,9 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
     /// <param name="args">Argument values.</param>
     /// <returns>A task that completes when the remote call has been acknowledged.</returns>
     /// <exception cref="RemoteInvocationException">The remote endpoint returned an error envelope.</exception>
-    private Task CallTaskAsync(MethodShape shape, object?[] args)
+    private async Task InvokeTaskAsync(MethodShape shape, object?[] args)
     {
-        return RunWithUpgradeRetryAsync<object?>(async ct =>
+        _ = await RunWithUpgradeRetryAsync<object?>(async ct =>
         {
             await _ioLock.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -501,13 +500,14 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
                     .ConfigureAwait(false);
 
                 ThrowIfError(doc);
-                return null;
+                return default;
             }
             finally
             {
                 _ioLock.Release();
             }
         });
+        return;
     }
 
     /// <summary>
@@ -530,7 +530,7 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
                     .ConfigureAwait(false);
 
                 var root = ThrowIfError(doc);
-                return JsonSerializer.Deserialize<TRes>(root.GetProperty("r").GetRawText())!;
+                return JsonSerializer.Deserialize<TRes?>(root.GetProperty("r").GetRawText())!;
             }
             finally
             {
@@ -554,6 +554,7 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
         if (root.TryGetProperty("ok", out var okProp) && !okProp.GetBoolean())
         {
             var msg = root.TryGetProperty("e", out var eProp) ? eProp.GetString() : null;
+            var hr = root.TryGetProperty("hr", out var hrProp) ? hrProp.GetInt32() : 0;
 
             if (string.Equals(msg, "Server closed.", StringComparison.OrdinalIgnoreCase))
             {
@@ -562,8 +563,10 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
                     HResult = 426
                 };
             }
-
-            throw new RemoteInvocationException(msg ?? "Remote error");
+            throw new RemoteInvocationException(msg ?? "Remote error")
+            {
+                HResult = hr
+            };
         }
 
         return root;
