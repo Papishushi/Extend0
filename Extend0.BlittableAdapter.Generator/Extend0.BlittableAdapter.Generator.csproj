@@ -5,7 +5,9 @@
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<PackageType>Analyzer</PackageType>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<BuildOutputTargetFolder>analyzers/dotnet/cs</BuildOutputTargetFolder>
 		<AssemblyName>Extend0.BlittableAdapter.Generator</AssemblyName>
 		<PackageId>Extend0.BlittableAdapter.Generator</PackageId>
 		<Authors>Papishushi</Authors>
@@ -14,8 +16,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9501.1686</AssemblyVersion>
-		<FileVersion>1.0.9501.1686</FileVersion>
+		<AssemblyVersion>1.0.9501.1967</AssemblyVersion>
+		<FileVersion>1.0.9501.1967</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -27,20 +29,9 @@
 		<NeutralLanguage>en-001</NeutralLanguage>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageReleaseNotes>
-			# Extend0.BlittableAdapter.Generator
-
-			[![NuGet](https://img.shields.io/nuget/v/Extend0.BlittableAdapter.Generator.svg)](https://www.nuget.org/packages/Extend0.BlittableAdapter.Generator)
-
-			A source generator that produces blittable interop adapters for structs, enabling zero-cost projection between managed and native-compatible layouts.
-
-			## Features
-
-			- Emits efficient `ref struct` adapters for blittable data structures.
-			- Preserves layout and alignment for use with `Span&lt;T&gt;`, `MemoryMarshal`, and native interop.
-			- Enforces compile-time validation of blittability constraints.
-			- Supports auto-wrapping of internal fields and projected reinterpretation.
+			Update dependencies to latest versions. Fix NU5128.
 		</PackageReleaseNotes>
-		<Version>1.0.9473</Version>
+		<Version>1.0.9501</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -56,12 +47,19 @@
 			<Pack>True</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
-		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
+		<None Include="$(OutputPath)\$(AssemblyName).pdb" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" Condition="Exists('$(OutputPath)\$(AssemblyName).pdb')" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="_._" Pack="true" PackagePath="lib/netstandard2.0/_._" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
 	</ItemGroup>
 
 </Project>
