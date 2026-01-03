@@ -50,5 +50,4 @@
         /// </summary>
         Unexpected = 0xFF
     }
-
 }
