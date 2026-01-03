@@ -1,5 +1,6 @@
 ﻿using Extend0.Metadata.Indexing.Definitions;
 using System.Runtime.CompilerServices;
+using static Extend0.Metadata.Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex;
 
 namespace Extend0.Metadata.Indexing.Internal.BuiltIn;
 
@@ -41,7 +42,7 @@ namespace Extend0.Metadata.Indexing.Internal.BuiltIn;
 /// </para>
 /// </remarks>
 internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity = 256, int perTableCapacity = 0, int keySize = 16)
-    : CrossTableRebuildableIndexDefinition<byte[], (string tableName, uint row, uint col)>(name, ByteArrayComparer.Ordinal, tablesCapacity, perTableCapacity, keySize)
+    : CrossTableRebuildableIndexDefinition<byte[], Hit>(name, ByteArrayComparer.Ordinal, tablesCapacity, perTableCapacity, keySize)
 {
     /// <summary>
     /// Attempts to retrieve the table location (row, column) associated with the specified key.
@@ -49,7 +50,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// <param name="key">The owned key buffer to query.</param>
     /// <param name="hit">When successful, receives the (row, column) location of the match.</param>
     /// <returns><see langword="true"/> if a hit was found; otherwise <see langword="false"/>.</returns>
-    public bool TryGetHit(byte[] key, out (string tableName, uint row, uint col) hit)
+    public bool TryGetHit(byte[] key, out Hit hit)
     {
         ThrowIfDisposed();
         if ((uint)key.Length > (uint)CachedKeySize)
@@ -76,7 +77,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// <param name="keyUtf8">A fixed-size UTF-8 span representing the key to query.</param>
     /// <param name="hit">When successful, receives the (row, column) location of the match.</param>
     /// <returns><see langword="true"/> if a hit was found; otherwise <see langword="false"/>.</returns>
-    public bool TryGetHit(ReadOnlySpan<byte> keyUtf8, out (string tableName, uint row, uint col) hit)
+    public bool TryGetHit(ReadOnlySpan<byte> keyUtf8, out Hit hit)
     {
         ThrowIfDisposed();
         if ((uint)keyUtf8.Length > (uint)CachedKeySize)
@@ -134,8 +135,6 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
         if ((uint)key.Length > (uint)CachedKeySize || key.Length == 0)
             return;
 
-        var hit = (tableName, row, col);
-
         Rwls.EnterWriteLock();
         byte[]? owned = null;
         try
@@ -144,20 +143,20 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
 
             if (!Index.TryGetValue(tableId, out var inner))
             {
-                inner = new Dictionary<byte[], (string tableName, uint row, uint col)>(ByteArrayComparer.Ordinal);
+                inner = new Dictionary<byte[], Hit>(ByteArrayComparer.Ordinal);
                 Index[tableId] = inner;
             }
 
-            if (inner.ContainsKey(lookup))
+            if (inner.TryGetValue(lookup, out var existing))
             {
-                inner[lookup] = hit;
+                inner[lookup] = new Hit(tableName, row, col, existing.OwnedKey);
                 return;
             }
 
             if (!TryRentKey(key, out owned))
                 return;
 
-            inner.Add(owned, hit);
+            inner.Add(owned, new Hit(tableName, row, col, owned));
         }
         catch
         {
@@ -221,8 +220,6 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
         if ((uint)key.Length > (uint)CachedKeySize || key.Length == 0)
             return;
 
-        var hit = (tableName, row, col);
-
         Rwls.EnterWriteLock();
         Guid[]? rented = null;
         try
@@ -251,14 +248,14 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
 
                 if (!Index.TryGetValue(tableId, out var inner) || inner is null)
                 {
-                    inner = new Dictionary<byte[], (string tableName, uint row, uint col)>(ByteArrayComparer.Ordinal);
+                    inner = new Dictionary<byte[], Hit>(ByteArrayComparer.Ordinal);
                     Index[tableId] = inner;
                 }
 
                 // Update fast-path (no rent)
-                if (inner.ContainsKey(lookup))
+                if (inner.TryGetValue(lookup, out var existing))
                 {
-                    inner[lookup] = hit;
+                    inner[lookup] = new Hit(tableName, row, col, existing.OwnedKey);
                     continue;
                 }
 
@@ -269,7 +266,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
                     if (!TryRentKey(key, out owned))
                         continue;
 
-                    inner.Add(owned, hit);
+                    inner.Add(owned, new Hit(tableName, row, col, owned));
                     owned = null; // ownership transferred to dictionary
                 }
                 finally
@@ -317,8 +314,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
                 return false;
 
             foreach (var k in tableMap.Keys)
-                if (k is byte[] kb)
-                    ReturnPooledKey(kb);
+                ReturnPooledKey(k);
 
             return Index.Remove(key);
         }
@@ -367,37 +363,22 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
             if ((uint)key.Length > (uint)CachedKeySize)
                 return false;
 
-            // Build lookup (fixed-size, padded) without allocation.
             var lookup = key.Length == CachedKeySize ? key : GetScratchLookupKey(key, CachedKeySize);
 
-            byte[]? storedKey = default;
-            byte[]? storedBytes = null;
-
-            foreach (var k in tableMap.Keys)
-                if (InnerKeyComparer.Equals(k, lookup) && k is byte[] sb)
-                {
-                    storedKey = k;
-                    storedBytes = sb;
-                    break;
-                }
-
-            if (storedBytes is null)
+            if (!tableMap.TryGetValue(lookup, out var hit))
                 return false;
 
-            if (!tableMap.Remove(storedKey!))
+            if (!tableMap.Remove(hit.OwnedKey))
                 return false;
 
-            ReturnPooledKey(storedBytes!);
+            ReturnPooledKey(hit.OwnedKey);
 
             if (tableMap.Count == 0)
                 Index.Remove(tableId);
 
             return true;
         }
-        finally
-        {
-            Rwls.ExitWriteLock();
-        }
+        finally { Rwls.ExitWriteLock(); }
     }
 
     /// <summary>
@@ -435,48 +416,30 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
             if ((uint)key.Length > (uint)CachedKeySize)
                 return false;
 
-            // Build lookup (fixed-size, padded) without allocation.
             var lookup = key.Length == CachedKeySize ? key : GetScratchLookupKey(key, CachedKeySize);
-
-            Guid foundTableId = default;
-            IDictionary<byte[], (string tableName, uint row, uint col)>? foundMap = null;
-            byte[]? storedKey = default;
-            byte[]? storedBytes = null;
 
             foreach (var kv in Index)
             {
                 var tableId = kv.Key;
                 var tableMap = kv.Value;
 
-                foreach (var k in tableMap.Keys)
-                    if (InnerKeyComparer.Equals(k, lookup) && k is byte[] sb)
-                    {
-                        foundTableId = tableId;
-                        foundMap = tableMap;
-                        storedKey = k;
-                        storedBytes = sb;
-                        goto FOUND; // break multiple loops
-                    }
+                if (!tableMap.TryGetValue(lookup, out var hit))
+                    continue;
+
+                if (!tableMap.Remove(hit.OwnedKey))
+                    return false;
+
+                ReturnPooledKey(hit.OwnedKey);
+
+                if (tableMap.Count == 0)
+                    Index.Remove(tableId);
+
+                return true; // first match wins
             }
 
-        FOUND:
-            if (foundMap is null || storedBytes is null)
-                return false;
-
-            if (!foundMap.Remove(storedKey!))
-                return false;
-
-            ReturnPooledKey(storedBytes!);
-
-            if (foundMap.Count == 0)
-                Index.Remove(foundTableId);
-
-            return true;
+            return false;
         }
-        finally
-        {
-            Rwls.ExitWriteLock();
-        }
+        finally { Rwls.ExitWriteLock(); }
     }
 
     /// <summary>
@@ -537,7 +500,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// </para>
     /// </remarks>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0301", Justification = "Hot-path: explicit Array.Empty<T>() usage.")]
-    public override Guid[] GetMemberTables(byte[] key, out (string tableName, uint row, uint col)[]? value)
+    public override Guid[] GetMemberTables(byte[] key, out Hit[]? value)
     {
         ThrowIfDisposed();
 
@@ -569,7 +532,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// This overload accepts variable-length keys for convenience and pads shorter keys using a thread-local scratch buffer
     /// to avoid allocations.
     /// </remarks>
-    public override bool TryGetValue(byte[] key, out (string tableName, uint row, uint col) value)
+    public override bool TryGetValue(byte[] key, out Hit value)
     {
         ThrowIfDisposed();
 
@@ -602,7 +565,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// This overload accepts variable-length keys for convenience and pads shorter keys using a thread-local scratch buffer
     /// to avoid allocations.
     /// </remarks>
-    public override bool TryGetValue(Guid tableId, byte[] key, out (string tableName, uint row, uint col) value)
+    public override bool TryGetValue(Guid tableId, byte[] key, out Hit value)
     {
         ThrowIfDisposed();
 
@@ -615,7 +578,6 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
         var lookup = key.Length == CachedKeySize ? key : GetScratchLookupKey(key, CachedKeySize);
         return base.TryGetValue(tableId, lookup, out value);
     }
-
 
     /// <summary>
     /// Adds an entry using a fixed-size binary key by materializing an owned pooled key buffer.
@@ -652,7 +614,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown if the index has been disposed.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool AddFixed(byte[] key, (string tableName, uint row, uint col) value, Guid? tableId = null)
+    private bool AddFixed(byte[] key, Hit value, Guid? tableId = null)
     {
         ThrowIfDisposed();
 
@@ -662,9 +624,12 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
 
         try
         {
+            // IMPORTANT: stored Hit must reference the actual dictionary key instance.
+            var stored = new Hit(value.TableName, value.Row, value.Col, owned);
+
             var ok = tableId.HasValue
-                ? base.Add(tableId.Value, owned, value)
-                : base.Add(owned, value);
+                ? base.Add(tableId.Value, owned, stored)
+                : base.Add(owned, stored);
 
             if (ok)
                 return true;
@@ -691,7 +656,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// This overload delegates to <see cref="AddFixed(byte[], ValueTuple{string, uint, uint}, Guid?)"/> to ensure
     /// consistent pooling and cleanup semantics.
     /// </remarks>
-    public override bool Add(byte[] key, (string tableName, uint row, uint col) value) => AddFixed(key, value);
+    public override bool Add(byte[] key, Hit value) => AddFixed(key, value);
 
     /// <summary>
     /// Adds a new entry into a specific table partition by normalizing <paramref name="key"/> into a pooled fixed-size owned buffer.
@@ -704,7 +669,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// This overload delegates to <see cref="AddFixed(byte[], ValueTuple{string, uint, uint}, Guid?)"/> and passes
     /// <paramref name="tableId"/> so the insertion targets a single partition while preserving pooling/ownership rules.
     /// </remarks>
-    public override bool Add(Guid tableId, byte[] key, (string tableName, uint row, uint col) value) => AddFixed(key, value, tableId);
+    public override bool Add(Guid tableId, byte[] key, Hit value) => AddFixed(key, value, tableId);
 
     /// <summary>
     /// Adds a complete table partition to the index by <b>copying</b> all incoming keys into pooled,
@@ -733,18 +698,18 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown if the index has been disposed.</exception>
     /// <exception cref="InvalidOperationException">Thrown if any key is longer than <see cref="CrossTableRebuildableIndexDefinition{TInnerKey, TInnerValue}.CachedKeySize"/>.</exception>
-    public override bool Add(Guid key, IDictionary<byte[], (string tableName, uint row, uint col)> value)
+    public override bool Add(Guid key, IDictionary<byte[], Hit> value)
     {
         ThrowIfDisposed();
         Rwls.EnterWriteLock();
-        Dictionary<byte[], (string tableName, uint row, uint col)>? ownedMap = null;
+        Dictionary<byte[], Hit>? ownedMap = null;
         try
         {
             // If partition already exists, do not allocate/rent anything.
             if (Index.ContainsKey(key))
                 return false;
 
-            ownedMap = new Dictionary<byte[], (string tableName, uint row, uint col)>(value.Count, ByteArrayComparer.Ordinal);
+            ownedMap = new Dictionary<byte[], Hit>(value.Count, ByteArrayComparer.Ordinal);
 
             foreach (var kv in value)
             {
@@ -759,12 +724,12 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
 
                 // Last-wins but do not leak rented buffers:
                 // if key already exists (by content), update the existing entry and return the newly rented key.
-                if (ownedMap.ContainsKey(ownedKey))
+                if (ownedMap.TryGetValue(ownedKey, out var prev))
                 {
-                    ownedMap[ownedKey] = kv.Value;
+                    ownedMap[ownedKey] = new Hit(kv.Value.TableName, kv.Value.Row, kv.Value.Col, prev.OwnedKey);
                     ReturnPooledKey(ownedKey);
                 }
-                else ownedMap.Add(ownedKey, kv.Value);
+                else ownedMap.Add(ownedKey, new Hit(kv.Value.TableName, kv.Value.Row, kv.Value.Col, ownedKey));
             }
 
             // Attach partition atomically.
@@ -802,7 +767,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
 
                 if (!Index.TryGetValue(tableId, out var existing))
                 {
-                    existing = new Dictionary<byte[], (string table, uint row, uint col)>(ByteArrayComparer.Ordinal);
+                    existing = new Dictionary<byte[], Hit>(ByteArrayComparer.Ordinal);
                     Index[tableId] = existing;
                 }
                 else
@@ -815,15 +780,79 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
                 foreach (var entry in table.EnumerateCells())
                 {
                     if (!TryRentKey(entry, out var owned)) continue;
-                    if (existing.ContainsKey(owned))
+                    if (existing.TryGetValue(owned, out var prev))
                     {
-                        existing[owned] = (table.Spec.Name, entry.Row, entry.Col);
+                        existing[owned] = new Hit(table.Spec.Name, entry.Row, entry.Col, prev.OwnedKey);
                         ReturnPooledKey(owned);
                     }
-                    else existing.Add(owned, (table.Spec.Name, entry.Row, entry.Col));
+                    else existing.Add(owned, new Hit(table.Spec.Name, entry.Row, entry.Col, owned));
                 }
             }
         }
         finally { Rwls.ExitWriteLock(); }
+    }
+
+    /// <summary>
+    /// Immutable location record for a resolved key hit in a cross-table index.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <see cref="Hit"/> represents the logical destination of a key lookup:
+    /// the owning table name plus the cell coordinates (<see cref="Row"/>, <see cref="Col"/>).
+    /// </para>
+    /// <para>
+    /// <b>Ownership invariant</b>:
+    /// <see cref="OwnedKey"/> must reference the <b>exact</b> key buffer instance stored as the dictionary key
+    /// inside the index (i.e., the pooled fixed-size key array owned by the index).
+    /// This is critical for correct removals and for returning pooled buffers to the pool without leaks.
+    /// </para>
+    /// <para>
+    /// Consumers should treat <see cref="OwnedKey"/> as an internal implementation detail:
+    /// it is not intended for external mutation or long-term retention.
+    /// </para>
+    /// </remarks>
+    internal readonly struct Hit
+    {
+        /// <summary>
+        /// Logical name of the table that contains the hit.
+        /// </summary>
+        public readonly string TableName;
+
+        /// <summary>
+        /// Row index of the hit within <see cref="TableName"/>.
+        /// </summary>
+        public readonly uint Row;
+
+        /// <summary>
+        /// Column index of the hit within <see cref="TableName"/>.
+        /// </summary>
+        public readonly uint Col;
+
+        /// <summary>
+        /// The owned pooled key buffer instance that is actually stored as the dictionary key.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This must be the same reference as the key used in the underlying dictionary entry.
+        /// It enables removal by reference and correct buffer return to the pool.
+        /// </para>
+        /// <para>
+        /// Internal by design: do not expose publicly to prevent misuse (mutation/retention).
+        /// </para>
+        /// </remarks>
+        internal readonly byte[] OwnedKey;
+
+        /// <summary>
+        /// Creates a new hit record.
+        /// </summary>
+        /// <param name="tableName">Logical name of the table that contains the hit.</param>
+        /// <param name="row">Row index of the hit.</param>
+        /// <param name="col">Column index of the hit.</param>
+        /// <param name="ownedKey">
+        /// The owned pooled key buffer instance stored as the dictionary key for this entry.
+        /// Must not be a temporary/scratch buffer.
+        /// </param>
+        public Hit(string tableName, uint row, uint col, byte[] ownedKey)
+            => (TableName, Row, Col, OwnedKey) = (tableName, row, col, ownedKey);
     }
 }

@@ -2,6 +2,7 @@
 using Extend0.Metadata.Indexing.Definitions;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using static Extend0.Metadata.Indexing.Internal.BuiltIn.ColumnKeyIndex;
 
 namespace Extend0.Metadata.Indexing.Internal.BuiltIn;
 
@@ -28,7 +29,7 @@ namespace Extend0.Metadata.Indexing.Internal.BuiltIn;
 /// </para>
 /// </remarks>
 internal sealed class ColumnKeyIndex(string name, int capacity = 0)
-    : RebuildableIndexDefinition<uint, Dictionary<byte[], uint>>(name, null, capacity)
+    : RebuildableIndexDefinition<uint, Dictionary<byte[], Hit>>(name, null, capacity)
 {
     /// <summary>
     /// Cached fixed key size (in bytes) per column id, derived from the table schema during <see cref="Rebuild"/>.
@@ -56,6 +57,12 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// <paramref name="value"/> dictionary, <b>last wins</b> if multiple input keys compare equal by content.
     /// </para>
     /// <para>
+    /// <b>Hit normalization:</b> <see cref="Hit.OwnedKey"/> is rewritten to reference the <em>stored</em> pooled key instance
+    /// that ends up as the dictionary key. If an equivalent key already existed (by content), the dictionary keeps its original
+    /// stored key array; the newly rented buffer is returned to the pool, and the hit is updated to point to the original
+    /// stored key instance. The input <see cref="Hit.OwnedKey"/> is ignored.
+    /// </para>
+    /// <para>
     /// <b>Pooling safety:</b> if a rented key is not inserted (e.g., because an equivalent key already exists by content),
     /// it is returned to the pool immediately. If an exception occurs while building the partition, any pooled keys that
     /// were inserted are returned before rethrowing.
@@ -65,7 +72,7 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown if the index has been disposed.</exception>
-    public override bool Add(uint key, Dictionary<byte[], uint> value)
+    public override bool Add(uint key, Dictionary<byte[], Hit> value)
     {
         ThrowIfDisposed();
         Rwls.EnterWriteLock();
@@ -77,7 +84,7 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
             if (!_cachedKeySizes.TryGetValue(key, out var keySize) || keySize <= 0)
                 return false;
 
-            var ownedInner = new Dictionary<byte[], uint>(value.Count, ByteArrayComparer.Ordinal);
+            var ownedInner = new Dictionary<byte[], Hit>(value.Count, ByteArrayComparer.Ordinal);
 
             try
             {
@@ -95,17 +102,21 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
 
                     try
                     {
-                        ref uint slot = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                        ref Hit slot = ref CollectionsMarshal.GetValueRefOrAddDefault(
                             ownedInner, ownedKey, out bool exists);
 
-                        slot = kv.Value; // last wins
+                        var storedKey = exists ? slot.OwnedKey : ownedKey;
 
-                        if (exists) ReturnPooledKey(ownedKey); // already owned
-                        else ownedKey = null; // free ownership
+                        if (exists)
+                            ReturnPooledKey(ownedKey);
+                        else
+                            ownedKey = null; // ownership transfer
+
+                        slot = new Hit(kv.Value.Row, storedKey); // last wins
                     }
                     finally
                     {
-                        if (ownedKey != null)
+                        if (ownedKey is not null)
                             ReturnPooledKey(ownedKey);
                     }
                 }
@@ -117,7 +128,6 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
             {
                 foreach (var k in ownedInner.Keys)
                     ReturnPooledKey(k);
-
                 throw;
             }
         }
@@ -141,8 +151,9 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// matching the index semantics.
     /// </para>
     /// <para>
-    /// <b>Thread-safety:</b> the snapshot is built under a read lock, so enumeration over the inner dictionary cannot race
-    /// with writers while cloning.
+    /// <b>Important:</b> in the returned snapshot, <see cref="Hit.OwnedKey"/> points to the cloned key buffer (heap-allocated),
+    /// not to the pooled buffer owned by the index. Therefore, it must not be returned to the pool and cannot be used with
+    /// fast-path removal APIs that require the exact stored key instance.
     /// </para>
     /// <para>
     /// <b>Cost:</b> this method allocates a new dictionary and one new <see cref="byte"/>[] per entry in the partition.
@@ -150,7 +161,7 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown if the index has been disposed.</exception>
-    public override bool TryGetValue(uint key, out Dictionary<byte[], uint> value)
+    public override bool TryGetValue(uint key, out Dictionary<byte[], Hit> value)
     {
         ThrowIfDisposed();
 
@@ -159,18 +170,18 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
         {
             if (!Index.TryGetValue(key, out var inner))
             {
-                value = new Dictionary<byte[], uint>(0, ByteArrayComparer.Ordinal);
+                value = new Dictionary<byte[], Hit>(0, ByteArrayComparer.Ordinal);
                 return false;
             }
 
-            var copy = new Dictionary<byte[], uint>(inner.Count, ByteArrayComparer.Ordinal);
+            var copy = new Dictionary<byte[], Hit>(inner.Count, ByteArrayComparer.Ordinal);
 
             foreach (var kv in inner)
             {
                 var src = kv.Key;
                 var dst = new byte[src.Length];
                 Buffer.BlockCopy(src, 0, dst, 0, dst.Length);
-                copy[dst] = kv.Value;
+                copy[dst] = new Hit(kv.Value.Row, dst); // Snapshot does not point to pooled key
             }
 
             value = copy;
@@ -178,7 +189,6 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
         }
         finally { Rwls.ExitReadLock(); }
     }
-
 
     /// <summary>
     /// Clears the index and returns all stored pooled key buffers (from all inner dictionaries) to the pool.
@@ -205,30 +215,19 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// <summary>
     /// Removes a key entry from a specific column partition using a fixed-size lookup key.
     /// </summary>
-    /// <param name="col">The column id (outer partition key).</param>
+    /// <param name="col">Column id (outer partition key).</param>
     /// <param name="lookupFixed">
-    /// A fixed-size, zero-padded lookup key whose length matches the configured key size for <paramref name="col"/>.
-    /// This buffer may be caller-owned or a thread-local scratch key produced by <c>GetScratchLookupKey</c>.
+    /// Fixed-size lookup key (zero-padded) whose length matches the configured key size for <paramref name="col"/>.
     /// </param>
-    /// <returns>
-    /// <see langword="true"/> if a matching key existed in the column partition and was removed; otherwise <see langword="false"/>.
-    /// </returns>
+    /// <returns><see langword="true"/> if a matching key existed and was removed; otherwise <see langword="false"/>.</returns>
     /// <remarks>
     /// <para>
-    /// Shared core implementation used by the public <c>Remove</c> overloads. Since stored keys are pooled <see cref="byte"/>[] buffers,
-    /// removal must locate the exact stored array instance (matched by content via <see cref="ByteArrayComparer.Ordinal"/>) so it can be
-    /// returned to the pool.
+    /// <b>Locking contract:</b> caller must hold the write lock.
     /// </para>
     /// <para>
-    /// <b>Locking contract:</b> the caller must already hold the write lock for the duration of this call.
-    /// This method does not acquire or release locks.
-    /// </para>
-    /// <para>
-    /// <b>Preconditions:</b> <paramref name="lookupFixed"/> is expected to already be in the fixed-size representation for the column
-    /// (copy + zero-fill). Length validation and scratch materialization are performed by the public overloads.
-    /// </para>
-    /// <para>
-    /// If the column partition becomes empty after removal, the partition entry is removed from the outer index.
+    /// <b>Removal strategy:</b> performs a content-based lookup to retrieve the stored <see cref="Hit"/> and then removes the
+    /// entry using <see cref="Hit.OwnedKey"/>, which is the exact dictionary key instance. This enables <c>O(1)</c> removal
+    /// and safe pooled key recycling without scanning dictionary keys.
     /// </para>
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -237,22 +236,13 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
         if (!Index.TryGetValue(col, out var dict))
             return false;
 
-        // Find the *stored* array instance so we can return it to the pool.
-        byte[]? stored = null;
-        foreach (var kv in dict)
-            if (ByteArrayComparer.Ordinal.Equals(kv.Key, lookupFixed))
-            {
-                stored = kv.Key;
-                break;
-            }
-
-        if (stored is null)
+        if (!dict.TryGetValue(lookupFixed, out var hit))
             return false;
 
-        if (!dict.Remove(stored))
+        if (!dict.Remove(hit.OwnedKey))
             return false;
 
-        ReturnPooledKey(stored);
+        ReturnPooledKey(hit.OwnedKey);
 
         if (dict.Count == 0)
             Index.Remove(col);
@@ -437,10 +427,14 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
             if ((uint)key.Length > (uint)keySize)
                 return false;
 
-            var scratch = GetScratchLookupKey(key, keySize);
+            var lookup = key.Length == keySize ? key : GetScratchLookupKey(key, keySize);
 
             if (Index.TryGetValue(col, out var dict))
-                return dict.TryGetValue(scratch, out row);
+            {
+                var a = dict.TryGetValue(lookup, out var hit);
+                row = hit.Row;
+                return a;
+            }
 
             return false;
         }
@@ -476,7 +470,12 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
             var scratch = GetScratchLookupKey(keyUtf8, keySize);
 
             if (Index.TryGetValue(col, out var dict))
-                return dict.TryGetValue(scratch, out row);
+            {
+                if (!dict.TryGetValue(scratch, out var hit))
+                    return false;
+                row = hit.Row;
+                return true;
+            }
 
             return false;
         }
@@ -540,22 +539,44 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
         finally { Rwls.ExitWriteLock(); }
     }
 
+    /// <summary>
+    /// Sets or overwrites the row id for <paramref name="ownedKey"/> inside the column partition.
+    /// </summary>
+    /// <param name="col">Column id (partition key).</param>
+    /// <param name="ownedKey">A pooled fixed-size key buffer to be used for insertion.</param>
+    /// <param name="row">Row id to store.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Locking contract:</b> caller must hold the write lock.
+    /// </para>
+    /// <para>
+    /// <b>Pooled key safety:</b> if an equivalent key already exists (by content), the dictionary keeps its original stored
+    /// key instance. In that case, the incoming pooled buffer is not used as a key and is returned to the pool, while the
+    /// stored key instance is preserved in <see cref="Hit.OwnedKey"/>.
+    /// </para>
+    /// <para>
+    /// <b>Semantics:</b> <b>last wins</b>.
+    /// </para>
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Set_NoLock(uint col, byte[] ownedKey, uint row)
     {
         if (!Index.TryGetValue(col, out var dict))
         {
-            dict = new Dictionary<byte[], uint>(ByteArrayComparer.Ordinal);
+            dict = new Dictionary<byte[], Hit>(ByteArrayComparer.Ordinal);
             Index[col] = dict;
         }
 
-        ref uint slot = ref CollectionsMarshal.GetValueRefOrAddDefault(dict, ownedKey, out bool exists);
+        ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(dict, ownedKey, out bool exists);
 
-        // If it already existed, the dictionary kept its original stored key instance,
-        // so the incoming pooled 'key' is unused -> return it to the pool.
+        // If it already existed, the dictionary kept its original stored key instance.
+        // Keep that key for OwnedKey; return the incoming pooled key.
+        var storedKey = exists ? slot.OwnedKey : ownedKey;
+
         if (exists)
             ReturnPooledKey(ownedKey);
 
-        slot = row; // last wins
+        slot = new Hit(row, storedKey); // last wins
     }
 
     /// <summary>
@@ -615,5 +636,47 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
             }
         }
         finally { Rwls.ExitWriteLock(); }
+    }
+
+    /// <summary>
+    /// Immutable per-column index hit for <see cref="ColumnKeyIndex"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Stores the row id for a key and the exact pooled key buffer instance used as the dictionary key.
+    /// </para>
+    /// <para>
+    /// <b>Pooled key ownership:</b> <see cref="OwnedKey"/> is a fixed-size buffer rented from the internal pool.
+    /// It is owned by the index while the entry exists and must be returned to the pool on removal/clear/rebuild.
+    /// </para>
+    /// <para>
+    /// <b>Why keep <see cref="OwnedKey"/>?</b> It enables <c>O(1)</c> removals without scanning dictionary keys:
+    /// callers can locate an entry by content (using a scratch lookup key) and then remove using the stored key instance.
+    /// </para>
+    /// </remarks>
+    internal readonly struct Hit
+    {
+        /// <summary>
+        /// Row id where the key was found.
+        /// </summary>
+        public readonly uint Row;
+
+        /// <summary>
+        /// The exact pooled key buffer instance stored as the dictionary key for this entry.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This buffer is owned by the index and must not be exposed or mutated outside the indexing layer.
+        /// </para>
+        /// </remarks>
+        internal readonly byte[] OwnedKey;
+
+        /// <summary>
+        /// Creates a new hit record.
+        /// </summary>
+        /// <param name="row">Row id where the key was found.</param>
+        /// <param name="ownedKey">The exact pooled key buffer instance used as the dictionary key.</param>
+        public Hit(uint row, byte[] ownedKey)
+            => (Row, OwnedKey) = (row, ownedKey);
     }
 }

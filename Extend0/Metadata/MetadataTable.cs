@@ -485,7 +485,11 @@ namespace Extend0.Metadata
         public bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out (uint col, uint row) hit)
         {
             var _globalKeyIndex = GetOrCreateGlobalKeyIndex();
-            if (_globalKeyIndex.TryGetHit(keyUtf8, out hit)) return true;
+            if (_globalKeyIndex.TryGetHit(keyUtf8: keyUtf8, out var resultHit))
+            {
+                hit = (resultHit.Col, resultHit.Row);
+                return true;
+            }
             hit = default;
             return false;
         }
@@ -518,7 +522,11 @@ namespace Extend0.Metadata
         public bool TryFindGlobal(byte[] keyUtf8, out (uint col, uint row) hit)
         {
             var _globalKeyIndex = GetOrCreateGlobalKeyIndex();
-            if (_globalKeyIndex.TryGetHit(keyUtf8, out hit)) return true;
+            if (_globalKeyIndex.TryGetHit(key: keyUtf8, out var resultHit))
+            {
+                hit = (resultHit.Col, resultHit.Row);
+                return true;
+            }
             hit = default;
             return false;
         }
