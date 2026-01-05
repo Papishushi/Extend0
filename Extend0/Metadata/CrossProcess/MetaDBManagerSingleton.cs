@@ -1,6 +1,9 @@
 ﻿using Extend0.Lifecycle.CrossProcess;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.CrossProcess.Contract;
+using Extend0.Metadata.CrossProcess.Internal;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 

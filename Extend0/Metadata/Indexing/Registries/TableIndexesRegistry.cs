@@ -1,4 +1,5 @@
-﻿using Extend0.Metadata.Indexing.Contract;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Registries.Contract;
 
 namespace Extend0.Metadata.Indexing.Registries
@@ -10,7 +11,7 @@ namespace Extend0.Metadata.Indexing.Registries
     /// Typically owned by a <c>MetadataTable</c> instance. Provides strongly-typed access
     /// while still allowing heterogeneous enumeration via <see cref="ITableIndex"/>.
     /// </remarks>
-    public sealed class TableIndexesRegistry : IndexesRegistryBase, ITableIndexesRegistry
+    internal sealed class TableIndexesRegistry : IndexesRegistryBase, ITableIndexesRegistry
     {
         /// <summary>
         /// Attempts to retrieve a registered index by name (non-generic).

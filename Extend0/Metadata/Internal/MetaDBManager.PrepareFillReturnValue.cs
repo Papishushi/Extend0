@@ -1,8 +1,9 @@
-﻿using System.Diagnostics;
+﻿using Extend0.Metadata.Storage;
+using System.Diagnostics;
 
 namespace Extend0.Metadata
 {
-    public sealed partial class MetaDBManager
+    internal sealed partial class MetaDBManager
     {
         /// <summary>
         /// Lightweight value container returned by the <c>PrepareFill</c> helper,

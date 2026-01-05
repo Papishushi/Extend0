@@ -1,12 +1,14 @@
-﻿using Extend0.Metadata.Refs;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Refs;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
+using Extend0.Metadata.Storage.Internal;
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Extend0.Metadata
+namespace Extend0.Metadata.Internal
 {
     /// <summary>
     /// Collection of low-level helper routines used by <see cref="MetaDBManager"/> to
@@ -625,7 +627,7 @@ namespace Extend0.Metadata
 
             ForEachBatch(rows, factory, batchSize, tSize, MaxStackBytes, (start, batch) =>
             {
-                byte* p = colBase + pitch * (nuint)start;
+                byte* p = colBase + pitch * start;
 
                 for (int i = 0; i < batch.Length; i++)
                 {
@@ -656,7 +658,7 @@ namespace Extend0.Metadata
 
                 fixed (byte* srcPtr = &MemoryMarshal.GetReference(srcBytes))
                 {
-                    nuint offset = (nuint)start * (nuint)blk.ValueSize;
+                    nuint offset = start * (nuint)blk.ValueSize;
                     byte* dest = basePtr + offset;
 
                     Buffer.MemoryCopy(srcPtr, dest, srcBytes.Length, srcBytes.Length);
@@ -819,7 +821,7 @@ namespace Extend0.Metadata
         /// </returns>
         /// <remarks>
         /// This helper is used as the “fast path” by
-        /// <see cref="FillColumn(IMetadataTable, uint, uint, Action{uint, IntPtr, uint}, CapacityPolicy, int)"/>.
+        /// <see cref="FillColumn(IMetadataTable, uint, uint, Action{uint, nint, uint}, CapacityPolicy, int)"/>.
         /// It only applies when the column reports a non-zero, fixed VALUE size.
         /// Variable-size columns always return <see langword="false"/>.
         /// </remarks>
@@ -839,10 +841,10 @@ namespace Extend0.Metadata
             // Batching keeps the hot loop short and branch-free
             ForEachRowBatch(rows, batchSize, (start, count) =>
             {
-                byte* p = valueBase + pitch * (nuint)start;
+                byte* p = valueBase + pitch * start;
                 for (int i = 0; i < count; i++)
                 {
-                    writer(start + (uint)i, (IntPtr)p, vsize);
+                    writer(start + (uint)i, (nint)p, vsize);
                     p += pitch;
                 }
             });
@@ -884,7 +886,7 @@ namespace Extend0.Metadata
                 {
                     uint row = start + (uint)i;
                     var cell = table.GetOrCreateCell(column, row);
-                    writer(row, (IntPtr)cell.GetValuePointer(), (uint)cell.ValueSize);
+                    writer(row, (nint)cell.GetValuePointer(), (uint)cell.ValueSize);
                 }
             });
         }
@@ -903,7 +905,7 @@ namespace Extend0.Metadata
         private static int AlignBatchTo4(int batch)
         {
             if (batch <= 0) throw new InvalidOperationException("Batch size must be a strictly positive number.");
-            return (batch + 3) & ~3;
+            return batch + 3 & ~3;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1061,7 +1063,7 @@ namespace Extend0.Metadata
             {
                 stormScore = Math.Min(10, stormScore + 1);
 
-                int mult = 2 + (stormScore / 3); // ~2..5
+                int mult = 2 + stormScore / 3; // ~2..5
                 long next = (long)compactCooldownMs * mult;
                 compactCooldownMs = (int)Math.Min(maxCooldownMs, next);
             }
@@ -1297,7 +1299,7 @@ namespace Extend0.Metadata
         /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        internal static void FillColumn(IMetadataTable table, uint column, uint rows, Action<uint, IntPtr, uint> writer, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
+        internal static void FillColumn(IMetadataTable table, uint column, uint rows, Action<uint, nint, uint> writer, CapacityPolicy policy, int batchSize = MetaDBManager.DEFAULT_BATCH_SIZE)
         {
             if (rows == 0) return;
 

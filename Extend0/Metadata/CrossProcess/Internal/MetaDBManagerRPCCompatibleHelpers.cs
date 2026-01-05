@@ -1,11 +1,14 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.CrossProcess.DTO;
+using Extend0.Metadata.CrossProcess.HResult;
 using Extend0.Metadata.Indexing.Contract;
+using Extend0.Metadata.Storage;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace Extend0.Metadata.CrossProcess
+namespace Extend0.Metadata.CrossProcess.Internal
 {
     internal static partial class MetaDBManagerRPCCompatibleHelpers
     {
@@ -606,8 +609,8 @@ namespace Extend0.Metadata.CrossProcess
         internal static int MakeRpcHResult(RpcOp op, RpcErr err)
         {
             const int FACILITY_ITF = 4;
-            int code16 = (((int)op & 0xFF) << 8) | ((int)err & 0xFF);
-            return unchecked((1 << 31) | (FACILITY_ITF << 16) | (code16 & 0xFFFF));
+            int code16 = ((int)op & 0xFF) << 8 | (int)err & 0xFF;
+            return unchecked(1 << 31 | FACILITY_ITF << 16 | code16 & 0xFFFF);
         }
 
         /// <summary>

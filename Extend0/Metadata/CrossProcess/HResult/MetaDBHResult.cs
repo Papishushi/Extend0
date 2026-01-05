@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata.CrossProcess
+﻿namespace Extend0.Metadata.CrossProcess.HResult
 {
     /// <summary>
     /// Utilities for decoding <c>HRESULT</c> values produced by <c>MetaDBManagerRPCCompatible</c>.
@@ -36,7 +36,7 @@
         {
             // Severity is bit 31 (1 = failure). Facility is bits 16..26 (11 bits).
             if (hresult >= 0) return false; // not a failing HRESULT
-            int facility = (hresult >> 16) & 0x7FF;
+            int facility = hresult >> 16 & 0x7FF;
             return facility == FacilityItf;
         }
 
@@ -70,7 +70,7 @@
                 return false;
 
             int code16 = hresult & 0xFFFF;
-            int opLow8 = (code16 >> 8) & 0xFF;
+            int opLow8 = code16 >> 8 & 0xFF;
             int err8 = code16 & 0xFF;
 
             op = (RpcOp)opLow8;

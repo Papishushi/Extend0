@@ -191,6 +191,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
+using Extend0.Metadata.Contract;
+
 namespace Extend0.Metadata.CodeGen
 {
     /// <summary>

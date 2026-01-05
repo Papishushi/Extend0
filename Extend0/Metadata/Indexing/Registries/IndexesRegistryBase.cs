@@ -24,7 +24,7 @@ namespace Extend0.Metadata.Indexing.Registries;
 /// and can filter/cast during enumeration when needed.
 /// </para>
 /// </remarks>
-public abstract class IndexesRegistryBase : IIndexesRegistryBase
+internal abstract class IndexesRegistryBase : IIndexesRegistryBase
 {
     /// <summary>
     /// Underlying index registry keyed by index name (ordinal).

@@ -1,10 +1,13 @@
-﻿using Extend0.Metadata.Diagnostics;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Diagnostics;
 using Extend0.Metadata.Indexing.Internal.BuiltIn;
 using Extend0.Metadata.Indexing.Registries;
 using Extend0.Metadata.Indexing.Registries.Contract;
+using Extend0.Metadata.Internal;
 using Extend0.Metadata.Refs;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
+using Extend0.Metadata.Storage.Internal;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -108,7 +111,7 @@ namespace Extend0.Metadata
     /// <seealso cref="TableSpec"/>
     /// <seealso cref="ColumnBlock"/>
     /// <seealso cref="MetadataTableRef"/>
-    public sealed partial class MetaDBManager : IMetaDBManager
+    internal sealed partial class MetaDBManager : IMetaDBManager
     {
         /// <summary>
         /// Default batch size(in rows) used by column operations when no explicit batch size is provided.

@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata
+﻿namespace Extend0.Metadata.Storage
 {
     /// <summary>
     /// Row capacity policy applied when operating on table columns.

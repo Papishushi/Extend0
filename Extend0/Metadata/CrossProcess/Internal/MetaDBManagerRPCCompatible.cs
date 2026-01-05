@@ -1,14 +1,17 @@
 ﻿using Extend0.Lifecycle.CrossProcess;
 using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.CrossProcess.Contract;
 using Extend0.Metadata.CrossProcess.DTO;
+using Extend0.Metadata.CrossProcess.HResult;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
-using static Extend0.Metadata.CrossProcess.MetaDBManagerRPCCompatibleHelpers;
+using static Extend0.Metadata.CrossProcess.Internal.MetaDBManagerRPCCompatibleHelpers;
 
-namespace Extend0.Metadata.CrossProcess
+namespace Extend0.Metadata.CrossProcess.Internal
 {
     /// <summary>
     /// RPC/IPC compatible façade for <see cref="MetaDBManager"/> using <see cref="CrossProcessServiceBase{TContract}"/>.
@@ -34,7 +37,7 @@ namespace Extend0.Metadata.CrossProcess
     /// lifecycle behavior, and centralized error handling in the in-proc manager.
     /// </para>
     /// </remarks>
-    public class MetaDBManagerRPCCompatible(
+    internal class MetaDBManagerRPCCompatible(
         /// <summary>
         /// Logger used by the underlying <see cref="MetaDBManager"/> for structured logging and diagnostics.
         /// </summary>
@@ -479,10 +482,8 @@ namespace Extend0.Metadata.CrossProcess
                             CellResultDTO dto = dtoNullable.Value;
 
                             if (keyCap == 0)
-                            {
                                 // VALUE-ONLY: write VALUE only
                                 WriteValueSegment(valuePtr, valCap, dto.ValueRaw, dto.ValueUtf8, cellPayloadMode);
-                            }
                             else
                             {
                                 // KEY/VALUE: write KEY + VALUE

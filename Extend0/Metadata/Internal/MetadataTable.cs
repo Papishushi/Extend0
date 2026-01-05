@@ -1,15 +1,18 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal.BuiltIn;
 using Extend0.Metadata.Indexing.Registries;
 using Extend0.Metadata.Indexing.Registries.Contract;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
+using Extend0.Metadata.Storage.Contract;
+using Extend0.Metadata.Storage.Internal;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace Extend0.Metadata
+namespace Extend0.Metadata.Internal
 {
     /// <summary>
     /// Represents a logical metadata table composed of fixed-size columns and rows,
@@ -40,15 +43,15 @@ namespace Extend0.Metadata
     /// <see cref="Dispose"/> when no longer needed.
     /// </para>
     /// </remarks>
-    public sealed class MetadataTable : IMetadataTable
+    internal sealed class MetadataTable : IMetadataTable
     {
-        private static readonly UTF8Encoding Utf8Strict = new(false, true);
+        private static readonly UTF8Encoding s_Utf8Strict = new(false, true);
 
         private readonly List<ColumnConfiguration> _columns = [];
         // Schema-level lookup (not a rebuildable table index). Built once from TableSpec.Columns.
         private readonly FrozenDictionary<string, uint> _colIndexByName;
 
-        private readonly ICellStore _store;
+        private ICellStore _store;
         private readonly TableSpec _spec;
 
         private const string COL_KEY_INDEX = "__builtIn:colKey";
@@ -68,6 +71,15 @@ namespace Extend0.Metadata
         /// Retrieves the <see cref="TableSpec"/> that defines this table.
         /// </summary>
         public TableSpec Spec => _spec;
+
+        /// <summary>
+        /// Gets or sets the underlying cell store used by this table.
+        /// </summary>
+        /// <remarks>
+        /// Changing the store may invalidate previously materialized cells and/or indexes depending on the implementation.
+        /// If you replace the store, you typically should call <see cref="RebuildIndexes(bool)"/> afterwards.
+        /// </remarks>
+        public ICellStore CellStore { get => _store; set => _store = value; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MetadataTable"/> class using the
@@ -211,7 +223,7 @@ namespace Extend0.Metadata
         ///     <description>
         ///     <b>Index rebuild</b>: all indexes in <see cref="Indexes"/> that implement
         ///     <see cref="IRebuildableIndex"/> are rebuilt by calling
-        ///     <see cref="IRebuildableIndex.Rebuild(MetadataTable)"/>.
+        ///     <see cref="IRebuildableIndex.Rebuild(IMetadataTable)"/>.
         ///     </description>
         ///   </item>
         /// </list>
@@ -833,7 +845,7 @@ namespace Extend0.Metadata
         /// </remarks>
         public string ToString(uint maxRows)
         {
-            var sb = new System.Text.StringBuilder();
+            var sb = new StringBuilder();
 
             int colCount = _columns.Count;
             if (colCount == 0) return "MetadataTable { Columns=0 }\n";
@@ -878,7 +890,7 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Writes the table body rows into the provided <see cref="System.Text.StringBuilder"/>.
+        /// Writes the table body rows into the provided <see cref="StringBuilder"/>.
         /// </summary>
         /// <param name="sb">The string builder that accumulates the textual table representation.</param>
         /// <param name="colCount">Total number of columns in the table.</param>
@@ -888,7 +900,7 @@ namespace Extend0.Metadata
         /// Each cell is retrieved from the underlying store and rendered using <see cref="Preview(ReadOnlySpan{byte}, int)"/>.
         /// Missing or unreadable cells are rendered as empty strings.
         /// </remarks>
-        private unsafe void WriteRows(System.Text.StringBuilder sb, uint colCount, uint rowsToShow, int[] widths)
+        private unsafe void WriteRows(StringBuilder sb, uint colCount, uint rowsToShow, int[] widths)
         {
             for (uint r = 0; r < rowsToShow; r++)
             {
@@ -927,10 +939,8 @@ namespace Extend0.Metadata
                         }
 
                         if (!v.IsEmpty)
-                        {
                             // Usar ancho final de columna para el preview
                             cellText = Preview(v, widths[c + 1]);
-                        }
                     }
 
                     sb.Append("| ").Append(Pad(cellText, widths[c + 1])).Append(' ');
@@ -1078,7 +1088,7 @@ namespace Extend0.Metadata
         {
             try
             {
-                text = Utf8Strict.GetString(v);
+                text = s_Utf8Strict.GetString(v);
             }
             catch
             {
@@ -1157,7 +1167,7 @@ namespace Extend0.Metadata
         /// </returns>
         private static string Border(uint colCount, int[] widths)
         {
-            var b = new System.Text.StringBuilder();
+            var b = new StringBuilder();
             b.Append('+').Append(new string('-', widths[0] + 2));
             for (int c = 0; c < colCount; c++)
                 b.Append('+').Append(new string('-', widths[c + 1] + 2));

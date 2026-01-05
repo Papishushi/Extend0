@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.Indexing.Definitions;
 using System.Runtime.InteropServices;
 using static Extend0.Metadata.Indexing.Internal.BuiltIn.GlobalKeyIndex;

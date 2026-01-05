@@ -1,6 +1,7 @@
 ﻿using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage;
 
-namespace Extend0.Metadata;
+namespace Extend0.Metadata.Contract;
 
 /// <summary>
 /// Common contract shared by local and RPC-compatible MetaDB managers.

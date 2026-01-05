@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.Indexing.Definitions;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -181,7 +182,8 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
                 var src = kv.Key;
                 var dst = new byte[src.Length];
                 Buffer.BlockCopy(src, 0, dst, 0, dst.Length);
-                copy[dst] = new Hit(kv.Value.Row, dst); // Snapshot does not point to pooled key
+                // Snapshot does not point to pooled key
+                copy[dst] = new Hit(kv.Value.Row, dst);
             }
 
             value = copy;

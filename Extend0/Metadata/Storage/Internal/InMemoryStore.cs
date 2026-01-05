@@ -1,8 +1,9 @@
 ﻿using Extend0.Metadata.CodeGen;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage.Contract;
 using System.Runtime.CompilerServices;
 
-namespace Extend0.Metadata.Storage
+namespace Extend0.Metadata.Storage.Internal
 {
     /// <summary>
     /// In-memory implementation of <see cref="ICellStore"/> used for testing,

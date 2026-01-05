@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal;
 using System.Runtime.CompilerServices;

@@ -1,4 +1,5 @@
-﻿using Extend0.Metadata.Indexing.Contract;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal;
 using System.Runtime.CompilerServices;
 
@@ -83,7 +84,7 @@ public abstract class CrossTableRebuildableIndexDefinition<TInnerKey, TInnerValu
     /// in a consistent state even if it was previously populated.
     /// </para>
     /// </remarks>
-    public abstract void Rebuild(MetaDBManager manager);
+    public abstract void Rebuild(IMetaDBManager manager);
 
     /// <summary>
     /// Clears the index partition for a single table and returns all pooled key buffers owned by that partition

@@ -1,4 +1,5 @@
-﻿using Extend0.Metadata.Indexing.Contract;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Indexing.Contract;
 
 namespace Extend0.Metadata.Indexing.Registries.Contract;
 

@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using Extend0.Metadata.Contract;
+using System.Collections.Concurrent;
 
 namespace Extend0.Metadata.Indexing.Contract;
 

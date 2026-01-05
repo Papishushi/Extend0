@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata.CrossProcess
+﻿namespace Extend0.Metadata.CrossProcess.HResult
 {
     /// <summary>
     /// Coarse-grained RPC error classification used to encode failures into a stable <c>HRESULT</c>.

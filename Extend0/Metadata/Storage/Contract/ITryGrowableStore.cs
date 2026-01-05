@@ -1,6 +1,6 @@
 ﻿using Extend0.Metadata.Schema;
 
-namespace Extend0.Metadata.Storage
+namespace Extend0.Metadata.Storage.Contract
 {
     /// <summary>
     /// Optional extension interface for <see cref="ICellStore"/> implementations
@@ -18,7 +18,7 @@ namespace Extend0.Metadata.Storage
     /// newly added value regions.
     /// </para>
     /// </remarks>
-    internal interface ITryGrowableStore : ICellStore
+    public interface ITryGrowableStore : ICellStore
     {
         /// <summary>
         /// Attempts to grow the specified column so that it can hold at least
@@ -73,6 +73,5 @@ namespace Extend0.Metadata.Storage
         /// </para>
         /// </remarks>
         bool TryGetColumnCapacity(uint column, out uint rowCapacity);
-
     }
 }

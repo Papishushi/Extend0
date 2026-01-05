@@ -1,6 +1,8 @@
-﻿using Extend0.Metadata.Schema;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage.Internal;
 
-namespace Extend0.Metadata.Storage
+namespace Extend0.Metadata.Storage.Contract
 {
     /// <summary>
     /// Abstraction over the underlying storage mechanism for metadata cells.
@@ -27,7 +29,7 @@ namespace Extend0.Metadata.Storage
     /// the associated <see cref="IMetadataTable"/> is no longer needed.
     /// </para>
     /// </remarks>
-    internal interface ICellStore : IDisposable, IEnumerable<CellRowColumnValueEntry>
+    public interface ICellStore : IDisposable, IEnumerable<CellRowColumnValueEntry>
     {
         /// <summary>
         /// Attempts to retrieve a low-level view over all values in a column.
@@ -46,7 +48,7 @@ namespace Extend0.Metadata.Storage
         /// vectorized processing) where the caller knows the exact binary layout of the
         /// values stored in the column.
         /// </remarks>
-        bool TryGetColumnBlock(uint column, out ColumnBlock block);
+        internal bool TryGetColumnBlock(uint column, out ColumnBlock block);
 
         /// <summary>
         /// Attempts to retrieve an existing cell at the specified column and row.
@@ -54,7 +56,7 @@ namespace Extend0.Metadata.Storage
         /// <param name="col">Zero-based column index.</param>
         /// <param name="row">Zero-based row index.</param>
         /// <param name="cell">
-        /// When this method returns <see langword="true"/>, contains a <see cref="MetadataCell"/>
+        /// When this method returns <see langword="true"/>, contains a <see cref="CodeGen.MetadataCell"/>
         /// representing the requested location.
         /// </param>
         /// <returns>

@@ -1,8 +1,9 @@
-﻿using Extend0.Metadata.Schema;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Schema;
 
 namespace Extend0.Metadata
 {
-    public sealed partial class MetaDBManager
+    internal sealed partial class MetaDBManager
     {
         /// <summary>
         /// Lazily materialized wrapper for a <see cref="IMetadataTable"/> registered in <see cref="MetaDBManager"/>.

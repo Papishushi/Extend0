@@ -1,4 +1,6 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Storage.Contract;
+using Extend0.Metadata.Storage.Internal;
 using System.Collections;
 using System.Runtime.CompilerServices;
 
@@ -24,7 +26,7 @@ namespace Extend0.Metadata.Storage
         /// Thrown when <paramref name="store"/> is not a supported implementation
         /// (<see cref="InMemoryStore"/> or <see cref="MappedStore"/>).
         /// </exception>
-        internal CellEnumerable(ICellStore store)
+        public CellEnumerable(ICellStore store)
         {
             if (store is InMemoryStore memStore) _store = memStore;
             else if (store is MappedStore mappedStore) _store = mappedStore;

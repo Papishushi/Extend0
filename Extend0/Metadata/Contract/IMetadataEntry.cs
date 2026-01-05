@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata
+﻿namespace Extend0.Metadata.Contract
 {
     /// <summary>
     /// Contract for generated metadata entry structs that expose a fixed key/value layout.

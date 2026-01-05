@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Extend0.Metadata.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace Extend0.Metadata.Diagnostics
 {

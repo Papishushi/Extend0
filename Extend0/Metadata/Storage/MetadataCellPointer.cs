@@ -1,7 +1,7 @@
 ﻿using System.Globalization;
 using System.Runtime.CompilerServices;
 
-namespace Extend0.Metadata
+namespace Extend0.Metadata.Storage
 {
     /// <summary>
     /// Lightweight value type that identifies a cell in a metadata table by
@@ -185,7 +185,7 @@ namespace Extend0.Metadata
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int GetWorstCase(char f) => f == HEX_FORMAT ? WORST_CASE_HEX : WORST_CASE_DECIMAL; // Capacity pre-check (worst case: decimal 10+1+10; hex 8+1+8)
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static char GetFormat(ReadOnlySpan<char> format) => (format.Length == 0) ? GENERAL_FORMAT : char.ToUpperInvariant(format[0]);
+        private static char GetFormat(ReadOnlySpan<char> format) => format.Length == 0 ? GENERAL_FORMAT : char.ToUpperInvariant(format[0]);
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static ReadOnlySpan<char> GetNumberFormat(char f) => f == HEX_FORMAT ? string.Empty+HEX_FORMAT : [];
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -372,7 +372,7 @@ namespace Extend0.Metadata
         /// and the low 32 bits contain <see cref="Row"/>.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong ToPacked() => ((ulong)Column << 32) | Row;
+        public ulong ToPacked() => (ulong)Column << 32 | Row;
 
         /// <summary>
         /// Unpacks a pointer from a 64-bit value produced by <see cref="ToPacked"/>.
@@ -421,7 +421,7 @@ namespace Extend0.Metadata
         /// This implementation formats into a temporary <see cref="char"/> buffer and then
         /// transcodes to UTF-8 for simplicity.
         /// </remarks>
-        public bool TryFormat(System.Span<byte> utf8Destination, out int bytesWritten, System.ReadOnlySpan<char> format, IFormatProvider? provider)
+        public bool TryFormat(Span<byte> utf8Destination, out int bytesWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
         {
             // Format to char and transcode (simple and fast enough).
             Span<char> tmp = stackalloc char[32];
@@ -612,7 +612,7 @@ namespace Extend0.Metadata
                 if (v == 0xFFFF_FFFFu)
                     return false;
 
-                n = (n << 4) | v;
+                n = n << 4 | v;
             }
 
             return true;

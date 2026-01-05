@@ -1,8 +1,9 @@
 ﻿using Extend0.Metadata.Indexing.Registries.Contract;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Extend0.Metadata;
+namespace Extend0.Metadata.Contract;
 
 /// <summary>
 /// High-level manager for registering, opening, resolving, linking, and maintaining MetaDB metadata tables.

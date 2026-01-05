@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata.CrossProcess
+﻿namespace Extend0.Metadata.CrossProcess.HResult
 {
     /// <summary>
     /// Identifies the RPC operation that failed, encoded into the <c>HRESULT</c> code produced by <see cref="MakeRpcHResult"/>.

@@ -21,7 +21,7 @@ namespace Extend0.Metadata.Indexing.Registries
     /// Each index implementation is responsible for its own internal synchronization.
     /// </para>
     /// </remarks>
-    public sealed class CrossTableIndexesRegistry : IndexesRegistryBase, ICrossTableIndexesRegistry
+    internal sealed class CrossTableIndexesRegistry : IndexesRegistryBase, ICrossTableIndexesRegistry
     {
         /// <summary>
         /// Attempts to retrieve a registered cross-table index by name (non-generic).

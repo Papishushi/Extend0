@@ -1,4 +1,4 @@
-﻿namespace Extend0.Metadata.Storage
+﻿namespace Extend0.Metadata.Storage.Contract
 {
     /// <summary>
     /// Represents a cell store that supports explicit compaction.
@@ -24,7 +24,7 @@
     /// cached spans, or previously obtained raw pointers.
     /// </para>
     /// </remarks>
-    internal interface ICompactableStore : ICellStore
+    public interface ICompactableStore : ICellStore
     {
         /// <summary>
         /// Attempts to compact the underlying storage to reduce memory usage.

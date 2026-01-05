@@ -1,4 +1,6 @@
-﻿namespace Extend0.Metadata.Schema
+﻿using Extend0.Metadata.Storage;
+
+namespace Extend0.Metadata.Schema
 {
     /// <summary>
     /// Describes the shape and basic behavior of a metadata column.

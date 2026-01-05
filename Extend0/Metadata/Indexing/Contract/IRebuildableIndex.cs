@@ -1,4 +1,6 @@
-﻿namespace Extend0.Metadata.Indexing.Contract;
+﻿using Extend0.Metadata.Contract;
+
+namespace Extend0.Metadata.Indexing.Contract;
 
 /// <summary>
 /// Contract for indexes that support rebuilding themselves by scanning the current contents of a metadata table.

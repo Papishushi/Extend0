@@ -1,6 +1,8 @@
 ﻿using Extend0.Lifecycle.CrossProcess;
+using Extend0.Metadata.Contract;
 using Extend0.Metadata.CrossProcess.DTO;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage;
 
 namespace Extend0.Metadata.CrossProcess.Contract;
 

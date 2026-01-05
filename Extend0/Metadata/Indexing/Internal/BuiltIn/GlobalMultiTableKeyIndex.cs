@@ -1,4 +1,5 @@
-﻿using Extend0.Metadata.Indexing.Definitions;
+﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Indexing.Definitions;
 using System.Runtime.CompilerServices;
 using static Extend0.Metadata.Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex;
 
@@ -753,7 +754,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// Rebuilds the entire index by scanning all registered tables in the manager.
     /// </summary>
     /// <param name="manager">The database manager providing access to all metadata tables.</param>
-    public override void Rebuild(MetaDBManager manager)
+    public override void Rebuild(IMetaDBManager manager)
     {
         ThrowIfDisposed();
 

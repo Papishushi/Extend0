@@ -1,5 +1,4 @@
-﻿
-namespace Extend0.Metadata.Storage
+﻿namespace Extend0.Metadata.Storage.Internal
 {
     /// <summary>
     /// Describes a contiguous value slice for a single column in a metadata store.

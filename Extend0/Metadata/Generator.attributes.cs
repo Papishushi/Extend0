@@ -18,8 +18,8 @@
 ///   <item><description>Inconsistent binary formats across processes or versions.</description></item>
 /// </list>
 /// <para>
-/// In other words: this file defines the fixed binary shapes that <see cref="MetadataTable"/>,
-/// <c>MappedStore</c> and related components can rely on when packing keys and values into
+/// In other words: this file defines the fixed binary shapes that <see cref="Extend0.Metadata.Contract.IMetadataTable"/>,
+/// <see cref="Extend0.Metadata.Storage.Contract.ICellStore"/> and related components can rely on when packing keys and values into
 /// memory-mapped columns.
 /// </para>
 /// </remarks>

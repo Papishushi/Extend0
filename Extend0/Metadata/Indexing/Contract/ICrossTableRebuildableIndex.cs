@@ -1,4 +1,6 @@
-﻿namespace Extend0.Metadata.Indexing.Contract;
+﻿using Extend0.Metadata.Contract;
+
+namespace Extend0.Metadata.Indexing.Contract;
 
 /// <summary>
 /// Marker interface for cross-table indexes that also support rebuilding themselves by scanning a metadata table.
@@ -13,7 +15,7 @@ public interface ICrossTableRebuildableIndex : ICrossTableIndex
     /// Rebuilds the index using the provided <paramref name="manager"/> as the source of truth.
     /// </summary>
     /// <param name="manager">The metadata manager to scan during reconstruction.</param>
-    void Rebuild(MetaDBManager manager);
+    void Rebuild(IMetaDBManager manager);
 }
 
 /// <summary>

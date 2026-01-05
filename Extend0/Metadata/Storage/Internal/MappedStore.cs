@@ -1,5 +1,6 @@
 ﻿using Extend0.Metadata.CodeGen;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage.Contract;
 using Extend0.Metadata.Storage.Files;
 using System.Buffers;
 using System.Diagnostics;
@@ -7,7 +8,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace Extend0.Metadata.Storage
+namespace Extend0.Metadata.Storage.Internal
 {
     /// <summary>
     /// Column store backed by a memory-mapped file.

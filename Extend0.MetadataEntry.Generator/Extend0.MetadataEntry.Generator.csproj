@@ -14,8 +14,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9489.36208</AssemblyVersion>
-		<FileVersion>1.0.9489.36208</FileVersion>
+		<AssemblyVersion>1.0.9501.1686</AssemblyVersion>
+		<FileVersion>1.0.9501.1686</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -27,19 +27,9 @@
 		<NeutralLanguage>en-001</NeutralLanguage>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageReleaseNotes>
-			# Extend0.MetadataEntry.Generator
-
-			A high-performance C# source generator that produces compact metadata entry structures used by Extend0 metadata framework at compile-time using `[assembly: GenerateMetadataEntry(key, value)]` attributes.
-
-			## Features
-
-			- Generates efficient value-type structs (`MetadataEntry{K}x{V}`) for (key, value) pairs at compile-time.
-			- Emits an optimized enum of variants with extension helpers.
-			- Produces a centralized `MetadataCell` wrapper for efficient dispatching.
-			- Minimal reflection, no runtime cost.
-			- Integrates seamlessly into build pipeline via Roslyn incremental generation.
+			Change using for IMetadataEntry.
 		</PackageReleaseNotes>
-		<Version>1.0.9473</Version>
+		<Version>1.0.9501</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
