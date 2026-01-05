@@ -16,8 +16,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9499.2636</AssemblyVersion>
-		<FileVersion>1.0.9499.2636</FileVersion>
+		<AssemblyVersion>1.0.9501.2716</AssemblyVersion>
+		<FileVersion>1.0.9501.2716</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -32,7 +32,7 @@
 			Change using for IMetadataEntry.
 			Update dependencies to latest versions. Fix NU5128.
 		</PackageReleaseNotes>
-		<Version>1.0.9501</Version>
+		<Version>1.0.9501.2716</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
