@@ -41,9 +41,9 @@ namespace Extend0.Metadata.Storage.Files
         /// </summary>
         public readonly long EntrySizeBytes => KeySize + ValueSize;
 
-        public override bool Equals(object? obj) => obj is ColumnDesc desc&&Equals(desc);
+        public readonly override bool Equals(object? obj) => obj is ColumnDesc desc&&Equals(desc);
 
-        public bool Equals(ColumnDesc other) =>
+        public readonly bool Equals(ColumnDesc other) =>
                    KeySize==other.KeySize&&
                    ValueSize==other.ValueSize&&
                    RowCapacity==other.RowCapacity&&
