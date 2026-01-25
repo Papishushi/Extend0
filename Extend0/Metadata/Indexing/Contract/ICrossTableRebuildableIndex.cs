@@ -15,7 +15,7 @@ public interface ICrossTableRebuildableIndex : ICrossTableIndex
     /// Rebuilds the index using the provided <paramref name="manager"/> as the source of truth.
     /// </summary>
     /// <param name="manager">The metadata manager to scan during reconstruction.</param>
-    void Rebuild(IMetaDBManager manager);
+    Task Rebuild(IMetaDBManager manager);
 }
 
 /// <summary>

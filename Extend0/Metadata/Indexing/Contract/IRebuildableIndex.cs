@@ -15,7 +15,7 @@ public interface IRebuildableIndex : ITableIndex
     /// Rebuilds the index using the provided <paramref name="table"/> as the source of truth.
     /// </summary>
     /// <param name="table">The metadata table to scan during reconstruction.</param>
-    void Rebuild(IMetadataTable table);
+    Task Rebuild(IMetadataTable table);
 }
 
 /// <summary>
