@@ -132,44 +132,226 @@ public interface IMetaDBManager : IMetaDBManagerCommon
     Task RunAsync(string operationName, Func<IMetaDBManager, Task> action, object? state = null);
 
     /// <summary>
-    /// Runs an operation under a named scope and rebuilds indexes for all known tables afterwards.
+    /// Runs a named operation and, if it completes successfully, triggers an index rebuild for all
+    /// currently materialized tables.
     /// </summary>
-    /// <param name="operationName">Operation name used for diagnostics and/or logging scopes.</param>
+    /// <param name="operationName">Human-readable operation name (used for diagnostics/logging scopes).</param>
     /// <param name="action">Callback executed with the manager.</param>
     /// <param name="state">Optional state object included in diagnostics.</param>
-    /// <param name="includeGlobal">Whether global indexes should be included.</param>
-    void RunWithReindexAll(string operationName, Action<IMetaDBManager> action, object? state = null, bool includeGlobal = true);
+    /// <param name="strict">
+    /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+    /// When <see langword="false"/>, index rebuild may be best-effort.
+    /// </param>
+    /// <param name="cancellationToken">Token used to cancel the index rebuild operation.</param>
+    /// <remarks>
+    /// <para>
+    /// This method invokes <see cref="IMetaDBManager.RebuildAllIndexes(bool, CancellationToken)"/> after
+    /// <paramref name="action"/> completes successfully.
+    /// </para>
+    /// <para>
+    /// Implementations may run the rebuild in a fire-and-forget fashion. If you need to observe completion,
+    /// use <see cref="RunWithReindexAllAsync(string, Func{IMetaDBManager, Task}, object?, bool, CancellationToken)"/>.
+    /// </para>
+    /// </remarks>
+    void RunWithReindexAll(
+        string operationName,
+        Action<IMetaDBManager> action,
+        object? state = null,
+        bool strict = true,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs an asynchronous operation under a named scope and rebuilds indexes for all known tables afterwards.
+    /// Runs a named asynchronous operation and, if it completes successfully, rebuilds indexes for all
+    /// currently materialized tables.
     /// </summary>
-    /// <param name="operationName">Operation name used for diagnostics and/or logging scopes.</param>
+    /// <param name="operationName">Human-readable operation name (used for diagnostics/logging scopes).</param>
     /// <param name="action">Async callback executed with the manager.</param>
     /// <param name="state">Optional state object included in diagnostics.</param>
-    /// <param name="includeGlobal">Whether global indexes should be included.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    Task RunWithReindexAllAsync(string operationName, Func<IMetaDBManager, Task> action, object? state = null, bool includeGlobal = true);
+    /// <param name="strict">
+    /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+    /// When <see langword="false"/>, index rebuild may be best-effort.
+    /// </param>
+    /// <param name="cancellationToken">Token used to cancel the operation and/or the index rebuild.</param>
+    /// <returns>A task that completes when the operation and the subsequent index rebuild have finished.</returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is canceled.
+    /// </exception>
+    Task RunWithReindexAllAsync(
+        string operationName,
+        Func<IMetaDBManager, Task> action,
+        object? state = null,
+        bool strict = true,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs an operation under a named scope and rebuilds indexes for a specific table afterwards.
+    /// Runs a named operation and, if it completes successfully, triggers an index rebuild for the table
+    /// identified by <paramref name="tableId"/>.
     /// </summary>
-    /// <param name="operationName">Operation name used for diagnostics and/or logging scopes.</param>
-    /// <param name="tableId">Target table id.</param>
+    /// <param name="operationName">Human-readable operation name (used for diagnostics/logging scopes).</param>
+    /// <param name="tableId">Identifier of the table whose indexes should be rebuilt.</param>
     /// <param name="action">Callback executed with the manager.</param>
     /// <param name="state">Optional state object included in diagnostics.</param>
-    /// <param name="includeGlobal">Whether global indexes should be included.</param>
-    void RunWithReindexTable(string operationName, Guid tableId, Action<IMetaDBManager> action, object? state, bool includeGlobal = true);
+    /// <param name="strict">
+    /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+    /// When <see langword="false"/>, index rebuild may be best-effort.
+    /// </param>
+    /// <param name="cancellationToken">Token used to cancel the index rebuild operation.</param>
+    /// <remarks>
+    /// <para>
+    /// This method invokes <see cref="IMetaDBManager.RebuildIndexes(Guid, bool, CancellationToken)"/> after
+    /// <paramref name="action"/> completes successfully.
+    /// </para>
+    /// <para>
+    /// Implementations may run the rebuild in a fire-and-forget fashion. If you need to observe completion,
+    /// use <see cref="RunWithReindexTableAsync(string, Guid, Func{IMetaDBManager, Task}, object?, bool, CancellationToken)"/>.
+    /// </para>
+    /// </remarks>
+    void RunWithReindexTable(
+        string operationName,
+        Guid tableId,
+        Action<IMetaDBManager> action,
+        object? state,
+        bool strict = true,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs an asynchronous operation under a named scope and rebuilds indexes for a specific table afterwards.
+    /// Runs a named asynchronous operation and, if it completes successfully, rebuilds indexes for the table
+    /// identified by <paramref name="tableId"/>.
     /// </summary>
-    /// <param name="operationName">Operation name used for diagnostics and/or logging scopes.</param>
-    /// <param name="tableId">Target table id.</param>
+    /// <param name="operationName">Human-readable operation name (used for diagnostics/logging scopes).</param>
+    /// <param name="tableId">Identifier of the table whose indexes should be rebuilt.</param>
     /// <param name="action">Async callback executed with the manager.</param>
     /// <param name="state">Optional state object included in diagnostics.</param>
-    /// <param name="includeGlobal">Whether global indexes should be included.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    Task RunWithReindexTableAsync(string operationName, Guid tableId, Func<IMetaDBManager, Task> action, object? state, bool includeGlobal = true);
+    /// <param name="strict">
+    /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+    /// When <see langword="false"/>, index rebuild may be best-effort.
+    /// </param>
+    /// <param name="cancellationToken">Token used to cancel the operation and/or the index rebuild.</param>
+    /// <returns>A task that completes when the operation and the subsequent index rebuild have finished.</returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is canceled.
+    /// </exception>
+    Task RunWithReindexTableAsync(
+        string operationName,
+        Guid tableId,
+        Func<IMetaDBManager, Task> action,
+        object? state,
+        bool strict = true,
+        CancellationToken cancellationToken = default);
+
+
+    /// <summary>
+    /// Rebuilds all registered indexes for the table identified by <paramref name="tableId"/>.
+    /// </summary>
+    /// <param name="tableId">The unique identifier of the table whose indexes should be rebuilt.</param>
+    /// <param name="strict">
+    /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants defined by the underlying
+    /// table/index implementation.
+    /// When <see langword="false"/>, the rebuild may be performed in best-effort mode (for example, skipping non-rebuildable
+    /// indexes or tolerating missing optional data).
+    /// </param>
+    /// <param name="cancellationToken">Token used to cancel the rebuild operation.</param>
+    /// <remarks>
+    /// <para>
+    /// This operation affects only the specified table. To rebuild indexes for all currently materialized tables, use
+    /// <see cref="RebuildAllIndexes(bool, CancellationToken)"/>.
+    /// </para>
+    /// <para>
+    /// The exact set of indexes and strict-mode rules are implementation-defined and delegated to the underlying table.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+    Task RebuildIndexes(Guid tableId, bool strict = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rebuilds all registered indexes for all currently materialized tables managed by this manager.
+    /// </summary>
+    /// <param name="strict">
+    /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants defined by each table/index
+    /// implementation.
+    /// When <see langword="false"/>, the rebuild may be performed in best-effort mode (for example, skipping non-rebuildable
+    /// indexes or tolerating missing optional data).
+    /// </param>
+    /// <param name="cancellationToken">Token used to cancel the rebuild operation.</param>
+    /// <remarks>
+    /// <para>
+    /// Only tables that are currently materialized/created are processed. Tables that are registered but not yet created
+    /// may be skipped by the implementation.
+    /// </para>
+    /// <para>
+    /// The exact set of indexes and strict-mode rules are implementation-defined and delegated to each underlying table.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+    Task RebuildAllIndexes(bool strict = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Attempts to compact a single table by its identifier.
+    /// </summary>
+    /// <param name="tableId">Identifier of the table to compact.</param>
+    /// <param name="strict">
+    /// When <see langword="true"/>, exceptions thrown during compaction are propagated to the caller.
+    /// When <see langword="false"/>, exceptions are swallowed and the method returns <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> if the table is not created (<c>IsCreated == false</c>) or if compaction succeeds.
+    /// <see langword="false"/> if the table is created but compaction is not supported or fails in non-strict mode.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Compaction is implementation-defined and may involve I/O, remapping, and index rebuilds.
+    /// Any previously obtained spans/pointers into the table's storage may become invalid after compaction.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="Exception">
+    /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by the underlying
+    /// compaction process.
+    /// </exception>
+    Task<bool> TryCompactTable(Guid tableId, bool strict, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Attempts to compact all currently created tables managed by this instance.
+    /// </summary>
+    /// <param name="strict">
+    /// When <see langword="true"/>, exceptions thrown while compacting a table are propagated to the caller and the
+    /// operation terminates immediately.
+    /// When <see langword="false"/>, failures are collected and the method continues attempting to compact remaining tables.
+    /// </param>
+    /// <returns>
+    /// A tuple describing the outcome:
+    /// <list type="bullet">
+    ///   <item>
+    ///     <description>
+    ///     <c>Success</c>: <see langword="true"/> when all eligible tables were compacted successfully; otherwise <see langword="false"/>.
+    ///     </description>
+    ///   </item>
+    ///   <item>
+    ///     <description>
+    ///     <c>FailedTableIds</c>: when <c>Success</c> is <see langword="true"/>, this value is <see langword="null"/>.
+    ///     When <c>Success</c> is <see langword="false"/>, this value is a non-empty sequence of the table IDs that failed.
+    ///     </description>
+    ///   </item>
+    /// </list>
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Only tables that are currently created (<c>IsCreated == true</c>) are considered. Tables that are not created or
+    /// are missing from the registry are ignored.
+    /// </para>
+    /// <para>
+    /// RPC note: tuple element names (<c>Success</c>, <c>FailedTableIds</c>) are compile-time metadata. Some serializers
+    /// represent tuples positionally (e.g., <c>Item1</c>/<c>Item2</c>), so consumers should treat the tuple as positional.
+    /// </para>
+    /// <para>
+    /// Compaction is implementation-defined and may involve I/O, remapping, and index rebuilds.
+    /// Any previously obtained spans/pointers into a table's storage may become invalid after compaction.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="Exception">
+    /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by a table's compaction
+    /// process.
+    /// </exception>
+    Task<TryCompactAllTablesResult> TryCompactAllTables(bool strict, CancellationToken cancellationToken);
 
     /// <summary>
     /// Attempts to get a currently managed table instance by <paramref name="id"/>.

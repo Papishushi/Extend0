@@ -482,4 +482,185 @@ public interface IMetaDBManagerRPCCompatible : IMetaDBManagerCommon, ICrossProce
     /// method may return <see cref="IndexLookupStatusDTO.NotFound"/> even if the key exists in underlying storage.
     /// </remarks>
     IndexLookupResultDTO FindGlobal(byte[] keyUtf8);
+
+    /// <summary>
+    /// Begins rebuilding all registered indexes for the table identified by <paramref name="tableId"/> and returns
+    /// an opaque call id that can be awaited or cancelled later.
+    /// </summary>
+    /// <param name="tableId">The unique identifier of the table whose indexes should be rebuilt.</param>
+    /// <param name="strict">
+    /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants defined by the underlying
+    /// table/index implementation. When <see langword="false"/>, the rebuild may be performed in best-effort mode.
+    /// </param>
+    /// <returns>
+    /// A call identifier for the started operation. Use <see cref="Await(long)"/> to wait for completion.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This method follows a BEGIN/AWAIT pattern to stay RPC-safe: it does not return a <see cref="Task"/> across the
+    /// process boundary. Instead, the server starts the work and returns a <c>callId</c> that can be used to await the
+    /// operation later.
+    /// </para>
+    /// <para>
+    /// The operation affects only the specified table. To rebuild indexes for all currently materialized tables, use
+    /// <see cref="RebuildAllIndexesBegin(bool)"/>.
+    /// </para>
+    /// <para>
+    /// Call ids are only meaningful for the lifetime of the server instance that created them. If the server restarts
+    /// or the operation finishes and is cleaned up, awaiting an old id may fail with an "unknown call id" error.
+    /// </para>
+    /// </remarks>
+    long RebuildIndexesBegin(Guid tableId, bool strict = true);
+
+    /// <summary>
+    /// Begins rebuilding all registered indexes for all currently materialized tables managed by this manager and returns
+    /// an opaque call id that can be awaited or cancelled later.
+    /// </summary>
+    /// <param name="strict">
+    /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants defined by each table/index
+    /// implementation. When <see langword="false"/>, the rebuild may be performed in best-effort mode.
+    /// </param>
+    /// <returns>
+    /// A call identifier for the started operation. Use <see cref="Await(long)"/> to wait for completion.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This method follows a BEGIN/AWAIT pattern to stay RPC-safe: it does not return a <see cref="Task"/> across the
+    /// process boundary. Instead, the server starts the work and returns a <c>callId</c>.
+    /// </para>
+    /// <para>
+    /// Only tables that are currently materialized/created are processed. Tables that are registered but not yet created
+    /// may be skipped by the implementation.
+    /// </para>
+    /// <para>
+    /// Call ids are only meaningful for the lifetime of the server instance that created them. If the server restarts
+    /// or the operation finishes and is cleaned up, awaiting an old id may fail with an "unknown call id" error.
+    /// </para>
+    /// </remarks>
+    long RebuildAllIndexesBegin(bool strict = true);
+
+    /// <summary>
+    /// Awaits completion of a previously started BEGIN operation identified by <paramref name="callId"/>.
+    /// </summary>
+    /// <param name="callId">The call identifier returned by a BEGIN method.</param>
+    /// <returns>
+    /// A task that completes when the tracked operation completes. If the underlying operation faults, the returned
+    /// task faults with the same exception; if it is cancelled, the returned task transitions to the cancelled state.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is the AWAIT half of the BEGIN/AWAIT pattern. It does not start any work; it only waits for the completion
+    /// of a server-tracked operation.
+    /// </para>
+    /// <para>
+    /// If the call id is unknown (never existed, already completed and cleaned up, belongs to a different server instance,
+    /// or the server has restarted), the implementation is expected to throw a <see cref="RemoteInvocationException"/>
+    /// with a 404-like <see cref="Exception.HResult"/>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="RemoteInvocationException">Thrown when <paramref name="callId"/> is not recognized.</exception>
+    Task Await(long callId);
+
+    /// <summary>
+    /// Awaits completion of a previously started asynchronous operation identified by <paramref name="callId"/>
+    /// and returns its typed result.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The expected result type produced by the pending operation. This must match the actual result type
+    /// registered for <paramref name="callId"/>.
+    /// </typeparam>
+    /// <param name="callId">The identifier previously returned by a corresponding <c>*Begin</c> method.</param>
+    /// <returns>
+    /// A task that completes when the underlying operation finishes and yields its result.
+    /// </returns>
+    /// <exception cref="RemoteInvocationException">
+    /// Thrown when <paramref name="callId"/> is not recognized. In that case <see cref="Exception.HResult"/> is set to 404.
+    /// </exception>
+    /// <exception cref="InvalidCastException">
+    /// Thrown when the call exists but was registered as a non-generic task or with a different result type than <typeparamref name="T"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown if the underlying operation was canceled (for example via <see cref="CancelAll"/> / <see cref="CancelByCallId(long)"/>).
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// This method only waits for an operation that is already in flight. It does not initiate any new work.
+    /// </para>
+    /// <para>
+    /// Implementations typically maintain an internal map of <c>callId</c> to a running <see cref="Task"/>.
+    /// The generic result is recovered by casting that stored task to <see cref="Task{TResult}"/>.
+    /// </para>
+    /// </remarks>
+    Task<T> Await<T>(long callId);
+
+    /// <summary>
+    /// Starts a compaction attempt for the specified table and returns a <c>callId</c> that can be awaited
+    /// (and optionally canceled) later.
+    /// </summary>
+    /// <param name="tableId">The unique identifier of the table to compact.</param>
+    /// <param name="strict">
+    /// When <see langword="true"/>, the compaction enforces strict invariants and fails fast on inconsistencies.
+    /// When <see langword="false"/>, the compaction may run in best-effort mode.
+    /// </param>
+    /// <returns>
+    /// A call identifier that can be passed to <see cref="Await{T}(long)"/> (with <c>T</c> = <see cref="bool"/>)
+    /// to observe completion and retrieve the result.
+    /// </returns>
+    /// <exception cref="RemoteInvocationException">
+    /// Thrown when the table cannot be resolved/opened or the operation cannot be started.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The returned <c>callId</c> represents an in-flight operation on the server-side service instance.
+    /// Implementations should clean up any per-call resources (such as cancellation token sources) when the call completes.
+    /// </para>
+    /// </remarks>
+    long TryCompactTableBegin(Guid tableId, bool strict);
+
+    /// <summary>
+    /// Starts a compaction attempt for all currently materialized tables and returns a <c>callId</c>
+    /// that can be awaited later.
+    /// </summary>
+    /// <param name="strict">
+    /// When <see langword="true"/>, the compaction enforces strict invariants and fails fast on inconsistencies.
+    /// When <see langword="false"/>, the compaction may run in best-effort mode.
+    /// </param>
+    /// <returns>
+    /// A call identifier that can be passed to <see cref="Await{T}(long)"/> (with <c>T</c> = <c>TryCompactAllTablesResult</c>)
+    /// to observe completion and retrieve the aggregated result.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Only tables that are currently materialized/open are processed; registered-but-not-created tables may be skipped
+    /// depending on the implementation.
+    /// </para>
+    /// </remarks>
+    long TryCompactAllTablesBegin(bool strict);
+
+    /// <summary>
+    /// Requests cancellation for all currently tracked in-flight calls started via <c>*Begin</c> methods.
+    /// </summary>
+    /// <returns>A task that completes when cancellation has been requested for all calls.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is best-effort: cancellation is cooperative and depends on the underlying operations honoring their
+    /// associated cancellation tokens.
+    /// </para>
+    /// </remarks>
+    Task CancelAll();
+
+    /// <summary>
+    /// Requests cancellation for a specific in-flight call identified by <paramref name="callId"/>.
+    /// </summary>
+    /// <param name="callId">The identifier of the call to cancel.</param>
+    /// <returns>A task that completes when cancellation has been requested for the specified call.</returns>
+    /// <exception cref="RemoteInvocationException">
+    /// Thrown when <paramref name="callId"/> is not recognized. Implementations commonly use <see cref="Exception.HResult"/> = 404.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// This is best-effort: cancellation is cooperative and depends on the underlying operation honoring its token.
+    /// </para>
+    /// </remarks>
+    Task CancelByCallId(long callId);
 }
