@@ -1,5 +1,6 @@
 ﻿using Extend0.Metadata.Contract;
 using Extend0.Metadata.Diagnostics;
+using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal.BuiltIn;
 using Extend0.Metadata.Indexing.Registries;
 using Extend0.Metadata.Indexing.Registries.Contract;
@@ -956,7 +957,7 @@ namespace Extend0.Metadata
                 ? mapPath[..^".tablespec.json".Length]
                 : mapPath;
 
-            var loaded = TableSpec.LoadFromFile(specPath);
+            var loaded = TableSpec.Helpers.LoadFromFile(specPath);
 
             // Observability: detect mismatch (we only force relocation if requested)
             if (_isLogActivated && !string.IsNullOrWhiteSpace(loaded.MapPath) &&
@@ -2531,75 +2532,139 @@ namespace Extend0.Metadata
             await RunCore(operationName, action, state).ConfigureAwait(false);
 
         /// <summary>
-        /// Executes a named operation and, upon successful completion, rebuilds
-        /// per-column (and optionally global) indexes for all materialized tables.
+        /// Executes a named operation and, upon successful completion, triggers an index rebuild
+        /// for all currently materialized tables.
         /// </summary>
-        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
-        /// <param name="action">Operation to execute.</param>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild global indexes in addition to per-column indexes;
-        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// <param name="operationName">Human-readable operation name (used for logging/diagnostics).</param>
+        /// <param name="action">The operation to execute.</param>
+        /// <param name="state">Optional user state forwarded to the underlying runner.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+        /// When <see langword="false"/>, index rebuild may be best-effort (for example, skipping non-rebuildable indexes).
         /// </param>
-        public void RunWithReindexAll(string operationName, Action<IMetaDBManager> action, object? state = null, bool includeGlobal = true) =>
+        /// <param name="cancellationToken">Token used to cancel the index rebuild operation.</param>
+        /// <remarks>
+        /// <para>
+        /// This method invokes <see cref="IMetaDBManager.RebuildAllIndexes(bool, CancellationToken)"/> after <paramref name="action"/>
+        /// completes successfully.
+        /// </para>
+        /// <para>
+        /// The rebuild is started in a fire-and-forget fashion via <c>Forget()</c>. If you need to observe completion and failures,
+        /// use <see cref="RunWithReindexAllAsync(string, Func{IMetaDBManager, Task}, object?, bool, CancellationToken)"/>.
+        /// </para>
+        /// </remarks>
+        public void RunWithReindexAll(
+            string operationName,
+            Action<IMetaDBManager> action,
+            object? state = null,
+            bool strict = true,
+            CancellationToken cancellationToken = default) =>
             Run(operationName, mgr =>
             {
                 action(mgr);
-                mgr.RebuildAllIndexes(includeGlobal);
+                mgr.RebuildAllIndexes(strict, cancellationToken).Forget();
             }, state);
 
         /// <summary>
-        /// Asynchronous version of <see cref="RunWithReindexAll"/> that rebuilds
-        /// indexes for all materialized tables when the operation completes successfully.
+        /// Executes a named asynchronous operation and, upon successful completion, rebuilds indexes
+        /// for all currently materialized tables.
         /// </summary>
-        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
-        /// <param name="action">Async operation to execute.</param>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild global indexes in addition to per-column indexes;
-        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// <param name="operationName">Human-readable operation name (used for logging/diagnostics).</param>
+        /// <param name="action">The asynchronous operation to execute.</param>
+        /// <param name="state">Optional user state forwarded to the underlying runner.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+        /// When <see langword="false"/>, index rebuild may be best-effort (for example, skipping non-rebuildable indexes).
         /// </param>
-        /// <returns>A task that completes when the operation and reindexing have finished.</returns>
-        public async Task RunWithReindexAllAsync(string operationName, Func<IMetaDBManager, Task> action, object? state = null, bool includeGlobal = true) =>
+        /// <param name="cancellationToken">Token used to cancel the operation and/or the index rebuild.</param>
+        /// <returns>A task that completes when the operation and the subsequent index rebuild have finished.</returns>
+        /// <remarks>
+        /// This method awaits <see cref="IMetaDBManager.RebuildAllIndexes(bool, CancellationToken)"/> after <paramref name="action"/>
+        /// completes successfully.
+        /// </remarks>
+        /// <exception cref="OperationCanceledException">
+        /// Thrown when <paramref name="cancellationToken"/> is canceled.
+        /// </exception>
+        public async Task RunWithReindexAllAsync(
+            string operationName,
+            Func<IMetaDBManager, Task> action,
+            object? state = null,
+            bool strict = true,
+            CancellationToken cancellationToken = default) =>
             await RunCore(operationName, async mgr =>
             {
                 await action(mgr).ConfigureAwait(false);
-                mgr.RebuildAllIndexes(includeGlobal);
+                await mgr.RebuildAllIndexes(strict, cancellationToken).ConfigureAwait(false);
             }, state).ConfigureAwait(false);
 
         /// <summary>
-        /// Executes a named operation and, upon successful completion, rebuilds
-        /// the key indexes for a single target table.
+        /// Executes a named operation and, upon successful completion, triggers an index rebuild
+        /// for a single target table.
         /// </summary>
-        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
+        /// <param name="operationName">Human-readable operation name (used for logging/diagnostics).</param>
         /// <param name="tableId">Identifier of the table whose indexes should be rebuilt.</param>
-        /// <param name="action">Operation to execute.</param>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild the global index for the table as well as per-column indexes;
-        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// <param name="action">The operation to execute.</param>
+        /// <param name="state">Optional user state forwarded to the underlying runner.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+        /// When <see langword="false"/>, index rebuild may be best-effort.
         /// </param>
-        public void RunWithReindexTable(string operationName, Guid tableId, Action<IMetaDBManager> action, object? state, bool includeGlobal = true) =>
+        /// <param name="cancellationToken">Token used to cancel the index rebuild operation.</param>
+        /// <remarks>
+        /// <para>
+        /// This method invokes <see cref="IMetaDBManager.RebuildIndexes(Guid, bool, CancellationToken)"/> after
+        /// <paramref name="action"/> completes successfully.
+        /// </para>
+        /// <para>
+        /// The rebuild is started in a fire-and-forget fashion via <c>Forget()</c>. If you need to observe completion and failures,
+        /// use <see cref="RunWithReindexTableAsync(string, Guid, Func{IMetaDBManager, Task}, object?, bool, CancellationToken)"/>.
+        /// </para>
+        /// </remarks>
+        public void RunWithReindexTable(
+            string operationName,
+            Guid tableId,
+            Action<IMetaDBManager> action,
+            object? state,
+            bool strict = true,
+            CancellationToken cancellationToken = default) =>
             Run(operationName, mgr =>
             {
                 action(mgr);
-                mgr.RebuildIndexes(tableId, includeGlobal);
+                mgr.RebuildIndexes(tableId, strict, cancellationToken).Forget();
             }, state);
 
         /// <summary>
-        /// Asynchronous version of <see cref="RunWithReindexTable"/> that rebuilds
-        /// the key indexes for a single table when the operation completes successfully.
+        /// Executes a named asynchronous operation and, upon successful completion, rebuilds indexes
+        /// for a single target table.
         /// </summary>
-        /// <param name="operationName">Human-readable operation name. Used in logs.</param>
+        /// <param name="operationName">Human-readable operation name (used for logging/diagnostics).</param>
         /// <param name="tableId">Identifier of the table whose indexes should be rebuilt.</param>
-        /// <param name="action">Async operation to execute.</param>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild the global index for the table as well as per-column indexes;
-        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// <param name="action">The asynchronous operation to execute.</param>
+        /// <param name="state">Optional user state forwarded to the underlying runner.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, index rebuild is performed in strict mode (implementation-defined invariants are enforced).
+        /// When <see langword="false"/>, index rebuild may be best-effort.
         /// </param>
-        /// <returns>A task that completes when the operation and reindexing have finished.</returns>
-        public async Task RunWithReindexTableAsync(string operationName, Guid tableId, Func<IMetaDBManager, Task> action, object? state, bool includeGlobal = true) =>
+        /// <param name="cancellationToken">Token used to cancel the operation and/or the index rebuild.</param>
+        /// <returns>A task that completes when the operation and the subsequent index rebuild have finished.</returns>
+        /// <remarks>
+        /// This method awaits <see cref="IMetaDBManager.RebuildIndexes(Guid, bool, CancellationToken)"/> after
+        /// <paramref name="action"/> completes successfully.
+        /// </remarks>
+        /// <exception cref="OperationCanceledException">
+        /// Thrown when <paramref name="cancellationToken"/> is canceled.
+        /// </exception>
+        public async Task RunWithReindexTableAsync(
+            string operationName,
+            Guid tableId,
+            Func<IMetaDBManager, Task> action,
+            object? state,
+            bool strict = true,
+            CancellationToken cancellationToken = default) =>
             await RunCore(operationName, async mgr =>
             {
                 await action(mgr).ConfigureAwait(false);
-                mgr.RebuildIndexes(tableId, includeGlobal);
+                await mgr.RebuildIndexes(tableId, strict, cancellationToken).ConfigureAwait(false);
             }, state).ConfigureAwait(false);
 
         private async Task RunCore(string operationName, Func<IMetaDBManager, Task> action, object? state = null)
@@ -2633,57 +2698,249 @@ namespace Extend0.Metadata
         }
 
         /// <summary>
-        /// Rebuilds the key indexes of the metadata table identified by the specified <paramref name="tableId"/>.
+        /// Rebuilds all registered indexes for the metadata table identified by <paramref name="tableId"/>.
         /// </summary>
-        /// <param name="tableId">
-        /// The unique identifier of the table whose indexes should be rebuilt.
+        /// <param name="tableId">The unique identifier of the table whose indexes should be rebuilt.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, enforces strict invariants defined by the underlying
+        /// <see cref="IMetadataTable"/> implementation and manager-level preconditions.
+        /// In this manager, strict mode requires the table to already be materialized/created
+        /// (implicit materialization is not allowed).
+        /// When <see langword="false"/>, the rebuild may be performed in best-effort mode.
         /// </param>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild both per-column and global key indexes;
-        /// <see langword="false"/> to rebuild only per-column indexes.
-        /// </param>
+        /// <param name="cancellationToken">Token used to cancel the rebuild operation.</param>
         /// <remarks>
         /// <para>
-        /// This method retrieves (or materializes on demand) the <see cref="IMetadataTable"/>
-        /// associated with <paramref name="tableId"/> and invokes
-        /// <see cref="IMetadataTable.RebuildIndexes(bool)"/> on it.
+        /// This method rebuilds indexes for a single table only. It does <b>not</b> rebuild manager-level/cross-table indexes
+        /// (for example, indexes that implement <see cref="ICrossTableRebuildableIndex"/>). To rebuild all table indexes and
+        /// cross-table indexes, use <see cref="RebuildAllIndexes(bool, CancellationToken)"/>.
         /// </para>
         /// <para>
-        /// Only the target table is affected. To rebuild indexes for all materialized tables,
-        /// use <see cref="RebuildAllIndexes(bool)"/>.
+        /// In non-strict mode, the table is materialized on demand by calling <see cref="GetOrCreate(Guid)"/>.
+        /// In strict mode, the table must already be created; otherwise an <see cref="InvalidOperationException"/> is thrown.
+        /// This avoids silently creating a new (empty) table and reporting a successful rebuild.
         /// </para>
         /// </remarks>
-        public void RebuildIndexes(Guid tableId, bool includeGlobal = true)
+        /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown in strict mode when the table must already be materialized/created but is not.
+        /// </exception>
+        public async Task RebuildIndexes(Guid tableId, bool strict = true, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (strict)
+            {
+                var managed = Require(tableId);
+                if (managed is null || !managed.IsCreated)
+                    throw new InvalidOperationException(
+                        $"Cannot rebuild indexes for table '{managed?.Name ?? tableId.ToString()}' because it is not created.");
+            }
+
             var table = GetOrCreate(tableId);
-            table.RebuildIndexes(includeGlobal);
+            await table.RebuildIndexes(strict, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Rebuilds per-column and global key indexes for all materialized tables
-        /// managed by this <see cref="MetaDBManager"/>.
+        /// Rebuilds all registered indexes for every table currently materialized by this manager, and then rebuilds
+        /// any cross-table indexes registered at the manager level.
         /// </summary>
-        /// <param name="includeGlobal">
-        /// <see langword="true"/> to rebuild global key indexes as well as per-column indexes;
-        /// <see langword="false"/> to rebuild only per-column indexes.
+        /// <param name="strict">
+        /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants defined by each
+        /// underlying <see cref="IMetadataTable"/> implementation. In addition:
+        /// <list type="bullet">
+        ///   <item><description>Any table that is registered but not created is treated as an error.</description></item>
+        ///   <item><description>Any manager-level index that does not implement <see cref="ICrossTableRebuildableIndex"/> is treated as an error.</description></item>
+        /// </list>
+        /// When <see langword="false"/>, the rebuild is best-effort: non-created tables are skipped and non-cross-table
+        /// manager indexes are ignored.
         /// </param>
+        /// <param name="cancellationToken">Token used to cancel the rebuild operation.</param>
         /// <remarks>
-        /// Only tables whose underlying <see cref="IMetadataTable"/> has already been created
-        /// (<c>ManagedTable.IsCreated == true</c>) are processed. Tables that are registered
-        /// but still lazy are skipped.
+        /// <para>
+        /// The method starts by clearing the current <b>index state</b> via <see cref="TableIndexesRegistry.ClearAll"/>.
+        /// This does <b>not</b> unregister indexes; it only resets their internal/ephemeral contents so they can be rebuilt
+        /// from the table data (implementation-defined per index).
+        /// </para>
+        /// <para>
+        /// Table rebuild phase: only tables that are currently created (<c>ManagedTable.IsCreated == true</c>) are processed.
+        /// In strict mode, non-created tables are recorded as errors; in non-strict mode, they are skipped.
+        /// </para>
+        /// <para>
+        /// Cross-table rebuild phase: after table-level rebuilds complete, this method enumerates manager-level indexes via
+        /// <c>Indexes.Enumerate()</c> and invokes <see cref="ICrossTableRebuildableIndex.Rebuild(IMetaDBManager)"/> for those
+        /// that support cross-table rebuilds. In strict mode, any index that does not implement
+        /// <see cref="ICrossTableRebuildableIndex"/> is recorded as an error.
+        /// </para>
+        /// <para>
+        /// Cross-table rebuilds are executed in parallel. Implementations of <see cref="ICrossTableRebuildableIndex"/> must be
+        /// thread-safe with respect to concurrent rebuild execution.
+        /// </para>
+        /// <para>
+        /// Enumeration over <c>_byId</c> is snapshot-based (it is a <c>ConcurrentDictionary</c>), so it is safe to iterate while
+        /// other threads register or close tables.
+        /// </para>
+        /// <para>
+        /// Cancellation is checked before and during the operation, including inside the parallel cross-table rebuild phase.
+        /// </para>
         /// </remarks>
-        public void RebuildAllIndexes(bool includeGlobal = true)
+        /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+        /// <exception cref="AggregateException">
+        /// Thrown when one or more errors are encountered while rebuilding table-level or cross-table indexes.
+        /// </exception>
+        public async Task RebuildAllIndexes(bool strict = true, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Clear everything (ephemeral by design)
+            Indexes.ClearAll();
+
+            ConcurrentQueue<InvalidOperationException>? errors = null;
+
             // _byId is a ConcurrentDictionary → snapshot enumeration is safe.
             foreach (var managed in _byId.Values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (managed is null || !managed.IsCreated)
+                {
+                    if (strict)
+                    {
+                        errors ??= [];
+                        errors.Enqueue(new InvalidOperationException(
+                            $"Cannot rebuild indexes for table '{managed?.Name ?? managed?.Id.ToString() ?? "<null>"}' because it is not created."));
+                    }
+                    continue;
+                }
+
+                await managed.Table.RebuildIndexes(strict, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Rebuild all cross-table indexes (manager-level)
+            await Parallel.ForEachAsync(
+                Indexes.Enumerate(),
+                cancellationToken,
+                async (idx, ct) =>
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    if (idx is ICrossTableRebuildableIndex ctidx)
+                        await ctidx.Rebuild(this).ConfigureAwait(false);
+                    else if (strict)
+                    {
+                        errors ??= [];
+                        errors.Enqueue(new InvalidOperationException(
+                            $"Index '{idx.Name}' does not support cross-table rebuilds."));
+                    }
+                }).ConfigureAwait(false);
+
+            if (errors is not null && !errors.IsEmpty)
+                throw new AggregateException("Errors occurred during index rebuild.", errors);
+        }
+
+        /// <summary>
+        /// Attempts to compact all currently created tables managed by this instance.
+        /// </summary>
+        /// <param name="strict">
+        /// When <see langword="true"/>, any exception thrown while compacting a table is propagated to the caller and the
+        /// operation terminates immediately.
+        /// When <see langword="false"/>, failures are collected and the method continues attempting to compact remaining tables.
+        /// </param>
+        /// <returns>
+        /// A <see cref="TryCompactAllTablesResult"/> containing an overall success flag and the identifiers of tables that
+        /// failed to compact.
+        /// When <see cref="TryCompactAllTablesResult.Success"/> is <see langword="true"/>, <see cref="TryCompactAllTablesResult.FailedTableIds"/>
+        /// is <see langword="null"/>.
+        /// When <see cref="TryCompactAllTablesResult.Success"/> is <see langword="false"/>, <see cref="TryCompactAllTablesResult.FailedTableIds"/>
+        /// is a non-empty sequence.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Only tables that are currently created (<c><see cref="ManagedTable.IsCreated"/> == <see langword="true"/></c>) are considered. Tables that are not created or
+        /// are missing from the registry are ignored.
+        /// </para>
+        /// <para>
+        /// Compaction is <see cref="IMetadataTable"/>/<see cref="Storage.Contract.ICellStore"/> implementation-defined and may involve I/O, remapping, and index rebuilds.
+        /// Any previously obtained spans/pointers into a table's storage may become invalid after compaction.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="Exception">
+        /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by a table's compaction
+        /// process.
+        /// </exception>
+        public async Task<TryCompactAllTablesResult> TryCompactAllTables(bool strict, CancellationToken cancellationToken)
+        {
+            bool result = true;
+            List<Guid>? failedIds = null;
+            foreach (var managed in _byId.Values)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (managed is null || !managed.IsCreated)
                     continue;
 
-                // For now we rebuild unique per-column + global indexes.
-                // Later, when we add multi-index support, this can call the extended overload.
-                managed.Table.RebuildIndexes(includeGlobal);
+                try
+                {
+                    if (!await managed.Table.TryCompactStore(strict, cancellationToken))
+                    {
+                        failedIds ??= [];
+                        failedIds.Add(managed.Id);
+                        result = false;
+                    }
+                }
+                catch
+                {
+                    if (strict) throw;
+                    failedIds ??= [];
+                    failedIds.Add(managed.Id);
+                    result = false;
+                }
             }
+            return (result, failedIds);
+        }
+
+        /// <summary>
+        /// Attempts to compact a single table by its identifier.
+        /// </summary>
+        /// <param name="tableId">The identifier of the table to compact.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, any exception thrown during compaction is propagated to the caller.
+        /// When <see langword="false"/>, exceptions are swallowed and the method returns <see langword="false"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the table is not created (<c>IsCreated == false</c>) or if compaction succeeds.
+        /// <see langword="false"/> if the table is created but compaction is not supported or fails in non-strict mode.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// If the table is not currently created, this method is a no-op and returns <see langword="true"/>.
+        /// </para>
+        /// <para>
+        /// Compaction is table/store implementation-defined and may involve I/O, remapping, and index rebuilds.
+        /// Any previously obtained spans/pointers into the table's storage may become invalid after compaction.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="Exception">
+        /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by the table's
+        /// compaction process.
+        /// </exception>
+        public async Task<bool> TryCompactTable(Guid tableId, bool strict, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var managed = Require(tableId);
+            if (managed is null || !managed.IsCreated)
+                return true;
+
+            var result = false;
+            try
+            {
+                result = await managed.Table.TryCompactStore(strict, cancellationToken);
+            }
+            catch
+            {
+                if (strict) throw;
+                return result;
+            }
+            return result;
         }
 
         /// <summary>
