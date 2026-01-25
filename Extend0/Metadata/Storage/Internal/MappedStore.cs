@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.CodeGen;
+using Extend0.Metadata.Diagnostics;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage.Contract;
 using Extend0.Metadata.Storage.Files;
@@ -40,6 +41,7 @@ namespace Extend0.Metadata.Storage.Internal
     /// </remarks>
     internal sealed unsafe class MappedStore : ITryGrowableStore, ICompactableStore
     {
+        private bool _disposed = false;
         private MemoryMappedFile _mmf;
         private MemoryMappedViewAccessor _view;
         private byte* _base;               // Base address of the mapping
@@ -144,6 +146,12 @@ namespace Extend0.Metadata.Storage.Internal
         ///   </description></item>
         /// </list>
         /// </remarks>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="spec"/> is <c>null</c>.</exception>
+        /// <exception cref="MetadataTableLockedException">
+        /// Thrown when the backing file cannot be opened or resized because it is in use by another process
+        /// (or access is denied).
+        /// </exception>
+        /// <exception cref="IOException">Rethrown when the I/O error is not recognized as a lock/sharing/access issue.</exception>
         public MappedStore(TableSpec spec)
         {
             var columns = spec.Columns;
@@ -176,10 +184,13 @@ namespace Extend0.Metadata.Storage.Internal
             Directory.CreateDirectory(dir);
             spec.SaveToDirectory(dir);
 
-            using (var fs = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read))
+            ThrowParsed(() =>
             {
-                if (fs.Length < fileSize) fs.SetLength(fileSize);
-            }
+                using (var fs = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read))
+                {
+                    if (fs.Length < fileSize) fs.SetLength(fileSize);
+                }
+            });
 
             _mmf  = MemoryMappedFile.CreateFromFile(fullPath, FileMode.Open, null, capacity: 0, MemoryMappedFileAccess.ReadWrite);
             _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
@@ -328,21 +339,28 @@ namespace Extend0.Metadata.Storage.Internal
         /// header and column descriptor pointers.
         /// </para>
         /// </remarks>
+        /// <exception cref="MetadataTableLockedException">
+        /// Thrown when the backing file cannot be opened or resized due to lock/sharing/access issues.
+        /// </exception>
+        /// <exception cref="IOException">Rethrown when the I/O error is not recognized as a lock/sharing/access issue.</exception>
+
         private void Remap(long newLength)
         {
             // Flush & drop current view
             _view.Flush();
-            if (_base != null)
-                _view.SafeMemoryMappedViewHandle.ReleasePointer();
+            ReleaseViewPointerIfHeld();
             _view.Dispose();
             _mmf.Dispose();
 
-            // Ensure file is at least newLength
-            using (var fs = new FileStream(_path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+            ThrowParsed(() =>
             {
-                if (fs.Length < newLength) fs.SetLength(newLength);
-                _length = fs.Length;
-            }
+                // Ensure file is at least newLength
+                using (var fs = new FileStream(_path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                {
+                    if (fs.Length < newLength) fs.SetLength(newLength);
+                    _length = fs.Length;
+                }
+            });
 
             // Re-map whole file
             _mmf  = MemoryMappedFile.CreateFromFile(_path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
@@ -351,6 +369,61 @@ namespace Extend0.Metadata.Storage.Internal
 
             _hdr  = (FileHeader*)_base;
             _cols = (ColumnDesc*)(_base + _hdr->ColumnsTableOffset);
+        }
+
+        /// <summary>
+        /// Executes <paramref name="action"/> and, when it fails with an <see cref="IOException"/>,
+        /// translates well-known OS lock / sharing errors into a <see cref="MetadataTableLockedException"/>.
+        /// All other <see cref="IOException"/> instances are rethrown unchanged.
+        /// </summary>
+        /// <param name="action">The operation to execute.</param>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="action"/> is <c>null</c>.</exception>
+        /// <exception cref="MetadataTableLockedException">
+        /// Thrown when the underlying <see cref="IOException"/> indicates the table file is locked/in-use
+        /// by another process, or when access is denied.
+        /// </exception>
+        /// <exception cref="IOException">
+        /// Rethrown when the <see cref="IOException"/> does not match a recognized lock/sharing/access pattern.
+        /// </exception>
+        private static void ThrowParsed(Action action)
+        {
+            ArgumentNullException.ThrowIfNull(action);
+
+            try
+            {
+                action();
+            }
+            catch (IOException ex)
+            {
+                int hr = ex.HResult;
+
+                // Windows HRESULTs (0x8007....)
+                const int HR_SHARING_VIOLATION = unchecked((int)0x80070020);
+                const int HR_LOCK_VIOLATION = unchecked((int)0x80070021);
+                const int HR_SHARING_BUF_EXCEEDED = unchecked((int)0x80070024);
+                const int HR_USER_MAPPED_FILE = unchecked((int)0x800704C8);
+                const int HR_ACCESS_DENIED = unchecked((int)0x80070005);
+
+                if (hr is HR_SHARING_VIOLATION or HR_LOCK_VIOLATION or HR_USER_MAPPED_FILE or HR_SHARING_BUF_EXCEEDED)
+                    throw new MetadataTableLockedException($"Locked by another process. HR=0x{hr:X8}", ex);
+
+                if (hr == HR_ACCESS_DENIED)
+                    throw new MetadataTableLockedException($"Access denied. HR=0x{hr:X8}", ex);
+
+                // Unix: often errno is stored straight in HResult (small positive ints)
+                if (!OperatingSystem.IsWindows() && hr > 0 && hr < 4096)
+                {
+                    const int EACCES = 13;
+                    const int EAGAIN = 11; // also EWOULDBLOCK
+                    const int EBUSY = 16;
+                    const int ETXTBSY = 26;
+
+                    if (hr is EACCES or EAGAIN or EBUSY or ETXTBSY)
+                        throw new MetadataTableLockedException($"Locked/busy (errno={hr}).", ex);
+                }
+
+                throw;
+            }
         }
 
         /// <summary>
@@ -383,7 +456,6 @@ namespace Extend0.Metadata.Storage.Internal
         [DebuggerStepThrough]
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private static long AlignUp(long v, int a = 64) => unchecked(v + (a - 1)) / a * a;
-
 
         /// <summary>
         /// Computes a raw pointer to the beginning of the (key,value) entry
@@ -538,19 +610,20 @@ namespace Extend0.Metadata.Storage.Internal
 
         /// <inheritdoc/>
         public CellEnumerable EnumerateCells() => new(this);
-
         /// <summary>
         /// Releases the memory-mapped view and the underlying mapping.
         /// </summary>
         public void Dispose()
         {
+            if (_disposed) return;
             if (_base != null)
             {
                 _view.Flush();
-                _view?.SafeMemoryMappedViewHandle.ReleasePointer();
+                ReleaseViewPointerIfHeld();
+                _view?.Dispose();
             }
-            _view?.Dispose();
             _mmf?.Dispose();
+            _disposed = true;
         }
 
         /// <inheritdoc/>
@@ -575,6 +648,12 @@ namespace Extend0.Metadata.Storage.Internal
         ///   </description></item>
         /// </list>
         /// </remarks>
+        /// <exception cref="MetadataTableLockedException">
+        /// Thrown when the store needs to resize/remap the backing file but it is locked/in use by another process
+        /// (or access is denied).
+        /// </exception>
+        /// <exception cref="IOException">Rethrown when the I/O error is not recognized as a lock/sharing/access issue.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the requested column size does not match the mapped column.</exception>
         public bool TryGrowColumnTo(uint column, uint minRows, in ColumnConfiguration meta, bool zeroInit)
         {
             if (minRows == 0) return true;
@@ -643,13 +722,37 @@ namespace Extend0.Metadata.Storage.Internal
             return true;
         }
 
+        /// <inheritdoc/>
         public IEnumerator<CellRowColumnValueEntry> GetEnumerator() => EnumerateCells().GetEnumerator();
 
+        /// <inheritdoc/>
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 
-        void ICompactableStore.Compact()
+        /// <inheritdoc/>
+        /// <exception cref="NotImplementedException">Always thrown; compaction is not yet implemented.</exception>"
+        Task ICompactableStore.Compact(bool strict, CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
+        }
+
+        /// <summary>
+        /// Releases the acquired native pointer for the current view (if any) and clears <see cref="_base"/>.
+        /// Safe to call multiple times.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This must be called after <see cref="MemoryMappedViewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref byte*)"/>
+        /// to avoid leaking a pinned view. Once released, <see cref="_base"/> becomes invalid and must not be dereferenced.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ReleaseViewPointerIfHeld()
+        {
+            if (_base != null)
+            {
+                _view.SafeMemoryMappedViewHandle.ReleasePointer();
+                _base = null;
+            }
         }
     }
 }
