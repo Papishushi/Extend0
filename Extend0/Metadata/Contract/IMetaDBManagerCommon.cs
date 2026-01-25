@@ -19,6 +19,12 @@ namespace Extend0.Metadata.Contract;
 /// </remarks>
 public interface IMetaDBManagerCommon : IDisposable, IAsyncDisposable
 {
+    /// <summary>
+    /// Gets the identifiers of all tables currently known to this manager.
+    /// </summary>
+    /// <value>
+    /// An enumeration of table IDs. The returned sequence may be empty.
+    /// </value>
     IEnumerable<Guid> TableIds { get; }
 
     /// <summary>
@@ -61,22 +67,6 @@ public interface IMetaDBManagerCommon : IDisposable, IAsyncDisposable
     /// Closes all managed tables using strict semantics.
     /// </summary>
     void CloseAllStrict();
-
-    /// <summary>
-    /// Rebuilds indexes for the table identified by <paramref name="tableId"/>.
-    /// </summary>
-    /// <param name="tableId">Target table id.</param>
-    /// <param name="includeGlobal">Whether global indexes should be included.</param>
-    void RebuildIndexes(Guid tableId, bool includeGlobal = true);
-
-    /// <summary>
-    /// Rebuilds per-column and global key indexes for all materialized tables managed by this manager.
-    /// </summary>
-    /// <param name="includeGlobal">
-    /// <see langword="true"/> to rebuild global key indexes as well as per-column indexes;
-    /// <see langword="false"/> to rebuild only per-column indexes.
-    /// </param>
-    void RebuildAllIndexes(bool includeGlobal = true);
 
     /// <summary>
     /// Restarts the background delete worker responsible for processing deletions, optionally using a queue path.
