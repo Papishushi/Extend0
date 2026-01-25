@@ -115,7 +115,7 @@
         bool TrySetValue(ReadOnlySpan<byte> str);
 
         /// <summary>
-        /// Attempts to set the key from a UTF-16 string.
+        /// Attempts to set the key from a UTF-8 string.
         /// </summary>
         /// <param name="key">Key text to encode and store.</param>
         /// <returns>
@@ -126,7 +126,7 @@
         bool TrySetKey(string key);
 
         /// <summary>
-        /// Attempts to set the value from a UTF-16 string.
+        /// Attempts to set the value from a UTF-8 string.
         /// </summary>
         /// <param name="str">Value text to encode and store.</param>
         /// <returns>
