@@ -179,11 +179,11 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// Hints are computed using <c>CStrLenHint</c> and are bounded by the segment capacities.
         /// They are only heuristics intended to reduce work when generating preview strings.
         /// </remarks>
-        private static (int keyLenHint, int valLenHint) GetLenghtHints(int keyCap, int valCap, ReadCellUnsafeResult result)
+        private static GetLenghtHintsResult GetLenghtHints(int keyCap, int valCap, ReadCellUnsafeResult result)
         {
             int keyLenHint = result.HasKey && !result.Key.IsEmpty ? CStrLenHint(result.Key, keyCap) : 0;
             int valLenHint = result.HasAnyValue && !result.Value.IsEmpty ? CStrLenHint(result.Value, valCap) : 0;
-            return (keyLenHint, valLenHint);
+            return new GetLenghtHintsResult(keyLenHint, valLenHint);
         }
 
         /// <summary>
@@ -207,7 +207,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// using the provided length hints.
         /// </para>
         /// </remarks>
-        private static (byte[]? keyRaw, byte[]? valRaw, string? keyUtf8, string? valUtf8) NormalizeMode(
+        private static NormalizeModeResult NormalizeMode(
             CellPayloadModeDTO mode,
             ReadCellUnsafeResult result,
             int keyLenHint,
@@ -230,7 +230,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
                 if (result.HasAnyValue && !result.Value.IsEmpty) valUtf8 = TryDecodePrintableUtf8(result.Value, valLenHint);
             }
 
-            return (keyRaw, valRaw, keyUtf8, valUtf8);
+            return new NormalizeModeResult(keyRaw, valRaw, keyUtf8, valUtf8);
         }
 
         /// <summary>
@@ -276,16 +276,15 @@ namespace Extend0.Metadata.CrossProcess.Internal
             }
             else
             {
-                if (cell.TryGetKey(out ReadOnlySpan<byte> k) && k.Length != 0)
+                if (cell.HasKeyRaw() && cell.TryGetKeyRaw(out ReadOnlySpan<byte> k))
                 {
                     hasKey = true;
                     key = k;
 
-                    // classic: value obtained using key
-                    if (cell.TryGetValue(k, out var v) && v.Length != 0)
+                    if (cell.TryGetValueRaw(out var v))
                     {
                         value = v;
-                        hasAnyValue = AnyNonZero(v); // optional signal
+                        hasAnyValue = AnyNonZero(v);
                     }
                 }
             }
@@ -407,7 +406,6 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// </summary>
         /// <param name="idx">Index instance.</param>
         /// <returns>DTO describing the index.</returns>
-
         internal static IndexInfoDTO ToIndexInfoDTO(ITableIndex idx) => new(
             Name: idx.Name,
             Kind: idx switch
@@ -417,7 +415,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
                 Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex => IndexKindDTO.BuiltIn_GlobalMultiTableKey,
                 _ => IndexKindDTO.Unknown
             },
-            IsRebuildable: idx is IRebuildableIndex,
+            IsRebuildable: idx is IRebuildableIndex || idx is ICrossTableRebuildableIndex,
             IsBuiltIn: IsBuiltIn(idx),
             Notes: null
         );
@@ -494,7 +492,6 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// <returns>
         /// The decoded string when valid printable UTF-8; otherwise <see langword="null"/> (binary/non-printable data).
         /// </returns>
-
         private static string? TryDecodePrintableUtf8(ReadOnlySpan<byte> data, int lenHint)
         {
             var slice = data[..Math.Clamp(lenHint, 0, data.Length)];
@@ -511,8 +508,6 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// </summary>
         /// <param name="dst">Destination pointer.</param>
         /// <param name="cap">Segment capacity in bytes.</param>
-        /// <param name="src">Source bytes.</param>
-
         internal static unsafe void WriteFixed(byte* dst, int cap, byte[] src)
         {
             var span = new Span<byte>(dst, cap);
@@ -528,7 +523,6 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// Raw bytes are preferred when <paramref name="mode"/> allows it; otherwise UTF-8 encoding is used.
         /// When room exists, a trailing <c>0</c> is written to preserve "C-string-like" semantics for textual keys.
         /// </remarks>
-
         internal static unsafe void WriteKeySegment(byte* keyPtr, int keyCap, byte[]? keyRaw, string? keyUtf8, CellPayloadModeDTO mode)
         {
             var seg = new Span<byte>(keyPtr, keyCap);
@@ -557,7 +551,6 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// Raw bytes are preferred when <paramref name="mode"/> allows it; otherwise UTF-8 encoding is used.
         /// When room exists, a trailing <c>0</c> is written to preserve "C-string-like" semantics for textual values.
         /// </remarks>
-
         internal static unsafe void WriteValueSegment(byte* valuePtr, int valCap, byte[]? valueRaw, string? valueUtf8, CellPayloadModeDTO mode)
         {
             var seg = new Span<byte>(valuePtr, valCap);
@@ -586,31 +579,6 @@ namespace Extend0.Metadata.CrossProcess.Internal
         {
             if (bytes <= 0) return;
             new Span<byte>(ptr, bytes).Clear();
-        }
-
-        /// <summary>
-        /// Builds an <c>HRESULT</c> that encodes both the failing RPC operation and a coarse error category.
-        /// </summary>
-        /// <param name="op">The RPC operation identifier.</param>
-        /// <param name="err">The coarse error classification.</param>
-        /// <returns>
-        /// A failing <c>HRESULT</c> with severity=1, facility=ITF (4), and a 16-bit code packing <paramref name="op"/> and <paramref name="err"/>.
-        /// </returns>
-        /// <remarks>
-        /// <para>
-        /// Encoding: Severity=1 (failure), Facility=ITF (4), Code = <c>(opLow8 &lt;&lt; 8) | err</c>.
-        /// This yields a stable, compact signal across IPC boundaries without exposing backend exception types.
-        /// </para>
-        /// <para>
-        /// Note: only the low 8 bits of <paramref name="op"/> are currently stored in the 16-bit code.
-        /// If you need to preserve the full 16-bit operation id, update this encoding and keep compatibility in mind.
-        /// </para>
-        /// </remarks>
-        internal static int MakeRpcHResult(RpcOp op, RpcErr err)
-        {
-            const int FACILITY_ITF = 4;
-            int code16 = ((int)op & 0xFF) << 8 | (int)err & 0xFF;
-            return unchecked(1 << 31 | FACILITY_ITF << 16 | code16 & 0xFFFF);
         }
 
         /// <summary>
@@ -667,7 +635,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
             catch (Exception ex)
             {
                 var err = ClassifyErr(ex);
-                ex.HResult = MakeRpcHResult(op, err);
+                ex.HResult = MetaDBHResult.MakeRpcHResult(op, err);
                 throw; // NO "throw ex;"
             }
         }
@@ -710,7 +678,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
             catch (Exception ex)
             {
                 var err = ClassifyErr(ex);
-                ex.HResult = MakeRpcHResult(op, err);
+                ex.HResult = MetaDBHResult.MakeRpcHResult(op, err);
                 throw;
             }
         }
@@ -740,7 +708,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
             catch (Exception ex)
             {
                 var err = ClassifyErr(ex);
-                ex.HResult = MakeRpcHResult(op, err);
+                ex.HResult = MetaDBHResult.MakeRpcHResult(op, err);
                 throw;
             }
         }
@@ -786,5 +754,8 @@ namespace Extend0.Metadata.CrossProcess.Internal
             /// </summary>
             public bool HasAnyValue = hasAnyValue;
         }
+
+        private readonly record struct NormalizeModeResult(byte[]? KeyRaw, byte[]? ValRaw, string? KeyUtf8, string? ValUtf8);
+        private readonly record struct GetLenghtHintsResult(int KeyLenHint, int ValLenHint);
     }
 }

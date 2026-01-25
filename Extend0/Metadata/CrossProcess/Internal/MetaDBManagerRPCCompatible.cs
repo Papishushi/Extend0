@@ -9,6 +9,8 @@ using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using Microsoft.Extensions.Logging;
 using System.Buffers;
+using System.Collections.Concurrent;
+using static Extend0.Metadata.CrossProcess.Internal.MetaDBManagerRPCCompatible;
 using static Extend0.Metadata.CrossProcess.Internal.MetaDBManagerRPCCompatibleHelpers;
 
 namespace Extend0.Metadata.CrossProcess.Internal
@@ -37,25 +39,20 @@ namespace Extend0.Metadata.CrossProcess.Internal
     /// lifecycle behavior, and centralized error handling in the in-proc manager.
     /// </para>
     /// </remarks>
-    internal class MetaDBManagerRPCCompatible(
-        /// <summary>
-        /// Logger used by the underlying <see cref="MetaDBManager"/> for structured logging and diagnostics.
-        /// </summary>
-        ILogger? logger,
-        /// <summary>
-        /// Optional table factory. When null, the underlying manager uses its default creation logic.
-        /// </summary>
-        Func<TableSpec?, IMetadataTable>? factory = null,
-        /// <summary>
-        /// Default capacity behavior when per-call policies are unspecified (<see cref="CapacityPolicy.None"/>).
-        /// </summary>
-        CapacityPolicy capacityPolicy = CapacityPolicy.Throw,
-        /// <summary>
-        /// Optional persisted delete queue path for the delete worker. When null, the default path is used.
-        /// </summary>
-        string? deleteQueuePath = null)
-        : CrossProcessServiceBase<IMetaDBManagerRPCCompatible>, IMetaDBManagerRPCCompatible
+    internal class MetaDBManagerRPCCompatible : CrossProcessServiceBase<IMetaDBManagerRPCCompatible>, IMetaDBManagerRPCCompatible
     {
+        private static long _nextId;
+        private readonly ConcurrentDictionary<long, CancellationTokenSource> _ctsByCallId = [];
+        private readonly ConcurrentDictionary<long, Task> _tasksByCallId = [];
+
+        private readonly TimeSpan _ttlAfterCancel = TimeSpan.FromMinutes(2);
+        private readonly TimeSpan _ttlAfterCompletion = TimeSpan.FromMinutes(2);
+        private readonly TimeSpan _ttlHardCap = TimeSpan.FromMinutes(30);
+
+        private readonly ConcurrentDictionary<long, long> _cleanupAtUtcTicks = [];
+        private readonly CancellationTokenSource _cleanupCts = new();
+        private Task _cleanupLoop;
+
         /// <summary>
         /// Named pipe identifier used by the cross-process host/client pair for MetaDB IPC.
         /// </summary>
@@ -72,12 +69,58 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// <summary>
         /// In-process manager that executes the actual MetaDB operations.
         /// </summary>
-        private readonly MetaDBManager _innerManager = new(logger, factory, capacityPolicy, deleteQueuePath);
+        private readonly MetaDBManager _innerManager;
 
         /// <summary>
         /// Indicates whether this instance has been disposed.
         /// </summary>
         private bool _disposed;
+
+        /// <summary>
+        /// Constructor
+        /// </summary>
+        /// <param name="logger">Logger used by the underlying <see cref="MetaDBManager"/> for structured logging and diagnostics.</param>
+        /// <param name="factory">Optional table factory. When null, the underlying manager uses its default creation logic.</param>
+        /// <param name="capacityPolicy">Default capacity behavior when per-call policies are unspecified (<see cref="CapacityPolicy.None"/>).</param>
+        /// <param name="deleteQueuePath">Optional persisted delete queue path for the delete worker. When null, the default path is used.</param>
+        public MetaDBManagerRPCCompatible(
+            ILogger? logger,
+            Func<TableSpec?, IMetadataTable>? factory = null,
+            CapacityPolicy capacityPolicy = CapacityPolicy.Throw,
+            string? deleteQueuePath = null)
+        {
+            _innerManager = new(logger, factory, capacityPolicy, deleteQueuePath);
+            _cleanupLoop = Task.Run(async () =>
+            {
+                var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+                try
+                {
+                    while (await timer.WaitForNextTickAsync(_cleanupCts.Token).ConfigureAwait(false))
+                    {
+                        var now = DateTime.UtcNow.Ticks;
+
+                        foreach (var kv in _cleanupAtUtcTicks)
+                        {
+                            if (now < kv.Value) continue;
+                            if (_cleanupAtUtcTicks.TryRemove(kv.Key, out _))
+                                CleanupCall(kv.Key);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    timer.Dispose();
+                }
+            });
+        }
+
+        private void MarkForCleanup(long callId, TimeSpan ttl)
+        {
+            var when = DateTime.UtcNow.Add(ttl).Ticks;
+            _cleanupAtUtcTicks.AddOrUpdate(callId, when,
+                (_, existing) => Math.Min(existing, when));
+        }
 
         /// <summary>
         /// Throws if this RPC-compatible facade (or its underlying in-proc manager) has already been disposed.
@@ -114,6 +157,91 @@ namespace Extend0.Metadata.CrossProcess.Internal
             if (innerDisposed) Dispose();
             ObjectDisposedException.ThrowIf(_disposed || innerDisposed, nameof(MetaDBManagerRPCCompatible));
         }
+
+        /// <summary>
+        /// Requests cancellation for all currently tracked in-flight calls started by this RPC-compatible facade,
+        /// and schedules each call for TTL-based cleanup.
+        /// </summary>
+        /// <returns>
+        /// A task that completes when cancellation has been requested for every call currently present in
+        /// <c>_ctsByCallId</c>.
+        /// </returns>
+        /// <exception cref="ObjectDisposedException">
+        /// Thrown if the facade (or its underlying manager) has been disposed.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// This is a best-effort broadcast cancel. Each call is associated with a
+        /// <see cref="CancellationTokenSource"/> stored in <c>_ctsByCallId</c>; this method iterates the map and
+        /// invokes <see cref="CancellationTokenSource.CancelAsync"/> for each entry, awaiting them via
+        /// <see cref="Task.WhenAll(System.Collections.Generic.IEnumerable{System.Threading.Tasks.Task})"/>.
+        /// </para>
+        /// <para>
+        /// TTL retention: after requesting cancellation, each call id is kept reachable for a limited time
+        /// (<c>_ttlAfterCancel</c>) so clients may still call <c>Await(callId)</c>. After the TTL expires, the call is
+        /// removed from the internal caches.
+        /// </para>
+        /// <para>
+        /// Cancellation is cooperative: the underlying operations must observe their cancellation tokens for the work to stop.
+        /// Even if cancellation is requested successfully, the in-flight tasks may still complete normally or fault depending
+        /// on where they are in their execution.
+        /// </para>
+        /// <para>
+        /// Snapshot note: enumerating <c>_ctsByCallId</c> is safe, but the set of calls may change concurrently.
+        /// Calls that start after enumeration begins may not be canceled by this invocation.
+        /// </para>
+        /// </remarks>
+        public Task CancelAll() => RpcAsync(RpcOp.Cancel_All, () =>
+        {
+            List<Task> tasks = [];
+
+            foreach (var kv in _ctsByCallId)
+            {
+                MarkForCleanup(kv.Key, _ttlAfterCancel);
+                tasks.Add(kv.Value.CancelAsync());
+            }
+
+            return Task.WhenAll(tasks);
+        }, ThrowIfDisposed);
+
+
+        /// <summary>
+        /// Requests cancellation for a single in-flight call identified by <paramref name="callId"/>,
+        /// and schedules it for TTL-based cleanup.
+        /// </summary>
+        /// <param name="callId">
+        /// The identifier of the call whose associated <see cref="CancellationTokenSource"/> should be canceled.
+        /// </param>
+        /// <returns>
+        /// A task that completes when cancellation has been requested for the specified call.
+        /// </returns>
+        /// <exception cref="ObjectDisposedException">
+        /// Thrown if the facade (or its underlying manager) has been disposed.
+        /// </exception>
+        /// <exception cref="RemoteInvocationException">
+        /// Thrown when <paramref name="callId"/> is unknown (not present in the call registry).
+        /// Uses <c>HResult = 404</c>.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// This is best-effort and cooperative: requesting cancellation does not guarantee immediate termination
+        /// of the underlying operation. The operation must observe its token for cancellation to take effect.
+        /// </para>
+        /// <para>
+        /// TTL retention: after requesting cancellation, the call id remains reachable for a limited time
+        /// (<c>_ttlAfterCancel</c>) so clients may still call <c>Await(callId)</c>. After the TTL expires, the call is
+        /// removed from the internal caches.
+        /// </para>
+        /// </remarks>
+        public Task CancelByCallId(long callId) => RpcAsync(RpcOp.Cancel_CallId, () =>
+        {
+            if (!_ctsByCallId.TryGetValue(callId, out var cts))
+                throw new RemoteInvocationException("Unknown callId") { HResult = 404 };
+
+            MarkForCleanup(callId, _ttlAfterCancel);
+            return cts.CancelAsync();
+        }, ThrowIfDisposed);
+
 
         // -----------------------------
         // Shared methods (RPC-wrapped)
@@ -177,19 +305,107 @@ namespace Extend0.Metadata.CrossProcess.Internal
             => RpcVoid(RpcOp.CloseAllStrict, _innerManager.CloseAllStrict, ThrowIfDisposed);
 
         /// <summary>
-        /// Rebuilds indexes for a single table.
+        /// Begins an index rebuild operation for a single table and returns a server-side call id that can be
+        /// awaited or cancelled later.
         /// </summary>
-        /// <param name="tableId">Table identifier.</param>
-        /// <param name="includeGlobal">Whether to rebuild the global key index.</param>
-        public void RebuildIndexes(Guid tableId, bool includeGlobal = true)
-            => RpcVoid(RpcOp.RebuildIndexes, () => _innerManager.RebuildIndexes(tableId, includeGlobal), ThrowIfDisposed);
+        /// <param name="tableId">Target table identifier.</param>
+        /// <param name="strict">
+        /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants required by the
+        /// underlying table/index implementations. When <see langword="false"/>, the rebuild may be best-effort.
+        /// </param>
+        /// <returns>
+        /// A unique call identifier for the scheduled rebuild. Use <see cref="Await(long)"/> to wait for completion,
+        /// and <c>CancelByCallId(callId)</c> (or <c>CancelAll()</c>) to request cancellation.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method follows a BEGIN/AWAIT pattern to remain RPC-safe: the long-running work is started on the
+        /// server, and only the opaque <c>callId</c> crosses the process boundary (no <see cref="Task"/> instances
+        /// are returned over the transport).
+        /// </para>
+        /// <para>
+        /// The server tracks the operation via internal dictionaries:
+        /// a <see cref="CancellationTokenSource"/> keyed by <c>callId</c> for cancellation, and a <see cref="Task"/>
+        /// keyed by <c>callId</c> for completion.
+        /// </para>
+        /// <para>
+        /// Cleanup is automatic: when the underlying task completes (success/failure/cancellation), the entry is
+        /// removed from the tracking dictionaries and the associated <see cref="CancellationTokenSource"/> is disposed.
+        /// </para>
+        /// <para>
+        /// Call id generation is monotonic (<see cref="Interlocked.Increment(ref long)"/>). Collisions are not expected;
+        /// if an unexpected collision occurs, an <see cref="InvalidOperationException"/> is thrown.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">Thrown when the service has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">Thrown on an unexpected call id collision.</exception>
+        public long RebuildIndexesBegin(Guid tableId, bool strict = true)
+        {
+            ThrowIfDisposed();
+
+            var callId = Interlocked.Increment(ref _nextId);
+            var cts = new CancellationTokenSource();
+
+            AddCTSAndCheckCallIdCollision(callId, cts);
+
+            var task = RpcAsync(
+                RpcOp.RebuildIndexes,
+                () => _innerManager.RebuildIndexes(tableId, strict, cts.Token),
+                ThrowIfDisposed);
+
+            AddTaskAndCheckCallIdCollision(callId, task);
+
+            MarkForCleanup(callId, _ttlHardCap);
+            _ = task.ContinueWith(_ => MarkForCleanup(callId, _ttlAfterCompletion), TaskScheduler.Default);
+
+            return callId;
+        }
 
         /// <summary>
-        /// Rebuilds indexes for all managed tables.
+        /// Begins an index rebuild operation for all currently materialized tables and returns a server-side call id
+        /// that can be awaited or cancelled later.
         /// </summary>
-        /// <param name="includeGlobal">Whether to rebuild the global key index.</param>
-        public void RebuildAllIndexes(bool includeGlobal = true)
-            => RpcVoid(RpcOp.RebuildAllIndexes, () => _innerManager.RebuildAllIndexes(includeGlobal), ThrowIfDisposed);
+        /// <param name="strict">
+        /// When <see langword="true"/>, the rebuild runs in strict mode and enforces the invariants required by the
+        /// underlying table/index implementations. When <see langword="false"/>, the rebuild may be best-effort.
+        /// </param>
+        /// <returns>
+        /// A unique call identifier for the scheduled rebuild. Use <see cref="Await(long)"/> to wait for completion,
+        /// and <c>CancelByCallId(callId)</c> (or <c>CancelAll()</c>) to request cancellation.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method follows a BEGIN/AWAIT pattern to remain RPC-safe: the long-running work is started on the
+        /// server, and only the opaque <c>callId</c> crosses the process boundary.
+        /// </para>
+        /// <para>
+        /// Cleanup is automatic: when the underlying task completes (success/failure/cancellation), the entry is
+        /// removed from the tracking dictionaries and the associated <see cref="CancellationTokenSource"/> is disposed.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">Thrown when the service has been disposed.</exception>
+        /// <exception cref="InvalidOperationException">Thrown on an unexpected call id collision.</exception>
+        public long RebuildAllIndexesBegin(bool strict = true)
+        {
+            ThrowIfDisposed();
+
+            var callId = Interlocked.Increment(ref _nextId);
+            var cts = new CancellationTokenSource();
+
+            AddCTSAndCheckCallIdCollision(callId, cts);
+
+            var task = RpcAsync(
+                RpcOp.RebuildAllIndexes,
+                () => _innerManager.RebuildAllIndexes(strict, cts.Token),
+                ThrowIfDisposed);
+
+            AddTaskAndCheckCallIdCollision(callId, task);
+
+            MarkForCleanup(callId, _ttlHardCap);
+            _ = task.ContinueWith(_ => MarkForCleanup(callId, _ttlAfterCompletion), TaskScheduler.Default);
+
+            return callId;
+        }
 
         /// <summary>
         /// Restarts the background delete worker responsible for deleting queued table files.
@@ -1041,7 +1257,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
 
                     return new(
                         IndexLookupStatusDTO.Ok,
-                        new IndexHitDTO(true, hit.col, hit.row, t.Spec.Name)
+                        new IndexHitDTO(true, hit.Col, hit.Row, t.Spec.Name)
                     );
                 });
             }, ThrowIfDisposed);
@@ -1100,21 +1316,261 @@ namespace Extend0.Metadata.CrossProcess.Internal
                 );
             }, ThrowIfDisposed);
 
+        /// <summary>
+        /// Awaits completion of a previously started BEGIN operation identified by <paramref name="callId"/>.
+        /// </summary>
+        /// <param name="callId">
+        /// The call identifier returned by a BEGIN method (e.g. <see cref="RebuildIndexesBegin(Guid, bool)"/> or
+        /// <see cref="RebuildAllIndexesBegin(bool)"/>).
+        /// </param>
+        /// <returns>
+        /// A task that completes when the tracked operation completes. If the underlying operation faults, the returned
+        /// task faults with the same exception; if it is cancelled, the returned task transitions to the cancelled state.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method is the AWAIT half of the BEGIN/AWAIT pattern. It does not start any work; it only returns the
+        /// server-tracked task corresponding to the given <paramref name="callId"/>.
+        /// </para>
+        /// <para>
+        /// If the call id is unknown (never existed, already completed and cleaned up, or belongs to a different server
+        /// instance), a <see cref="RemoteInvocationException"/> with <c>HResult = 404</c> is thrown.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ObjectDisposedException">Thrown when the service has been disposed.</exception>
+        /// <exception cref="RemoteInvocationException">Thrown when the call id is not recognized.</exception>
+        public Task Await(long callId)
+        {
+            ThrowIfDisposed();
+
+            if (!_tasksByCallId.TryGetValue(callId, out var task))
+                throw new RemoteInvocationException("Unknown callId") { HResult = 404 };
+
+            return task;
+        }
+
+        /// <summary>
+        /// Awaits completion of a previously started asynchronous RPC call identified by <paramref name="callId"/>
+        /// and returns its typed result.
+        /// </summary>
+        /// <typeparam name="T">
+        /// The expected result type produced by the pending call. This must match the actual generic result type
+        /// of the task that was registered for <paramref name="callId"/>.
+        /// </typeparam>
+        /// <param name="callId">
+        /// The identifier previously returned by a corresponding <c>*Begin</c> method.
+        /// </param>
+        /// <returns>
+        /// A task that completes when the underlying call finishes and yields its result.
+        /// </returns>
+        /// <exception cref="ObjectDisposedException">
+        /// Thrown if this service instance has been disposed.
+        /// </exception>
+        /// <exception cref="RemoteInvocationException">
+        /// Thrown when <paramref name="callId"/> is not recognized. In that case <see cref="Exception.HResult"/> is set to 404.
+        /// </exception>
+        /// <exception cref="InvalidCastException">
+        /// Thrown when the call exists but was registered as a non-generic task or with a different result type than <typeparamref name="T"/>.
+        /// </exception>
+        /// <exception cref="OperationCanceledException">
+        /// Thrown if the underlying operation was canceled (for example via <c>CancelAll</c> / <c>CancelByCallId</c> or disposal).
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// This method only waits for a call that is already in flight. It does not initiate any new work.
+        /// </para>
+        /// <para>
+        /// The task associated with <paramref name="callId"/> is stored as <see cref="Task"/> and cast back to <see cref="Task{TResult}"/>
+        /// here. If you need stronger type safety, store typed tasks separately or track the expected result type per call id.
+        /// </para>
+        /// </remarks>
+        public async Task<T> Await<T>(long callId)
+        {
+            ThrowIfDisposed();
+
+            if (!_tasksByCallId.TryGetValue(callId, out var task))
+                throw new RemoteInvocationException("Unknown callId") { HResult = 404 };
+
+            return await ((Task<T>)task).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public long TryCompactTableBegin(Guid tableId, bool strict)
+        {
+            ThrowIfDisposed();
+
+            var callId = Interlocked.Increment(ref _nextId);
+            var cts = new CancellationTokenSource();
+
+            AddCTSAndCheckCallIdCollision(callId, cts);
+
+            var task = RpcAsync(
+                RpcOp.TryCompact_Table,
+                () => _innerManager.TryCompactTable(tableId, strict, cts.Token),
+                ThrowIfDisposed);
+
+            AddTaskAndCheckCallIdCollision(callId, task);
+
+            MarkForCleanup(callId, _ttlHardCap);
+            _ = task.ContinueWith(_ => MarkForCleanup(callId, _ttlAfterCompletion), TaskScheduler.Default);
+            return callId;
+        }
+
+        /// <inheritdoc/>
+        public long TryCompactAllTablesBegin(bool strict)
+        {
+            ThrowIfDisposed();
+
+            var callId = Interlocked.Increment(ref _nextId);
+            var cts = new CancellationTokenSource();
+
+            AddCTSAndCheckCallIdCollision(callId, cts);
+
+            var task = RpcAsync(
+                RpcOp.TryCompact_AllTables,
+                () => _innerManager.TryCompactAllTables(strict, cts.Token),
+                ThrowIfDisposed);
+
+            AddTaskAndCheckCallIdCollision(callId, task);
+
+            MarkForCleanup(callId, _ttlHardCap);
+            _ = task.ContinueWith(_ => MarkForCleanup(callId, _ttlAfterCompletion), TaskScheduler.Default);
+            return callId;
+        }
+
+        /// <summary>
+        /// Registers a per-call <see cref="CancellationTokenSource"/> in <see cref="_ctsByCallId"/> and throws if the
+        /// <paramref name="callId"/> already exists.
+        /// </summary>
+        /// <param name="callId">
+        /// Unique identifier for an in-flight asynchronous RPC call. Must be unique within this service instance.
+        /// </param>
+        /// <param name="cts">
+        /// The cancellation token source that will be used to signal cancellation for the call identified by
+        /// <paramref name="callId"/>.
+        /// </param>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when <paramref name="callId"/> collides with an existing entry in <see cref="_ctsByCallId"/>.
+        /// This indicates a duplicate id generation or a logic bug in call registration.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// On collision, this method disposes <paramref name="cts"/> before throwing to avoid leaking OS resources.
+        /// </para>
+        /// <para>
+        /// Typical usage is in a “Begin” method: generate a new call id, allocate a new <see cref="CancellationTokenSource"/>,
+        /// then call this helper before starting and registering the associated <see cref="Task"/>.
+        /// </para>
+        /// </remarks>
+        private void AddCTSAndCheckCallIdCollision(long callId, CancellationTokenSource cts)
+        {
+            if (_ctsByCallId.TryAdd(callId, cts)) return;
+            cts.Dispose();
+            throw new InvalidOperationException("callId collision (unlikely).");
+        }
+
+        /// <summary>
+        /// Registers an in-flight call <see cref="Task"/> in <see cref="_tasksByCallId"/> and throws if the
+        /// <paramref name="callId"/> already exists.
+        /// </summary>
+        /// <param name="callId">
+        /// Unique identifier for an in-flight asynchronous RPC call. Must match the id used to register the call’s
+        /// <see cref="CancellationTokenSource"/>.
+        /// </param>
+        /// <param name="task">
+        /// The task representing the call’s asynchronous work. This task is returned to callers through an
+        /// “Await”-style API.
+        /// </param>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when <paramref name="callId"/> collides with an existing entry in <see cref="_tasksByCallId"/>.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// If registering the task fails, this method performs a best-effort rollback by removing and disposing the
+        /// associated <see cref="CancellationTokenSource"/> from <see cref="_ctsByCallId"/> (if present), since the call
+        /// cannot be awaited reliably without a task entry.
+        /// </para>
+        /// <para>
+        /// This helper is intended to be used immediately after starting the RPC operation (creating the task),
+        /// and after successfully registering the corresponding cancellation source.
+        /// </para>
+        /// </remarks>
+        private void AddTaskAndCheckCallIdCollision(long callId, Task task)
+        {
+            if (_tasksByCallId.TryAdd(callId, task)) return;
+
+            _ctsByCallId.TryRemove(callId, out var removedCts);
+            removedCts?.Dispose();
+
+            throw new InvalidOperationException("callId collision (tasks map).");
+        }
+
+        /// <summary>
+        /// Removes all state associated with a call id and disposes its cancellation resources.
+        /// </summary>
+        /// <param name="callId">
+        /// The call identifier previously returned by a “Begin” method.
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// This method is idempotent and may be safely invoked multiple times for the same <paramref name="callId"/>.
+        /// </para>
+        /// <para>
+        /// It removes the call’s task from <see cref="_tasksByCallId"/> (if present) and removes and disposes the
+        /// corresponding <see cref="CancellationTokenSource"/> from <see cref="_ctsByCallId"/> (if present).
+        /// </para>
+        /// <para>
+        /// Typical usage is wiring this helper to the task’s completion continuation to ensure resources are reclaimed
+        /// regardless of success, failure, or cancellation.
+        /// </para>
+        /// </remarks>
+        private void CleanupCall(long callId)
+        {
+            _tasksByCallId.TryRemove(callId, out _);
+
+            if (_ctsByCallId.TryRemove(callId, out var cts))
+                cts.Dispose();
+
+            _cleanupAtUtcTicks.TryRemove(callId, out _);
+        }
+
         // -----------------------------
         // Dispose
         // -----------------------------
 
         /// <summary>
         /// Disposes this wrapper and the underlying <see cref="MetaDBManager"/>.
+        /// Cleans up all in-flight call cancellation resources.
         /// </summary>
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
 
-            try { _innerManager.Dispose(); }
-            finally { GC.SuppressFinalize(this); }
+            try
+            {
+                try { _cleanupCts.Cancel(); } catch { /* best-effort */ }
+                try { _cleanupLoop?.GetAwaiter().GetResult(); } catch { /* best-effort */ }
+
+                foreach (var kv in _ctsByCallId)
+                    if (_ctsByCallId.TryRemove(kv.Key, out var cts))
+                    {
+                        try { cts.Cancel(); } catch { /* best-effort */ }
+                        cts.Dispose();
+                    }
+
+                _tasksByCallId.Clear();
+                _cleanupAtUtcTicks.Clear();
+
+                _innerManager.Dispose();
+            }
+            finally
+            {
+                _cleanupCts.Dispose();
+                GC.SuppressFinalize(this);
+            }
         }
+
 
         /// <summary>
         /// Asynchronously disposes this wrapper and the underlying <see cref="MetaDBManager"/>.
@@ -1124,8 +1580,28 @@ namespace Extend0.Metadata.CrossProcess.Internal
             if (_disposed) return;
             _disposed = true;
 
-            try { await _innerManager.DisposeAsync().ConfigureAwait(false); }
-            finally { GC.SuppressFinalize(this); }
+            try 
+            {
+                try { _cleanupCts.Cancel(); } catch { }
+                try { if (_cleanupLoop is not null) await _cleanupLoop.ConfigureAwait(false); } catch { }
+
+                foreach (var kv in _ctsByCallId)
+                    if (_ctsByCallId.TryRemove(kv.Key, out var cts))
+                    {
+                        try { cts.Cancel(); } catch { /* best-effort */ }
+                        cts.Dispose();
+                    }
+
+                _tasksByCallId.Clear();
+                _cleanupAtUtcTicks.Clear();
+
+                await _innerManager.DisposeAsync().ConfigureAwait(false);
+            }
+            finally 
+            {
+                _cleanupCts.Dispose();
+                GC.SuppressFinalize(this); 
+            }
         }
     }
 }
