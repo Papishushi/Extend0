@@ -8,6 +8,7 @@ using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using Extend0.Metadata.Storage.Contract;
 using Extend0.Metadata.Storage.Internal;
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -45,8 +46,6 @@ namespace Extend0.Metadata.Internal
     /// </remarks>
     internal sealed class MetadataTable : IMetadataTable
     {
-        private static readonly UTF8Encoding s_Utf8Strict = new(false, true);
-
         private readonly List<ColumnConfiguration> _columns = [];
         // Schema-level lookup (not a rebuildable table index). Built once from TableSpec.Columns.
         private readonly FrozenDictionary<string, uint> _colIndexByName;
@@ -184,102 +183,122 @@ namespace Extend0.Metadata.Internal
         }
 
         /// <summary>
-        /// Rebuilds all registered rebuildable indexes for this table by scanning the underlying storage.
+        /// Rebuilds index state for this table by clearing all registered indexes and invoking rebuild on those that support it.
         /// </summary>
         /// <param name="strict">
-        /// When <see langword="true"/>, the method enforces strict rebuild rules:
+        /// When <see langword="true"/>, the method enforces stricter validation:
         /// <list type="bullet">
         ///   <item>
         ///     <description>
-        ///     Any index registered in <see cref="Indexes"/> that does not implement
-        ///     <see cref="IRebuildableIndex"/> causes an exception.
+        ///     Every index returned by <see cref="Indexes"/> must implement <see cref="IRebuildableIndex"/>; otherwise an
+        ///     <see cref="InvalidOperationException"/> is thrown before rebuild starts.
         ///     </description>
         ///   </item>
         ///   <item>
         ///     <description>
-        ///     Any enumerated cell that belongs to a key/value column and does not expose a non-empty key
-        ///     causes an exception.
+        ///     The cell scan validates that entries returned by <see cref="EnumerateCells"/> for key/value columns expose a non-empty key.
+        ///     Violations are collected and reported as an <see cref="AggregateException"/> after the scan completes.
+        ///     Value-only columns (<c>KeySize == 0</c>) are exempt.
         ///     </description>
         ///   </item>
         /// </list>
-        /// When <see langword="false"/>, non-rebuildable indexes are ignored and keyless cells are skipped.
+        /// When <see langword="false"/>, non-rebuildable indexes are ignored and key validation is skipped.
         /// </param>
+        /// <param name="cancellationToken">Token used to cancel scanning and rebuild work.</param>
+        /// <returns>A task that completes when all applicable indexes have finished rebuilding.</returns>
         /// <remarks>
         /// <para>
-        /// Indexes are treated as ephemeral caches. The method starts by clearing all current index state via
-        /// <see cref="TableIndexesRegistry.ClearAll"/> and then repopulates indexes from the table storage.
+        /// Indexes are treated as ephemeral caches. The method first clears current index state via
+        /// <see cref="TableIndexesRegistry.ClearAll"/> and then rebuilds indexes implementing <see cref="IRebuildableIndex"/>.
         /// </para>
         /// <para>
-        /// Rebuild flow:
+        /// Concurrency: rebuild is executed in parallel using
+        /// <see cref="Parallel.ForEachAsync(IEnumerable{TSource}, CancellationToken, Func{TSource, CancellationToken, ValueTask})"/>.
+        /// Multiple indexes may rebuild simultaneously; each index implementation must be thread-safe with respect to its own state.
         /// </para>
-        /// <list type="number">
-        ///   <item>
-        ///     <description>
-        ///     <b>Optional strict validation</b>: when <paramref name="strict"/> is enabled, the table is scanned
-        ///     and every cell in a key/value column must expose a non-empty key.
-        ///     </description>
-        ///   </item>
-        ///   <item>
-        ///     <description>
-        ///     <b>Index rebuild</b>: all indexes in <see cref="Indexes"/> that implement
-        ///     <see cref="IRebuildableIndex"/> are rebuilt by calling
-        ///     <see cref="IRebuildableIndex.Rebuild(IMetadataTable)"/>.
-        ///     </description>
-        ///   </item>
-        /// </list>
         /// <para>
-        /// Key semantics:
+        /// Exceptions thrown by individual <see cref="IRebuildableIndex.Rebuild"/> calls propagate from the parallel loop.
+        /// In addition, in strict mode, collected validation errors are thrown as an <see cref="AggregateException"/> at the end.
         /// </para>
-        /// <list type="bullet">
-        ///   <item>
-        ///     <description>
-        ///     Value-only columns (<c>KeySize == 0</c>) do not produce keys and are always allowed to be keyless.
-        ///     They are ignored by key-based indexes.
-        ///     </description>
-        ///   </item>
-        ///   <item>
-        ///     <description>
-        ///     In strict mode, only key/value columns are validated; value-only columns are explicitly exempt.
-        ///     </description>
-        ///   </item>
-        /// </list>
         /// <para>
-        /// Concurrency: this method does not take a global table lock. Individual indexes are expected to handle
-        /// their own synchronization (e.g., reader/writer locks) during rebuild.
+        /// Note: compaction/remapping operations may invalidate previously obtained spans/pointers into the store. Do not hold
+        /// unmanaged views across calls that may rebuild indexes or otherwise mutate/remap the underlying storage.
         /// </para>
         /// </remarks>
+        /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
         /// <exception cref="InvalidOperationException">
-        /// Thrown when <paramref name="strict"/> is <see langword="true"/> and either:
-        /// <list type="bullet">
-        ///   <item><description>An index in <see cref="Indexes"/> is not rebuildable.</description></item>
-        ///   <item><description>A scanned cell in a key/value column does not expose a non-empty key.</description></item>
-        /// </list>
+        /// Thrown when <paramref name="strict"/> is <see langword="true"/> and an index in <see cref="Indexes"/> does not implement
+        /// <see cref="IRebuildableIndex"/>.
         /// </exception>
-        public void RebuildIndexes(bool strict = false)
+        /// <exception cref="AggregateException">
+        /// Thrown when <paramref name="strict"/> is <see langword="true"/> and one or more validation or rebuild errors are accumulated.
+        /// </exception>
+        public async Task RebuildIndexes(bool strict = false, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Clear everything (ephemeral by design)
             Indexes.ClearAll();
 
+            ConcurrentQueue<InvalidOperationException>? errors = null;
+
             if (strict)
             {
-                foreach (var entry in EnumerateCells())
+                // 1) Strict rule: all indexes must be rebuildable
+                foreach (var idx in Indexes.Enumerate())
+                    if (idx is not IRebuildableIndex)
+                        throw new InvalidOperationException($"Index '{idx.Name}' is not rebuildable.");
+
+                // 2) Strict rule: any CREATED cell in a key/value column must have a key
+                await foreach (var entry in EnumerateCells().AsAsync().WithCancellation(cancellationToken))
                 {
-                    // Value-only columns are allowed to have no key
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     var meta = _columns[(int)entry.Col];
                     if (meta.Size.GetKeySize() == 0)
-                        continue;
+                        continue; // value-only exempt
 
-                    if (!entry.Cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
-                        throw new InvalidOperationException($"Cell at ({entry.Col}, {entry.Row}) has no key.");
+                    if (!entry.Cell.HasKeyRaw())
+                    {
+                        // It's empty, nothing to index. This assumes the store is zero-init or has been byte marked and processed by the user.
+                        // If a legitimate value to index is an all-zero value, then this will fail to find the value as it will be treated as ASCII NULL \0
+                        if (!entry.Cell.HasAnyValueRaw()) continue;
+                        errors ??= [];
+                        errors.Enqueue(new InvalidOperationException(
+                            $"Cell at ({entry.Col}, {entry.Row}) is created but has no key. KeySize={meta.Size.GetKeySize()}, ValueSize={meta.Size.GetValueSize()}"));
+                    }
                 }
             }
 
             // Rebuild all indexes that know how to rebuild
-            foreach (var idx in Indexes.Enumerate())
-            {
-                if (idx is IRebuildableIndex r) r.Rebuild(this);
-                else if (strict) throw new InvalidOperationException($"Index '{idx.Name}' is not rebuildable.");
-            }
+            await Parallel.ForEachAsync(
+                Indexes.Enumerate(),
+                cancellationToken,
+                async (idx, ct) =>
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    // In strict mode we already validated rebuildability above,
+                    // but keep it safe for non-strict mode.
+                    if (idx is IRebuildableIndex r)
+                        try { await r.Rebuild(this).ConfigureAwait(false); }
+                        catch (Exception ex)
+                        {
+                            if (strict)
+                            {
+                                errors ??= [];
+                                errors.Enqueue(new InvalidOperationException($"Index '{idx.Name}' rebuild failed.", ex));
+                            }
+                        }
+                    else if (strict)
+                    {
+                        errors ??= [];
+                        errors.Enqueue(new InvalidOperationException($"Index '{idx.Name}' does not support cross-table rebuilds."));
+                    }
+                });
+
+            if (errors is not null)
+                throw new AggregateException("Errors occurred during index rebuild.", errors);
         }
 
         /// <summary>
@@ -494,12 +513,12 @@ namespace Extend0.Metadata.Internal
         /// even if the key exists in the underlying storage.
         /// </para>
         /// </remarks>
-        public bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out (uint col, uint row) hit)
+        public bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out TryFindGlobalHit hit)
         {
             var _globalKeyIndex = GetOrCreateGlobalKeyIndex();
             if (_globalKeyIndex.TryGetHit(keyUtf8: keyUtf8, out var resultHit))
             {
-                hit = (resultHit.Col, resultHit.Row);
+                hit = new(resultHit.Col, resultHit.Row);
                 return true;
             }
             hit = default;
@@ -531,12 +550,12 @@ namespace Extend0.Metadata.Internal
         /// even if the key exists in the underlying storage.
         /// </para>
         /// </remarks>
-        public bool TryFindGlobal(byte[] keyUtf8, out (uint col, uint row) hit)
+        public bool TryFindGlobal(byte[] keyUtf8, out TryFindGlobalHit hit)
         {
             var _globalKeyIndex = GetOrCreateGlobalKeyIndex();
             if (_globalKeyIndex.TryGetHit(key: keyUtf8, out var resultHit))
             {
-                hit = (resultHit.Col, resultHit.Row);
+                hit = new(resultHit.Col, resultHit.Row);
                 return true;
             }
             hit = default;
@@ -784,7 +803,7 @@ namespace Extend0.Metadata.Internal
                 else
                 {
                     // KEY-VALUE: non-empty if key is non-empty
-                    if (cell.TryGetKey(out ReadOnlySpan<byte> k) && k.Length != 0)
+                    if (cell.HasKeyRaw() && cell.TryGetKeyRaw(out ReadOnlySpan<byte> k))
                         return true;
                 }
             }
@@ -798,6 +817,7 @@ namespace Extend0.Metadata.Internal
         /// <returns>
         /// An enumerable sequence of column names in their declared order.
         /// </returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IEnumerable<string> GetColumnNames()
         {
             foreach (var m in _columns) yield return m.Name;
@@ -815,6 +835,7 @@ namespace Extend0.Metadata.Internal
         /// The enumeration walks the underlying <see cref="ICellStore"/> in an implementation-defined
         /// order, typically column by column and row by row. Cells may be materialized lazily.
         /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public CellEnumerable EnumerateCells() => _store.EnumerateCells();
 
         /// <summary>
@@ -824,6 +845,7 @@ namespace Extend0.Metadata.Internal
         /// <returns>
         /// A human-readable preview of the table, showing column headers and sampled rows.
         /// </returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override string ToString() => ToString(byte.MaxValue);
 
         /// <summary>
@@ -869,22 +891,22 @@ namespace Extend0.Metadata.Internal
             sb.Append("MetadataTable { Columns=").Append(_columns.Count)
               .Append(", Rows≈").Append(totalRows).AppendLine(" }");
 
-            sb.Append(Border(colCountUnsigned, widths));
-            sb.Append("| ").Append(Pad("Row", widths[0])).Append(' ');
+            sb.Append(MetadataTableHelpers.Border(colCountUnsigned, widths));
+            sb.Append("| ").Append(MetadataTableHelpers.Pad("Row", widths[0])).Append(' ');
             for (int c = 0; c < colCount; c++)
-                sb.Append("| ").Append(Pad(_columns[c].Name, widths[c + 1])).Append(' ');
+                sb.Append("| ").Append(MetadataTableHelpers.Pad(_columns[c].Name, widths[c + 1])).Append(' ');
             sb.Append("|\n");
-            sb.Append(Border(colCountUnsigned, widths));
+            sb.Append(MetadataTableHelpers.Border(colCountUnsigned, widths));
 
             // Rows
             WriteRows(sb, colCountUnsigned, rowsToShow, widths);
 
             if (rowsToShow < totalRows)
             {
-                sb.Append(Border(colCountUnsigned, widths));
+                sb.Append(MetadataTableHelpers.Border(colCountUnsigned, widths));
                 sb.Append("… ").Append(totalRows - rowsToShow).Append(" more rows\n");
             }
-            sb.Append(Border(colCountUnsigned, widths));
+            sb.Append(MetadataTableHelpers.Border(colCountUnsigned, widths));
 
             return sb.ToString();
         }
@@ -904,7 +926,7 @@ namespace Extend0.Metadata.Internal
         {
             for (uint r = 0; r < rowsToShow; r++)
             {
-                sb.Append("| ").Append(Pad(r.ToString(), widths[0])).Append(' ');
+                sb.Append("| ").Append(MetadataTableHelpers.Pad(r.ToString(), widths[0])).Append(' ');
                 for (uint c = 0; c < colCount; c++)
                 {
                     string cellText = "";
@@ -913,37 +935,19 @@ namespace Extend0.Metadata.Internal
                     {
                         var meta = _columns[(int)c];
                         int keySize = meta.Size.GetKeySize();
-                        int valueSize = meta.Size.GetValueSize();
 
                         ReadOnlySpan<byte> v = default;
 
-                        if (keySize == 0)
-                        {
-                            // VALUE-ONLY: leer directamente el segmento de valor
-                            var raw = new ReadOnlySpan<byte>(cell.GetValuePointer(), valueSize);
-
-                            bool allZero = true;
-                            foreach (var b in raw)
-                            {
-                                if (b != 0) { allZero = false; break; }
-                            }
-
-                            if (!allZero)
-                                v = raw;
-                        }
-                        else if (cell.TryGetKey(out ReadOnlySpan<byte> k) &&
-                                 cell.TryGetValue(k, out ReadOnlySpan<byte> vv))
-                        {
-                            // KEY-VALUE: camino clásico
-                            v = vv;
-                        }
+                        if (keySize == 0 && cell.HasAnyValueRaw())   // VALUE-ONLY
+                            v = cell.GetValueRaw();
+                        else if (cell.HasAnyValueRaw() && cell.TryGetValueRaw(out ReadOnlySpan<byte> raw))   // KEY-VALUE
+                            v = raw;
 
                         if (!v.IsEmpty)
-                            // Usar ancho final de columna para el preview
-                            cellText = Preview(v, widths[c + 1]);
+                            cellText = MetadataTableHelpers.Preview(v, widths[c + 1]);
                     }
 
-                    sb.Append("| ").Append(Pad(cellText, widths[c + 1])).Append(' ');
+                    sb.Append("| ").Append(MetadataTableHelpers.Pad(cellText, widths[c + 1])).Append(' ');
                 }
                 sb.Append("|\n");
             }
@@ -974,205 +978,21 @@ namespace Extend0.Metadata.Internal
 
                     var meta = _columns[(int)c];
                     int keySize = meta.Size.GetKeySize();
-                    int valueSize = meta.Size.GetValueSize();
 
                     ReadOnlySpan<byte> v = default;
 
-                    if (keySize == 0)
-                    {
-                        // VALUE-ONLY: leer directamente el segmento de valor
-                        var raw = new ReadOnlySpan<byte>(cell.GetValuePointer(), valueSize);
-
-                        bool allZero = true;
-                        foreach (var b in raw)
-                        {
-                            if (b != 0) { allZero = false; break; }
-                        }
-
-                        if (!allZero)
-                            v = raw;
-                    }
-                    else if (cell.TryGetKey(out ReadOnlySpan<byte> k) &&
-                             cell.TryGetValue(k, out ReadOnlySpan<byte> vv))
-                    {
-                        // KEY-VALUE
-                        v = vv;
-                    }
+                    if (keySize == 0 && cell.HasAnyValueRaw())  // VALUE-ONLY
+                        v = cell.GetValueRaw();
+                    else if (cell.HasAnyValueRaw() && cell.TryGetValueRaw(out ReadOnlySpan<byte> raw))   // KEY-VALUE
+                        v = raw;
 
                     if (!v.IsEmpty)
                     {
-                        var prev = Preview(v, MAX_COL_WIDTH);
+                        var prev = MetadataTableHelpers.Preview(v, MAX_COL_WIDTH);
                         widths[c + 1] = Math.Min(MAX_COL_WIDTH, Math.Max(widths[c + 1], prev.Length));
                     }
                 }
             }
-        }
-
-        /// <summary>
-        /// Produces a short textual preview for a VALUE payload given the maximum width.
-        /// </summary>
-        /// <param name="v">The raw VALUE bytes to render.</param>
-        /// <param name="maxChars">Maximum number of characters to include in the preview.</param>
-        /// <returns>
-        /// An empty string when <paramref name="v"/> is empty; otherwise a UTF-8 or hexadecimal
-        /// preview string truncated with an ellipsis if necessary.
-        /// </returns>
-        /// <remarks>
-        /// Delegates to <see cref="Utf8Preview(ReadOnlySpan{byte}, int)"/> which prefers UTF-8 decoding
-        /// when the bytes form a printable string, or to a hexadecimal preview otherwise.
-        /// </remarks>
-        private static string Preview(ReadOnlySpan<byte> v, int maxChars) => v.Length == 0 ? "" : Utf8Preview(v, maxChars);
-
-        /// <summary>
-        /// Attempts to render the given VALUE bytes as a printable UTF-8 string, falling back
-        /// to a hexadecimal preview when decoding fails or produces non-printable characters.
-        /// </summary>
-        /// <param name="v">The raw VALUE bytes to render.</param>
-        /// <param name="maxChars">Maximum number of characters allowed in the resulting string.</param>
-        /// <returns>
-        /// A UTF-8 decoded preview string (possibly truncated with an ellipsis) when the data is
-        /// printable, or a hexadecimal preview produced by <see cref="HexPreview(ReadOnlySpan{byte}, int)"/>
-        /// otherwise.
-        /// </returns>
-        private static string Utf8Preview(ReadOnlySpan<byte> v, int maxChars)
-        {
-            if (!TryDecodePrintableUtf8(v, out var s)) return HexPreview(v, maxChars);
-            return SafeEllipsis(s, maxChars);
-        }
-
-        /// <summary>
-        /// Renders VALUE bytes as an uppercase hexadecimal string, truncated with an ellipsis if needed.
-        /// </summary>
-        /// <param name="v">The raw VALUE bytes to render.</param>
-        /// <param name="maxChars">
-        /// Maximum number of characters in the output, including the ellipsis character if truncation occurs.
-        /// </param>
-        /// <returns>
-        /// A hexadecimal representation of <paramref name="v"/>. If the full representation would exceed
-        /// <paramref name="maxChars"/>, the output is truncated to fit and suffixed with <c>'…'</c>.
-        /// </returns>
-        private static string HexPreview(ReadOnlySpan<byte> v, int maxChars)
-        {
-            if (maxChars <= 0) return string.Empty;
-
-            int fullChars = v.Length * 2;
-            if (fullChars <= maxChars)
-            {
-                var chars = new char[fullChars];
-                FillHex(v, chars);
-                return new string(chars);
-            }
-            else
-            {
-                int maxBytes = Math.Max(0, (maxChars - 1) / 2); // leave 1 char for ellipsis
-                var chars = new char[maxBytes * 2 + 1];
-                FillHex(v[..maxBytes], chars);
-                chars[maxBytes * 2] = '…';
-                return new string(chars);
-            }
-        }
-
-        /// <summary>
-        /// Tries to decode a UTF-8 byte span into a printable string.
-        /// </summary>
-        /// <param name="v">The UTF-8 encoded bytes to decode.</param>
-        /// <param name="text">
-        /// When this method returns <see langword="true"/>, contains the decoded string.
-        /// When it returns <see langword="false"/>, the value is undefined.
-        /// </param>
-        /// <returns>
-        /// <see langword="true"/> if the bytes decode cleanly to UTF-8 without replacement characters
-        /// and do not contain control characters other than TAB, CR, or LF; otherwise <see langword="false"/>.
-        /// </returns>
-        private static bool TryDecodePrintableUtf8(ReadOnlySpan<byte> v, out string text)
-        {
-            try
-            {
-                text = s_Utf8Strict.GetString(v);
-            }
-            catch
-            {
-                text = string.Empty;
-                return false;
-            }
-
-            if (text.Contains('\uFFFD')) return false;
-            foreach (var ch in text)
-                if (char.IsControl(ch) && ch != '\t' && ch != '\r' && ch != '\n')
-                    return false;
-            return true;
-        }
-
-        /// <summary>
-        /// Converts a sequence of bytes to their uppercase hexadecimal representation
-        /// and writes the result into a caller-provided character span.
-        /// </summary>
-        /// <param name="v">The input bytes to convert.</param>
-        /// <param name="outChars">
-        /// Destination span that receives the hexadecimal characters. Its length must be
-        /// at least <c>2 * v.Length</c>.
-        /// </param>
-        private static void FillHex(ReadOnlySpan<byte> v, Span<char> outChars)
-        {
-            static char Hex(byte x) => (char)(x < 10 ? '0' + x : 'A' + (x - 10));
-            int ci = 0;
-            foreach (var b in v)
-            {
-                outChars[ci++] = Hex((byte)(b >> 4));
-                outChars[ci++] = Hex((byte)(b & 0xF));
-            }
-        }
-
-        /// <summary>
-        /// Safely truncates a string to a maximum length and appends an ellipsis when needed.
-        /// </summary>
-        /// <param name="s">The input string to truncate.</param>
-        /// <param name="maxChars">Maximum allowed number of characters in the result.</param>
-        /// <returns>
-        /// The original string if it fits within <paramref name="maxChars"/>;
-        /// otherwise, a truncated version with a trailing <c>'…'</c>. Surrogate pairs at the cut
-        /// boundary are preserved by backing off one character when necessary.
-        /// </returns>
-        private static string SafeEllipsis(string s, int maxChars)
-        {
-            if (maxChars <= 0) return string.Empty;
-            if (s.Length <= maxChars) return s;
-            int cut = Math.Max(0, maxChars - 1);
-            if (cut > 0 && char.IsHighSurrogate(s[cut - 1])) cut--;
-            return s.AsSpan(0, cut).ToString() + "…";
-        }
-
-        /// <summary>
-        /// Pads a string on the right with spaces so that its length is at least the specified width.
-        /// </summary>
-        /// <param name="s">The string to pad.</param>
-        /// <param name="w">The desired minimum width.</param>
-        /// <returns>
-        /// The original string if its length is greater than or equal to <paramref name="w"/>;
-        /// otherwise, the string padded with spaces on the right to reach the given width.
-        /// </returns>
-        private static string Pad(string s, int w) => s.Length >= w ? s : s + new string(' ', w - s.Length);
-
-        /// <summary>
-        /// Builds a horizontal border line for the textual table representation.
-        /// </summary>
-        /// <param name="colCount">Number of data columns in the table.</param>
-        /// <param name="widths">
-        /// Column widths array, where index 0 corresponds to the row index column and indices 1..colCount
-        /// correspond to the data columns.
-        /// </param>
-        /// <returns>
-        /// A string containing a border line composed of <c>'+'</c> and <c>'-'</c> characters,
-        /// followed by a newline.
-        /// </returns>
-        private static string Border(uint colCount, int[] widths)
-        {
-            var b = new StringBuilder();
-            b.Append('+').Append(new string('-', widths[0] + 2));
-            for (int c = 0; c < colCount; c++)
-                b.Append('+').Append(new string('-', widths[c + 1] + 2));
-            b.Append("+\n");
-            return b.ToString();
         }
 
         /// <summary>
@@ -1222,6 +1042,53 @@ namespace Extend0.Metadata.Internal
             }
             catch
             {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Attempts to compact the table's backing store and then rebuild indexes, if supported.
+        /// </summary>
+        /// <param name="strict">
+        /// When <see langword="true"/>, any exception thrown during compaction or index rebuild is propagated to the caller.
+        /// When <see langword="false"/>, failures are swallowed and the method returns <see langword="false"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the store implements <see cref="ICompactableStore"/>, compaction completed successfully,
+        /// and indexes were rebuilt; otherwise, <see langword="false"/> (either because the store is not compactable or because
+        /// compaction/rebuild failed in non-strict mode).
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Compaction is an implementation-defined operation performed by the underlying store (for example, rewriting a mapped
+        /// file, shrinking capacity, or relocating slabs). It may be expensive and can involve I/O and temporary extra space.
+        /// </para>
+        /// <para>
+        /// After a successful compaction, this method rebuilds all registered indexes via <see cref="RebuildIndexes(bool)"/>.
+        /// Indexes are treated as ephemeral caches and may be cleared and repopulated.
+        /// </para>
+        /// <para>
+        /// Any previously obtained spans/pointers into the store's backing memory may become invalid after compaction
+        /// (e.g., due to remapping). Consumers must not hold on to <see cref="MetadataCell"/>-backed spans across this call.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="Exception">
+        /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by
+        /// <see cref="ICompactableStore.Compact"/> or by <see cref="RebuildIndexes(bool)"/>.
+        /// </exception>
+        public async Task<bool> TryCompactStore(bool strict, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_store is not ICompactableStore compactableStore) return false;
+            try
+            {
+                await compactableStore.Compact(strict, cancellationToken);
+                await RebuildIndexes(strict, cancellationToken);
+                return true;
+            }
+            catch
+            {
+                if (strict) throw;
                 return false;
             }
         }
