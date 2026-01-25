@@ -25,7 +25,7 @@ namespace Extend0.Metadata.Storage
     /// <c>(Col, Row, Cell)</c> order for ergonomic deconstruction and creation.
     /// </para>
     /// </remarks>
-    public record struct CellRowColumnValueEntry(MetadataCellPointer Pointer, MetadataCell Cell) : IEquatable<CellRowColumnValueEntry>, IComparable<CellRowColumnValueEntry>
+    public readonly record struct CellRowColumnValueEntry(MetadataCellPointer Pointer, MetadataCell Cell) : IEquatable<CellRowColumnValueEntry>, IComparable<CellRowColumnValueEntry>
     {
         /// <summary>
         /// Gets the zero-based row index of the cell, as exposed

@@ -14,7 +14,7 @@ namespace Extend0.Metadata.Storage
     /// both <see cref="InMemoryStore"/> and <see cref="MappedStore"/> instances.
     /// Instances are value-type views over a specific backing store.
     /// </remarks>
-    public readonly struct CellEnumerable : IEquatable<CellEnumerable>, IEnumerable<CellRowColumnValueEntry>
+    public readonly partial struct CellEnumerable : IEquatable<CellEnumerable>, IEnumerable<CellRowColumnValueEntry>
     {
         private readonly ICellStore? _store;
 
@@ -62,7 +62,6 @@ namespace Extend0.Metadata.Storage
             null => default, // Move next will return false
             _ => throw new InvalidOperationException("Unsupported ICellStore implementation.")
         };
-
 
         /// <summary>
         /// Returns an enumerator that iterates through all cells in the store.
@@ -153,130 +152,13 @@ namespace Extend0.Metadata.Storage
         }
 
         /// <summary>
-        /// Struct-based enumerator over metadata cells.
+        /// Wraps this synchronous cell enumerable as an <see cref="IAsyncEnumerable{T}"/> so it can be consumed with
+        /// <c>await foreach</c>.
         /// </summary>
         /// <remarks>
-        /// This is a <c>record struct</c>, so value equality and hash code are generated
-        /// automatically from its fields (column/row position, column count and backing store).
+        /// This does not make the underlying enumeration truly asynchronous; it only provides an async-compatible
+        /// surface while preserving the exact iteration semantics of the synchronous enumerator.
         /// </remarks>
-        public record struct Enumerator : IEquatable<Enumerator>, IEnumerator<CellRowColumnValueEntry>
-        {
-            // shared state
-            private uint _c, _r;
-            private uint _colCount;
-
-            // mode
-            private InMemoryStore? _mem;
-            private MappedStore? _mapped;
-
-            /// <summary>
-            /// Gets the current cell triple: column index, row index and cell instance.
-            /// </summary>
-            public CellRowColumnValueEntry Current { get; private set; }
-
-            readonly object IEnumerator.Current => Current;
-
-            /// <summary>
-            /// Creates an enumerator bound to an in-memory store.
-            /// </summary>
-            internal static Enumerator ForMemory(InMemoryStore s) => new()
-            {
-                _mem = s,
-                _mapped = null,
-                _c = 0,
-                _r = uint.MaxValue, // start before first
-                _colCount = s.ColumnCount,
-            };
-
-            /// <summary>
-            /// Creates an enumerator bound to a memory-mapped store.
-            /// </summary>
-            internal static Enumerator ForMapped(MappedStore s) => new()
-            {
-                _mem = null,
-                _mapped = s,
-                _c = 0,
-                _r = uint.MaxValue, // start before first
-                _colCount = s.ColumnCount
-            };
-
-            /// <inheritdoc />
-            public bool MoveNext()
-            {
-                if (_mapped is not null) return MoveNextMapped();
-                if (_mem is not null) return MoveNextMem();
-                return false; // default enumerator with no store
-            }
-
-            private bool MoveNextMem()
-            {
-                var s = _mem!;
-                if (_r == uint.MaxValue)
-                {
-                    if (_colCount == 0) return false;
-                    _r = 0;
-                }
-                else
-                {
-                    _r++;
-                }
-
-                while (_c < _colCount && _r >= s.MetaAt(_c).InitialCapacity)
-                {
-                    _c++;
-                    if (_c >= _colCount) return false;
-                    _r = 0;
-                }
-                if (_c >= _colCount) return false;
-
-                var meta = s.MetaAt(_c);
-                var cell = s.GetOrCreateCell(_c, _r, meta);
-                Current = (_c, _r, cell);
-                return true;
-            }
-
-            private bool MoveNextMapped()
-            {
-                var s = _mapped!;
-                if (_r == uint.MaxValue)
-                {
-                    if (_colCount == 0) return false;
-                    _r = 0;
-                }
-                else
-                {
-                    _r++;
-                }
-
-                while (_c < _colCount && _r >= s.GetRowCapacity(_c))
-                {
-                    _c++;
-                    if (_c >= _colCount) return false;
-                    _r = 0;
-                }
-                if (_c >= _colCount) return false;
-
-                var meta = s.GetColumnConfiguration(_c);
-                var cell = s.GetOrCreateCell(_c, _r, meta);
-                Current = (_c, _r, cell);
-                return true;
-            }
-
-            /// <inheritdoc />
-            public void Reset()
-            {
-                _c = 0;
-                _r = uint.MaxValue;
-                Current = default;
-            }
-
-            /// <inheritdoc />
-            public void Dispose()
-            {
-                // Do not dispose the underlying store: we don't own it.
-                _mem    = null;
-                _mapped = null;
-            }
-        }
+        public AsyncEnumerable AsAsync() => new(this);
     }
 }
