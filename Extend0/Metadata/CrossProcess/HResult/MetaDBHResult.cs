@@ -18,7 +18,31 @@
     /// </remarks>
     public static class MetaDBHResult
     {
-        private const int FacilityItf = 4;
+        private const int FACILITY_ITF = 4;
+
+        /// <summary>
+        /// Builds an <c>HRESULT</c> that encodes both the failing RPC operation and a coarse error category.
+        /// </summary>
+        /// <param name="op">The RPC operation identifier.</param>
+        /// <param name="err">The coarse error classification.</param>
+        /// <returns>
+        /// A failing <c>HRESULT</c> with severity=1, facility=ITF (4), and a 16-bit code packing <paramref name="op"/> and <paramref name="err"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Encoding: Severity=1 (failure), Facility=ITF (4), Code = <c>(opLow8 &lt;&lt; 8) | err</c>.
+        /// This yields a stable, compact signal across IPC boundaries without exposing backend exception types.
+        /// </para>
+        /// <para>
+        /// Note: only the low 8 bits of <paramref name="op"/> are currently stored in the 16-bit code.
+        /// If you need to preserve the full 16-bit operation id, update this encoding and keep compatibility in mind.
+        /// </para>
+        /// </remarks>
+        public static int MakeRpcHResult(RpcOp op, RpcErr err)
+        {
+            int code16 = ((int)op & 0xFF) << 8 | (int)err & 0xFF;
+            return unchecked(1 << 31 | FACILITY_ITF << 16 | code16 & 0xFFFF);
+        }
 
         /// <summary>
         /// Determines whether a given <c>HRESULT</c> matches the MetaDBManager RPC encoding header:
@@ -37,7 +61,7 @@
             // Severity is bit 31 (1 = failure). Facility is bits 16..26 (11 bits).
             if (hresult >= 0) return false; // not a failing HRESULT
             int facility = hresult >> 16 & 0x7FF;
-            return facility == FacilityItf;
+            return facility == FACILITY_ITF;
         }
 
         /// <summary>
