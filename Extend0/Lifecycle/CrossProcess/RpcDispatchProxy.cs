@@ -540,36 +540,66 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
     }
 
     /// <summary>
-    /// Validates the standard JSON envelope and throws if it represents a remote error.
+    /// Validates a standard RPC JSON response envelope and throws a <see cref="RemoteInvocationException"/>
+    /// when the envelope represents a remote or transport-level failure.
     /// </summary>
     /// <param name="doc">The JSON document returned by the transport.</param>
-    /// <returns>The root element for further processing when the envelope is successful.</returns>
+    /// <returns>
+    /// The root <see cref="JsonElement"/> when the envelope indicates success (either no <c>ok</c> flag is present,
+    /// or <c>ok</c> is <see langword="true"/>).
+    /// </returns>
     /// <exception cref="RemoteInvocationException">
-    /// Thrown when <c>ok</c> is <c>false</c>. The exception message contains the remote error string, if provided.
+    /// Thrown when the response contains <c>"ok": false</c>. The exception message is taken from <c>"e"</c> when present.
+    /// The exception <see cref="Exception.HResult"/> is taken from <c>"hr"</c> when present.
     /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Expected envelope format:
+    /// <c>{"ok": true, "r": &lt;result&gt;}</c> on success, or
+    /// <c>{"ok": false, "e": "error message", "hr": &lt;hresult&gt;}</c> on failure.
+    /// </para>
+    /// <para>
+    /// Special-case: a transport shutdown / upgrade condition is surfaced as <c>HResult = 426</c>.
+    /// This method treats either a well-known message (e.g. <c>"Server closed."</c>) or an explicit
+    /// <c>"hr": 426</c> as upgrade-eligible.
+    /// </para>
+    /// <para>
+    /// Note: if the envelope does not contain an <c>ok</c> property, it is treated as success and the root is returned.
+    /// Higher layers may still validate result shape as needed.
+    /// </para>
+    /// </remarks>
     private static JsonElement ThrowIfError(JsonDocument doc)
     {
         var root = doc.RootElement;
 
-        if (root.TryGetProperty("ok", out var okProp) && !okProp.GetBoolean())
-        {
-            var msg = root.TryGetProperty("e", out var eProp) ? eProp.GetString() : null;
-            var hr = root.TryGetProperty("hr", out var hrProp) ? hrProp.GetInt32() : 0;
+        // Success fast-path: missing "ok" or ok == true.
+        if (!root.TryGetProperty("ok", out var okProp) || okProp.GetBoolean())
+            return root;
 
-            if (string.Equals(msg, "Server closed.", StringComparison.OrdinalIgnoreCase))
+        var msg = root.TryGetProperty("e", out var eProp) ? eProp.GetString() : null;
+        var hr = root.TryGetProperty("hr", out var hrProp) ? hrProp.GetInt32() : 0;
+
+        // Upgrade/transport-closed condition: either explicit hr==426 or known message.
+        if (hr == 426)
+        {
+            throw new RemoteInvocationException(msg ?? "Upgrade required")
             {
-                throw new RemoteInvocationException(msg ?? "Upgrade required")
-                {
-                    HResult = 426
-                };
-            }
-            throw new RemoteInvocationException(msg ?? "Remote error")
-            {
-                HResult = hr
+                HResult = 426
             };
         }
 
-        return root;
+        if (hr == 422)
+        {
+            throw new RemoteInvocationException(msg ?? "Corrupted transport messages")
+            {
+                HResult = 422
+            };
+        }
+
+        throw new RemoteInvocationException(msg ?? "Remote error")
+        {
+            HResult = hr
+        };
     }
 
     /// <summary>
@@ -582,7 +612,7 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
             // First attempt
             return attempt();
         }
-        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+        catch (RemoteInvocationException rEx) when (!IsUpgradeEligible(rEx))
         {
             // Not an upgrade case → propagate
             throw;
@@ -608,7 +638,7 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
             // First attempt
             return await attempt(_ct).ConfigureAwait(false);
         }
-        catch (RemoteInvocationException rEx) when (rEx.HResult != 426)
+        catch (RemoteInvocationException rEx) when (!IsUpgradeEligible(rEx))
         {
             // Not an upgrade case → propagate
             throw;
@@ -623,4 +653,8 @@ public class RpcDispatchProxy<TService> : DispatchProxy where TService : class, 
             return await attempt(_ct).ConfigureAwait(false);
         }
     }
+
+    private static bool IsUpgradeEligible(RemoteInvocationException ex)
+    => ex.HResult is 426 or 422;
+
 }

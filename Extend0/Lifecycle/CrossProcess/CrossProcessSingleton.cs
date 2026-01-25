@@ -1,4 +1,6 @@
-﻿namespace Extend0.Lifecycle.CrossProcess;
+﻿using Microsoft.Extensions.Logging;
+
+namespace Extend0.Lifecycle.CrossProcess;
 
 /// <summary>
 /// A singleton that can run in-process or as a cross-process singleton,
@@ -77,7 +79,7 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// <exception cref="InvalidOperationException">
     /// Thrown if the static service is already initialized and <see cref="SingletonOptions.Overwrite"/> is <see langword="false"/>.
     /// </exception>
-    public CrossProcessSingleton(Func<TService> factory, CrossProcessSingletonOptions options) : base(options) => InitializeStatic(factory, options, out _crossHandleInstance);
+    public CrossProcessSingleton(Func<TService> factory, CrossProcessSingletonOptions options, ILoggerFactory? loggerFactory = null) : base(options) => InitializeStatic(factory, options, out _crossHandleInstance, loggerFactory);
 
     /// <summary>
     /// Releases managed resources held by this singleton. In cross-process mode, disposes the
@@ -129,7 +131,7 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// Thrown when a singleton is already initialized and <see cref="CrossProcessSingletonOptions.Overwrite"/>
     /// is <c>false</c>.
     /// </exception>
-    private static void InitializeStatic(Func<TService> factory, CrossProcessSingletonOptions options, out CrossProcessHandle<TService>? instanceHandle)
+    private static void InitializeStatic(Func<TService> factory, CrossProcessSingletonOptions options, out CrossProcessHandle<TService>? instanceHandle, ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
         instanceHandle = null;
@@ -142,7 +144,7 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
             _service = null;
             IsOwner = false;
 
-            InitializeNewInstance(factory, options, out instanceHandle);
+            InitializeNewInstance(factory, options, out instanceHandle, loggerFactory);
         }
     }
 
@@ -220,12 +222,14 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// This method assumes previous state has already been validated and torn down.
     /// It updates <c>_service</c>, <c>_handle</c> and <see cref="IsOwner"/> atomically under the static lock.
     /// </remarks>
-    private static void InitializeNewInstance(Func<TService> factory, CrossProcessSingletonOptions options, out CrossProcessHandle<TService>? instanceHandle)
+    private static void InitializeNewInstance(Func<TService> factory, CrossProcessSingletonOptions options, out CrossProcessHandle<TService>? instanceHandle, ILoggerFactory? loggerFactory = null)
     {
         instanceHandle = null;
 
         if (options.Mode == SingletonMode.CrossProcess)
         {
+            if (loggerFactory is not null)
+                CrossProcessOrchestator<TService>.s_LoggerFactory = loggerFactory;
             var h = CrossProcessOrchestator<TService>.GetOrStart(factory, serverName: options.CrossProcessServer, name: options.CrossProcessName, connectTimeoutMs: options.CrossProcessConnectTimeoutMs);
 
             _handle = h;

@@ -1,4 +1,7 @@
-﻿namespace Extend0.Lifecycle.CrossProcess
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Extend0.Lifecycle.CrossProcess
 {
     /// <summary>
     /// Cross-process singleton orchestrator for a service contract <typeparamref name="TService"/>.
@@ -19,6 +22,11 @@
     /// </remarks>
     internal static class CrossProcessOrchestator<TService> where TService : class, ICrossProcessService
     {
+        /// <summary>
+        /// Shared logger factory used to create <see cref="ILogger"/> instances for this process.
+        /// </summary>
+        internal static ILoggerFactory? s_LoggerFactory;
+
         /// <summary>
         /// Starts or connects to a cross-process singleton for <typeparamref name="TService"/>.
         /// </summary>
@@ -174,8 +182,9 @@
             try
             {
                 var impl = factory(); // if this throws, we release the mutex below
+                var serverLogger = s_LoggerFactory?.CreateLogger<NamedPipeServer>() ?? NullLogger<NamedPipeServer>.Instance;
 
-                server = new NamedPipeServer(pipeName, impl!, cts.Token);
+                server = new NamedPipeServer(pipeName, impl!, serverLogger, cts.Token);
 
                 // Return owner handle (keeps the mutex; released on Dispose)
                 return new CrossProcessHandle<TService>(

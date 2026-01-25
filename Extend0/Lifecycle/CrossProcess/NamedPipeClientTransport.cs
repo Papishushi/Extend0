@@ -104,54 +104,101 @@ namespace Extend0.Lifecycle.CrossProcess
         }
 
         /// <summary>
-        /// Sends a method invocation to the remote endpoint and returns the raw JSON response.
+        /// Sends a line-delimited JSON-RPC request over the underlying named-pipe transport and returns
+        /// the raw JSON response envelope as a <see cref="JsonDocument"/>.
         /// </summary>
-        /// <param name="method">Logical method name to invoke.</param>
+        /// <param name="method">Logical method name to invoke remotely.</param>
         /// <param name="args">Positional arguments for the call (may be empty).</param>
         /// <param name="paramTypes">
-        /// CLR parameter types corresponding to <paramref name="args"/>. This transport
-        /// ignores them, but higher-level layers may use them for serialization decisions.
+        /// CLR parameter types corresponding to <paramref name="args"/>. This transport does not use them directly,
+        /// but higher layers may pass them for symmetry and diagnostics.
         /// </param>
         /// <param name="declaredReturnType">
-        /// Declared return type (e.g., <c>typeof(void)</c>, the result type for
-        /// <c>Task&lt;T&gt;</c>, or a synchronous return type). Currently unused by this
-        /// transport but included for interface symmetry.
+        /// Declared return type (for example <c>typeof(void)</c>, a synchronous CLR type, or the result type of a
+        /// <c>Task&lt;T&gt;</c>). This transport does not use it directly.
         /// </param>
         /// <param name="ct">
-        /// Cancellation token applied to the overall operation. This is best-effort:
-        /// underlying stream APIs may not fully honor the token.
+        /// Cancellation token applied to the write/read operations. Cancellation is propagated as
+        /// <see cref="OperationCanceledException"/>.
         /// </param>
         /// <returns>
-        /// A <see cref="JsonDocument"/> representing the response envelope.
-        /// The caller is responsible for disposing the document.
+        /// A <see cref="JsonDocument"/> representing the response envelope. The caller must dispose it.
+        /// On transport-level failures (pipe closed/disposed), a synthetic error envelope is returned with
+        /// <c>hr = 426</c> to signal an upgrade/reconnect condition to higher layers.
         /// </returns>
-        /// <exception cref="IOException">The server closed the connection or returned invalid data.</exception>
+        /// <exception cref="OperationCanceledException">
+        /// Thrown when <paramref name="ct"/> is canceled while sending or receiving.
+        /// </exception>
         /// <remarks>
         /// <para>
-        /// The request is written as a single JSON line; the response is read as a single JSON line.
-        /// The payload shape and semantics are enforced by the server implementation.
+        /// Protocol: the request is written as a single JSON line <c>{"m":"Method","a":[...]}</c> and the response is read
+        /// as a single JSON line containing the standard envelope <c>{"ok":true,"r":...}</c> or <c>{"ok":false,"e":"...","hr":...}</c>.
         /// </para>
         /// <para>
-        /// If the write fails (e.g., the server closed the pipe), a synthetic JSON error envelope
-        /// <c>{"ok": false, "e": "Server closed."}</c> is returned instead of throwing.
+        /// This method treats transport shutdown as a soft error and returns a synthetic envelope instead of throwing,
+        /// allowing the RPC proxy to unify “server closed / reconnect needed” handling (e.g., mapping <c>hr = 426</c>
+        /// to an upgrade path).
+        /// </para>
+        /// <para>
+        /// If the response line is malformed JSON, a synthetic error envelope is returned with a dedicated <c>hr</c>
+        /// (<c>422</c>) to indicate corrupted/partial transport data.
         /// </para>
         /// </remarks>
         public async Task<JsonDocument> CallAsync(string method, object?[] args, Type[] paramTypes, Type declaredReturnType, CancellationToken ct)
-        {
+        {           
             // Send: {"m":"Method","a":[...]}
             var req = new RpcReq(method, args);
             try
             {
                 await _writer.WriteLineAsync(JsonSerializer.Serialize(req)).ConfigureAwait(false);
             }
-            catch
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Server closed.\"}");
+                throw;
+            }
+            catch (IOException)
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Transport closed.\", \"hr\": 426}");
+            }
+            catch (ObjectDisposedException)
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Transport closed.\", \"hr\": 426}");
+            }
+            catch (InvalidOperationException)
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Transport closed.\", \"hr\": 426}");
             }
 
-            // Receive one line
-            var line = await _reader.ReadLineAsync(ct).ConfigureAwait(false);
-            return line is null ? throw new IOException("Server closed.") : JsonDocument.Parse(line);
+            string? line;
+            try
+            {
+                // Receive one line
+                line = await _reader.ReadLineAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (IOException)
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Transport closed.\", \"hr\": 426}");
+            }
+            catch (ObjectDisposedException)
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Transport closed.\", \"hr\": 426}");
+            }
+
+            if (line is null)
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Transport closed.\", \"hr\": 426}");
+
+            try
+            {
+                return JsonDocument.Parse(line);
+            }
+            catch (JsonException)
+            {
+                return JsonDocument.Parse("{\"ok\": false, \"e\": \"Bad transport data.\", \"hr\": 422}");
+            }
         }
 
         /// <summary>

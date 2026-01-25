@@ -1,4 +1,5 @@
-﻿using System.Buffers;
+﻿using Microsoft.Extensions.Logging;
+using System.Buffers;
 using System.IO.Pipes;
 using System.Reflection;
 using System.Text;
@@ -52,6 +53,7 @@ namespace Extend0.Lifecycle.CrossProcess
         private readonly CancellationTokenSource _cts;   // linked to external token
         private readonly Task _loopTask;
         private bool _disposed;
+        private readonly ILogger<NamedPipeServer> _logger;
 
         /// <summary>
         /// Creates and starts a named-pipe JSON-RPC server bound to <paramref name="pipeName"/>.
@@ -59,10 +61,12 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </summary>
         /// <param name="pipeName">Operating system pipe name (e.g., value from <see cref="CrossProcessUtils.BuildPipeName(string, string?)"/>).</param>
         /// <param name="impl">Service implementation whose public instance methods are exposed.</param>
+        /// <param name="logger">Logger used by the server.</param>
         /// <param name="ct">External cancellation token. When signaled, the server stops.</param>
         /// <exception cref="ArgumentNullException"><paramref name="pipeName"/> or <paramref name="impl"/> is <c>null</c>.</exception>
-        public NamedPipeServer(string pipeName, object impl, CancellationToken ct)
+        public NamedPipeServer(string pipeName, object impl, ILogger<NamedPipeServer> logger, CancellationToken ct)
         {
+            _logger   = logger  ?? throw new ArgumentNullException(nameof(logger));
             _pipeName = pipeName ?? throw new ArgumentNullException(nameof(pipeName));
             _impl     = impl     ?? throw new ArgumentNullException(nameof(impl));
 
@@ -120,7 +124,11 @@ namespace Extend0.Lifecycle.CrossProcess
                     }
 
                     // Each client is processed by an observed fire and forget handler.
-                    HandleClientAsync(server, methodsByName, token).Forget();
+                    HandleClientAsync(server, methodsByName, token)
+                        .Forget(_logger,
+                            onExceptionMessage: "NamedPipeServer: client handler crashed",
+                            onExceptionAction: ex => _logger.LogCritical(ex, "RPC handler fatal"),
+                            measureDuration: true);
                 }
             }
             catch (OperationCanceledException) when (_cts.IsCancellationRequested)
@@ -143,40 +151,47 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </param>
         private async Task HandleClientAsync(NamedPipeServerStream server, IReadOnlyDictionary<string, MethodInfo[]> methodsByName, CancellationToken token)
         {
-            using var reader = new StreamReader(
-                server,
-                Encoding.UTF8,
-                detectEncodingFromByteOrderMarks: false,
-                leaveOpen: false);
-
-            using var writer = new StreamWriter(
-                server,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                bufferSize: 1024,
-                leaveOpen: false)
-            {
-                AutoFlush = true
-            };
+            StreamReader? reader = null;
+            StreamWriter? writer = null;
 
             try
             {
+                reader = new StreamReader(
+                    server,
+                    Encoding.UTF8,
+                    detectEncodingFromByteOrderMarks: false,
+                    leaveOpen: true);
+
+                writer = new StreamWriter(
+                    server,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    bufferSize: 1024,
+                    leaveOpen: true)
+                {
+                    AutoFlush = true
+                };
+
                 await SendHandshakeAsync(writer).ConfigureAwait(false);
                 await ProcessClientLoopAsync(server, reader, writer, methodsByName, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                // Graceful shutdown requested.
+                // Shutdown normal.
+            }
+            catch (IOException)
+            {
+                // Cliente desconectó / pipe roto: normal.
+            }
+            catch (ObjectDisposedException)
+            {
+                // Pipe cerrado por carrera de cierre: normal en shutdown.
             }
             finally
             {
-                try
-                {
-                    server.Dispose();
-                }
-                catch
-                {
-                    // Best-effort cleanup; ignore failures during teardown.
-                }
+                try { writer?.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
+                try { reader?.Dispose(); } catch (ObjectDisposedException) { }
+
+                await server.DisposeAsync().ConfigureAwait(false);
             }
         }
 
