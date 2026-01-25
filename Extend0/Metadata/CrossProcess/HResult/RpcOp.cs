@@ -137,5 +137,17 @@
 
         /// <summary>Finds a global hit across all tables (bytes) using the global multi-table index.</summary>
         FindGlobal_Manager_Bytes = 0x0029,
+
+        /// <summary>Try to compact a given table found using its tableId (Guid | 16 bytes).</summary>
+        TryCompact_Table = 0x002A,
+
+        /// <summary>Try to compact all registered tables found.</summary>
+        TryCompact_AllTables = 0x002B,
+
+        /// <summary>Cancel a pending RPC call by its CallId.</summary>
+        Cancel_CallId = 0x002C,
+
+        /// <summary>Cancel all pending RPC calls.</summary>
+        Cancel_All = 0x002D,
     }
 }
