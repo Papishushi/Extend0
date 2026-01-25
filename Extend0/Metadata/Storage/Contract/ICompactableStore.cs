@@ -27,13 +27,33 @@
     public interface ICompactableStore : ICellStore
     {
         /// <summary>
-        /// Attempts to compact the underlying storage to reduce memory usage.
+        /// Compacts the underlying storage to reduce memory usage and improve locality.
         /// </summary>
+        /// <param name="strict">
+        /// When <see langword="true"/>, the implementation must enforce stricter compaction guarantees,
+        /// such as fully releasing unused capacity when possible and/or performing deeper reorganization.
+        /// When <see langword="false"/>, the implementation may apply a best-effort/lightweight compaction.
+        /// </param>
+        /// <param name="cancellationToken">Token used to cancel the compaction operation.</param>
+        /// <returns>A task that completes when compaction has finished.</returns>
         /// <remarks>
-        /// Implementations should release unused capacity and/or reorganize internal
-        /// data structures to improve memory locality. The exact strategy is
-        /// implementation-defined.
+        /// <para>
+        /// Compaction is implementation-defined and may include releasing unused capacity, rebuilding internal
+        /// structures, defragmenting, or rewriting backing storage to improve memory locality.
+        /// </para>
+        /// <para>
+        /// Warning: compaction may relocate data. Any previously obtained spans, pointers, offsets, or cached views
+        /// into the store may become invalid after this call. Do not hold unmanaged views across a compaction.
+        /// </para>
+        /// <para>
+        /// Concurrency: implementations are expected to be thread-safe according to the store contract, but callers
+        /// should assume compaction is a mutating operation and avoid concurrent readers/writers unless explicitly supported.
+        /// </para>
         /// </remarks>
-        void Compact();
+        /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when <paramref name="strict"/> is <see langword="true"/> and strict compaction guarantees cannot be satisfied.
+        /// </exception>
+        Task Compact(bool strict, CancellationToken cancellationToken);
     }
 }
