@@ -514,7 +514,7 @@ namespace Extend0.Metadata.CodeGen
         /// </para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool TryGetKey(out ReadOnlySpan<byte> keyUtf8)
+        public bool TryGetKeyUtf8(out ReadOnlySpan<byte> keyUtf8)
         {
             int cap = KeyCap(_size);
             var stored = new ReadOnlySpan<byte>(_entry, cap);
@@ -531,14 +531,30 @@ namespace Extend0.Metadata.CodeGen
         }
 
         /// <summary>
-        /// Attempts to get the stored key as a managed <see cref="string"/>.
+        /// Attempts to retrieve the stored key as a managed <see cref="string"/> (UTF-8).
         /// </summary>
-        /// <param name="key">Receives the key string if present.</param>
-        /// <returns><c>true</c> if a non-empty key is stored; otherwise <c>false</c>.</returns>
+        /// <param name="key">
+        /// When this method returns <see langword="true"/>, receives the decoded key string.
+        /// When this method returns <see langword="false"/>, the value is <see langword="null"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the entry contains a valid, non-empty <c>NUL</c>-terminated key; otherwise,
+        /// <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This overload delegates to <see cref="TryGetKeyUtf8(out ReadOnlySpan{byte})"/> and decodes the returned UTF-8
+        /// bytes into a managed string.
+        /// </para>
+        /// <para>
+        /// If the underlying bytes are not valid UTF-8, the decoder will replace invalid sequences according to the
+        /// runtime's UTF-8 decoding behavior.
+        /// </para>
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool TryGetKey(out string? key)
+        public bool TryGetKeyUtf8(out string? key)
         {
-            if (TryGetKey(out ReadOnlySpan<byte> k))
+            if (TryGetKeyUtf8(out ReadOnlySpan<byte> k))
             {
                 key = Encoding.UTF8.GetString(k);
                 return true;
@@ -546,15 +562,129 @@ namespace Extend0.Metadata.CodeGen
             key = null;
             return false;
         }
+        
+        /// <summary>
+        /// Attempts to retrieve the stored key as a fixed-size raw byte span (binary-safe).
+        /// </summary>
+        /// <param name="keyRaw">
+        /// When this method returns <see langword="true"/>, receives a span over the entire key slot.
+        /// The span length is exactly <see cref="KeySize"/> bytes and it may contain zeros.
+        /// When this method returns <see langword="false"/>, the value is <see langword="default"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if this entry has a key segment (<see cref="KeySize"/> &gt; 0); otherwise,
+        /// <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method does not validate key presence or terminators. It simply exposes the raw fixed-size key slot.
+        /// </para>
+        /// <para>
+        /// The returned span is a view over unmanaged/mapped memory. It is only valid while the underlying storage remains
+        /// alive and unmoved (e.g., until the owning store is disposed or remapped).
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryGetKeyRaw(out ReadOnlySpan<byte> keyRaw)
+        {
+            int cap = KeyCap(_size);
+            if (cap == 0)
+            {
+                keyRaw = default;
+                return false;
+            }
+        
+            keyRaw = new ReadOnlySpan<byte>(_entry, cap);
+            return true;
+        }
+        
+        /// <summary>
+        /// Returns <see langword="true"/> if the key slot exists and contains at least one non-zero byte (binary-safe).
+        /// </summary>
+        /// <returns>
+        /// <see langword="true"/> if the entry has a key segment and it is not all zeros; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a binary-safe presence check suitable for fixed-size binary keys (for example, GUID keys stored as 16 bytes).
+        /// </para>
+        /// <para>
+        /// For text keys, prefer <see cref="TryGetKeyUtf8(out ReadOnlySpan{byte})"/> / <see cref="KeyEquals(ReadOnlySpan{byte})"/>
+        /// which validate a non-empty <c>NUL</c>-terminated UTF-8 key.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasKeyRaw()
+        {
+            if (!TryGetKeyRaw(out var raw))
+                return false;
+        
+            for (int i = 0; i < raw.Length; i++)
+                if (raw[i] != 0)
+                    return true;
+        
+            return false;
+        }
+        
+        /// <summary>
+        /// Compares the entry's raw fixed-size key slot against the provided raw key bytes (binary-safe).
+        /// </summary>
+        /// <param name="keyRaw">Raw key bytes to compare with the stored key slot.</param>
+        /// <returns>
+        /// <see langword="true"/> if this entry has a key segment and the stored key slot matches <paramref name="keyRaw"/>
+        /// byte-for-byte; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This comparison requires <paramref name="keyRaw"/> to be exactly <see cref="KeySize"/> bytes long.
+        /// If the length differs, the method returns <see langword="false"/>.
+        /// </para>
+        /// <para>
+        /// This method performs a full-slot comparison and does not interpret terminators. It is intended for fixed-size
+        /// binary keys.
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool KeyEqualsRaw(ReadOnlySpan<byte> keyRaw)
+        {
+            if (!TryGetKeyRaw(out var stored))
+                return false;
+        
+            if (keyRaw.Length != stored.Length)
+                return false;
+        
+            return stored.SequenceEqual(keyRaw);
+        }
 
         /// <summary>
-        /// Attempts to read the value associated with the given key bytes.
+        /// Attempts to retrieve the stored value as UTF-8 bytes for the specified UTF-8 key.
         /// </summary>
-        /// <param name="keyUtf8">UTF-8 encoded key bytes to match.</param>
-        /// <param name="valueUtf8">Receives the value bytes if the key matches.</param>
-        /// <returns><c>true</c> if the key matches and a value exists; otherwise <c>false</c>.</returns>
+        /// <param name="keyUtf8">UTF-8 encoded key bytes to match against the stored key.</param>
+        /// <param name="valueUtf8">
+        /// When this method returns <see langword="true"/>, receives a slice of the value slot interpreted as UTF-8 bytes.
+        /// The returned span is trimmed at the first <c>NUL</c> byte, if present; otherwise the full value slot is returned.
+        /// When this method returns <see langword="false"/>, the value is <see langword="default"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the stored key is present and matches <paramref name="keyUtf8"/>; otherwise,
+        /// <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method first validates and compares the stored key (it must be non-empty and <c>NUL</c>-terminated) and only
+        /// then exposes the value. No additional "value exists" check is performed: the value slot is fixed-size.
+        /// </para>
+        /// <para>
+        /// If the underlying storage is not zero-initialized, an entry that was never written may contain arbitrary bytes.
+        /// In that scenario, the returned data may be meaningless unless an explicit occupancy marker is used.
+        /// </para>
+        /// <para>
+        /// The returned span is a view over unmanaged/mapped memory. It is only valid while the underlying storage remains
+        /// alive and unmoved (e.g., until the owning store is disposed or remapped).
+        /// </para>
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool TryGetValue(ReadOnlySpan<byte> keyUtf8, out ReadOnlySpan<byte> valueUtf8)
+        public bool TryGetValueUtf8(ReadOnlySpan<byte> keyUtf8, out ReadOnlySpan<byte> valueUtf8)
         {
             if (!KeyEquals(keyUtf8))
             {
@@ -567,25 +697,139 @@ namespace Extend0.Metadata.CodeGen
             valueUtf8 = len < 0 ? stored : stored[..len];
             return true;
         }
-
+        
         /// <summary>
-        /// Attempts to read the value associated with the given managed key string.
+        /// Attempts to retrieve the stored value as a managed <see cref="string"/> for the specified key.
         /// </summary>
-        /// <param name="key">Managed key string.</param>
-        /// <param name="value">Receives the value string if the key matches.</param>
-        /// <returns><c>true</c> if the key matches and a value exists; otherwise <c>false</c>.</returns>
-        public bool TryGetValue(string key, out string? value)
+        /// <param name="key">Managed key string to match against the stored key.</param>
+        /// <param name="value">
+        /// When this method returns <see langword="true"/>, receives the decoded value string (UTF-8).
+        /// When this method returns <see langword="false"/>, the value is <see langword="null"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the stored key is present and matches <paramref name="key"/>; otherwise,
+        /// <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This overload encodes <paramref name="key"/> as UTF-8 and delegates to
+        /// <see cref="TryGetValueUtf8(ReadOnlySpan{byte}, out ReadOnlySpan{byte})"/>.
+        /// </para>
+        /// <para>
+        /// The value is decoded from UTF-8. If the underlying bytes are not valid UTF-8, the decoder will replace invalid
+        /// sequences according to the runtime's UTF-8 decoding behavior.
+        /// </para>
+        /// </remarks>
+        public bool TryGetValueUtf8(string key, out string? value)
         {
             int n = Encoding.UTF8.GetByteCount(key);
             Span<byte> tmp = n <= 256 ? stackalloc byte[n] : new byte[n];
             Encoding.UTF8.GetBytes(key, tmp);
-            if (TryGetValue(tmp, out var v))
+            if (TryGetValueUtf8(tmp, out var v))
             {
                 value = Encoding.UTF8.GetString(v);
                 return true;
             }
             value = null;
             return false;
+        }
+
+        /// <summary>
+        /// Returns the raw fixed-size value slot as a binary-safe byte span.
+        /// </summary>
+        /// <returns>
+        /// A span over the entire value slot. Its length is exactly <see cref="ValueSize"/> bytes and it may contain zeros.
+        /// If <see cref="ValueSize"/> is 0, returns an empty span.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method does not interpret the value (no UTF-8 trimming, no terminator search) and does not check the key.
+        /// It simply exposes the underlying value bytes for the entry.
+        /// </para>
+        /// <para>
+        /// If the underlying storage is not zero-initialized, the returned span may contain arbitrary bytes for entries
+        /// that were never written. This API does not provide an occupancy signal.
+        /// </para>
+        /// <para>
+        /// The returned span is a view over unmanaged/mapped memory. It is only valid while the underlying
+        /// storage remains alive and unmoved (e.g., until the owning store is disposed or remapped).
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ReadOnlySpan<byte> GetValueRaw()
+        {
+            int cap = ValueCap(_size);
+            return new ReadOnlySpan<byte>(ValuePtr(_entry, _size), cap);
+        }
+        
+        /// <summary>
+        /// Returns <see langword="true"/> if the raw value slot contains any non-zero byte.
+        /// </summary>
+        /// <returns>
+        /// <see langword="true"/> if at least one byte in the value slot is non-zero; otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This is a binary-safe heuristic that can be used as a "likely written" signal when the underlying storage is
+        /// known to be zero-initialized for unwritten entries (for example, when the backing file was created with
+        /// zeroed capacity or when growth uses <c>zeroInit</c>).
+        /// </para>
+        /// <para>
+        /// If the underlying storage is not zero-initialized, unwritten entries may contain arbitrary bytes and this method
+        /// may return <see langword="true"/> even though no value was ever written. In that scenario, this method must not be
+        /// used to determine occupancy.
+        /// </para>
+        /// <para>
+        /// Note: a legitimately stored value may also be all zeros (for example, an integer <c>0</c>), in which case this
+        /// method returns <see langword="false"/> even though the value may be meaningful.
+        /// </para>
+        /// <para>
+        /// If you need a definitive "written vs never written" signal regardless of initialization policy, store an explicit
+        /// occupancy marker (for example, a per-entry flag byte or a bitmap per column).
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasAnyValueRaw()
+        {
+            var v = GetValueRaw();
+            for (int i = 0; i < v.Length; i++)
+                if (v[i] != 0) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Attempts to retrieve the raw fixed-size value slot (binary-safe).
+        /// </summary>
+        /// <param name="valueRaw">
+        /// When this method returns <see langword="true"/>, receives a span over the entire value slot.
+        /// The span length is exactly <see cref="ValueSize"/> bytes and may contain zeros.
+        /// When this method returns <see langword="false"/>, the value is <see langword="default"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if this entry has a value segment (<see cref="ValueSize"/> &gt; 0);
+        /// otherwise, <see langword="false"/>.
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// This method does not interpret the value (no UTF-8 trimming, no terminator search) and does not
+        /// check the key. It simply exposes the raw value bytes for the entry.
+        /// </para>
+        /// <para>
+        /// If the underlying storage is not zero-initialized, the returned span may contain arbitrary bytes for entries
+        /// that were never written. This API does not provide an occupancy signal.
+        /// </para>
+        /// <para>
+        /// The returned span is a view over unmanaged/mapped memory. It is only valid while the underlying
+        /// storage remains alive and unmoved (e.g., until the owning store is disposed or remapped).
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryGetValueRaw(out ReadOnlySpan<byte> valueRaw)
+        {
+            int cap = ValueCap(_size);
+            if (cap == 0) { valueRaw = default; return false; }
+            valueRaw = new ReadOnlySpan<byte>(ValuePtr(_entry, _size), cap);
+            return true;
         }
 
         /// <summary>

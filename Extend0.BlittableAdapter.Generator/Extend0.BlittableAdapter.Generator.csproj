@@ -16,8 +16,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9501.2716</AssemblyVersion>
-		<FileVersion>1.0.9501.2716</FileVersion>
+		<AssemblyVersion>1.0.9507.31386</AssemblyVersion>
+		<FileVersion>1.0.9507.31386</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -31,7 +31,7 @@
 		<PackageReleaseNotes>
 			Update dependencies to latest versions. Fix NU5128.
 		</PackageReleaseNotes>
-		<Version>1.0.9501</Version>
+		<Version>1.0.9506</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -51,10 +51,6 @@
 
 	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).pdb" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" Condition="Exists('$(OutputPath)\$(AssemblyName).pdb')" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<None Include="_._" Pack="true" PackagePath="lib/netstandard2.0/_._" />
 	</ItemGroup>
 
 	<ItemGroup>

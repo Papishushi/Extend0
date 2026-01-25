@@ -2,12 +2,10 @@
 
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
-		<PackageType>Analyzer</PackageType>
-		<IncludeBuildOutput>true</IncludeBuildOutput>
-		<BuildOutputTargetFolder>analyzers/dotnet/cs</BuildOutputTargetFolder>
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<AssemblyName>Extend0.MetadataEntry.Generator</AssemblyName>
 		<PackageId>Extend0.MetadataEntry.Generator</PackageId>
 		<Authors>Papishushi</Authors>
@@ -16,8 +14,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9501.2716</AssemblyVersion>
-		<FileVersion>1.0.9501.2716</FileVersion>
+		<AssemblyVersion>1.0.9507.31386</AssemblyVersion>
+		<FileVersion>1.0.9507.31386</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -29,10 +27,9 @@
 		<NeutralLanguage>en-001</NeutralLanguage>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageReleaseNotes>
-			Change using for IMetadataEntry.
-			Update dependencies to latest versions. Fix NU5128.
+
 		</PackageReleaseNotes>
-		<Version>1.0.9501.2716</Version>
+		<Version>1.0.9504</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -55,12 +52,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="_._" Pack="true" PackagePath="lib/netstandard2.0/_._" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" PrivateAssets="all" />
-		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
 	</ItemGroup>
 
 </Project>
