@@ -12,10 +12,10 @@ namespace Extend0.Metadata.Indexing.Registries.Contract;
 public interface IIndexesRegistryBase : IDisposable
 {
     /// <summary>
-    /// Removes all registered indexes and clears any associated state.
+    /// Clears every index currently registered in this registry.
     /// </summary>
     /// <remarks>
-    /// Implementations should dispose removed indexes as part of the operation.
+    /// Calls <see cref="ITableIndex.Clear"/> on each registered index.
     /// </remarks>
     void ClearAll();
 

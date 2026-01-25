@@ -754,7 +754,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// Rebuilds the entire index by scanning all registered tables in the manager.
     /// </summary>
     /// <param name="manager">The database manager providing access to all metadata tables.</param>
-    public override void Rebuild(IMetaDBManager manager)
+    public override async Task Rebuild(IMetaDBManager manager)
     {
         ThrowIfDisposed();
 
@@ -778,7 +778,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
                     existing.Clear();
                 }
 
-                foreach (var entry in table.EnumerateCells())
+                await foreach (var entry in table.EnumerateCells().AsAsync())
                 {
                     if (!TryRentKey(entry, out var owned)) continue;
                     if (existing.TryGetValue(owned, out var prev))

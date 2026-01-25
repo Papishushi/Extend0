@@ -84,7 +84,7 @@ public abstract class CrossTableRebuildableIndexDefinition<TInnerKey, TInnerValu
     /// in a consistent state even if it was previously populated.
     /// </para>
     /// </remarks>
-    public abstract void Rebuild(IMetaDBManager manager);
+    public abstract Task Rebuild(IMetaDBManager manager);
 
     /// <summary>
     /// Clears the index partition for a single table and returns all pooled key buffers owned by that partition
@@ -256,7 +256,7 @@ public abstract class CrossTableRebuildableIndexDefinition<TInnerKey, TInnerValu
         Justification = "Hot-path: prefer Array.Empty<T>() to avoid any ambiguity in lowering/semantics and keep allocation behavior explicit.")]
     protected bool TryRentKey(Storage.CellRowColumnValueEntry entry, out byte[] owned)
     {
-        if (!entry.Cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
+        if (!entry.Cell.HasKeyRaw() || !entry.Cell.TryGetKeyRaw(out ReadOnlySpan<byte> k) || k.Length == 0)
         { owned = Array.Empty<byte>(); return false; }
 
         if ((uint)k.Length > (uint)_cachedKeySize)

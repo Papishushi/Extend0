@@ -61,7 +61,7 @@ public abstract class RebuildableIndexDefinition<TKey, TValue>(string name, IEqu
     /// in a consistent state even if it was previously populated.
     /// </para>
     /// </remarks>
-    public abstract void Rebuild(IMetadataTable table);
+    public abstract Task Rebuild(IMetadataTable table);
 
     /// <summary>
     /// Materializes a fixed-size lookup key into a per-thread scratch buffer, suitable for
@@ -164,8 +164,8 @@ public abstract class RebuildableIndexDefinition<TKey, TValue>(string name, IEqu
         var keySize = cols[(int)entry.Col].Size.GetKeySize();
         if (keySize == 0) { owned = Array.Empty<byte>(); return false; }
 
-        if (!entry.Cell.TryGetKey(out ReadOnlySpan<byte> k) || k.Length == 0)
-        { owned = Array.Empty<byte>(); return false; }
+        if (!entry.Cell.HasKeyRaw() || !entry.Cell.TryGetKeyRaw(out ReadOnlySpan<byte> k) || k.IsEmpty)
+            { owned = Array.Empty<byte>(); return false; }
 
         owned = _pool.RentExact(keySize);
         IndexKeyScratch.Fill(owned, k);

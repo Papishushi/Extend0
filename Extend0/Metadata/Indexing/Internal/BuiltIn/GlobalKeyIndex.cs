@@ -318,7 +318,7 @@ internal sealed class GlobalKeyIndex(string name, int capacity = 0)
     /// Returns all previously stored pooled keys to the pool, clears the index, then repopulates it by enumerating cells.
     /// </para>
     /// </remarks>
-    public override void Rebuild(IMetadataTable table)
+    public override async Task Rebuild(IMetadataTable table)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(table);
@@ -345,7 +345,7 @@ internal sealed class GlobalKeyIndex(string name, int capacity = 0)
             if (_keySize <= 0)
                 return;
 
-            foreach (var entry in table.EnumerateCells())
+            await foreach (var entry in table.EnumerateCells().AsAsync())
             {
                 if (!TryRentKey(cols, entry, out var perColOwned))
                     continue;

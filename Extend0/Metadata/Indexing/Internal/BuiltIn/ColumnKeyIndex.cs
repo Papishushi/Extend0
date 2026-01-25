@@ -613,7 +613,7 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown if <paramref name="table"/> is <see langword="null"/>.</exception>
     /// <exception cref="ObjectDisposedException">Thrown if the index has been disposed.</exception>
-    public override void Rebuild(IMetadataTable table)
+    public override async Task Rebuild(IMetadataTable table)
     {
         ThrowIfDisposed();
         Rwls.EnterWriteLock();
@@ -631,7 +631,7 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
 
             Index.Clear();
 
-            foreach (var entry in table.EnumerateCells())
+            await foreach (var entry in table.EnumerateCells().AsAsync())
             {
                 if (!TryRentKey(cols, entry, out var owned)) continue;
                 Set_NoLock(entry.Col, owned, entry.Row);
