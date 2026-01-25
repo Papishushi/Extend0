@@ -107,13 +107,29 @@ namespace Extend0.Metadata.Contract
         IMetadataTable Open();
 
         /// <summary>
-        /// Rebuilds all registered indexes using the table as the source of truth.
+        /// Rebuilds indexes for this table by scanning the underlying storage and using the table as the source of truth.
         /// </summary>
         /// <param name="strict">
-        /// If <see langword="true"/>, failures during index rebuild are surfaced (e.g., thrown or reported) according to the implementation.
-        /// If <see langword="false"/>, the implementation may skip or tolerate rebuild failures for best-effort indexing.
+        /// When <see langword="true"/>, the implementation must apply strict rebuild rules and surface failures
+        /// (for example, by throwing when a registered index is not rebuildable, or when invariant checks fail during the scan).
+        /// When <see langword="false"/>, the implementation may perform a best-effort rebuild (for example, skipping non-rebuildable
+        /// indexes and tolerating recoverable errors).
         /// </param>
-        void RebuildIndexes(bool strict = false);
+        /// <param name="cancellationToken">Token used to cancel the rebuild operation.</param>
+        /// <returns>A task that completes when the rebuild operation finishes.</returns>
+        /// <remarks>
+        /// <para>
+        /// Index rebuild is implementation-defined: implementations may rebuild sequentially or in parallel, may clear existing
+        /// index state before rebuilding, and may treat indexes as ephemeral caches derived from storage.
+        /// </para>
+        /// <para>
+        /// Callers should assume that rebuild may be expensive (it can scan storage and/or perform I/O) and that any previously
+        /// obtained spans/pointers into the underlying storage may become invalid if the implementation compacts or remaps data
+        /// as part of the rebuild workflow.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+        Task RebuildIndexes(bool strict = false, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Returns a human-readable representation of the table.
@@ -125,6 +141,35 @@ namespace Extend0.Metadata.Contract
         /// </summary>
         /// <param name="maxRows">Maximum number of rows to include in the output.</param>
         string ToString(uint maxRows);
+
+        /// <summary>
+        /// Attempts to compact this table's backing storage and related internal structures, if supported.
+        /// </summary>
+        /// <param name="strict">
+        /// When <see langword="true"/>, any exception thrown during compaction is propagated to the caller.
+        /// When <see langword="false"/>, compaction failures are swallowed and the method returns <see langword="false"/>.
+        /// </param>
+        /// <returns>
+        /// <see langword="true"/> if the table supports compaction and the operation completed successfully; otherwise,
+        /// <see langword="false"/> (either because compaction is not supported or because it failed in non-strict mode).
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// Compaction is implementation-defined at the <see cref="IMetadataTable"/> level. Depending on the concrete
+        /// implementation, it may include one or more of the following:
+        /// rewriting or shrinking the backing file, relocating slabs, reclaiming unused capacity, or rebuilding internal
+        /// caches/indexes.
+        /// </para>
+        /// <para>
+        /// Callers should assume compaction may be expensive and can involve I/O, remapping, and temporary extra space.
+        /// Any previously obtained spans/pointers into the table's storage may become invalid after a successful compaction.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="Exception">
+        /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by the compaction
+        /// process.
+        /// </exception>
+        Task<bool> TryCompactStore(bool strict, CancellationToken cancellationToken);
 
         /// <summary>
         /// Attempts to locate a cell by key within a specific column using a UTF-8 key buffer.
@@ -150,7 +195,7 @@ namespace Extend0.Metadata.Contract
         /// <param name="keyUtf8">UTF-8 key bytes.</param>
         /// <param name="hit">When this method returns <see langword="true"/>, receives the <c>(col,row)</c> location.</param>
         /// <returns><see langword="true"/> if the key was found; otherwise <see langword="false"/>.</returns>
-        bool TryFindGlobal(byte[] keyUtf8, out (uint col, uint row) hit);
+        bool TryFindGlobal(byte[] keyUtf8, out TryFindGlobalHit hit);
 
         /// <summary>
         /// Attempts to locate the first-class location of a key across all key-producing columns without allocating.
@@ -158,7 +203,7 @@ namespace Extend0.Metadata.Contract
         /// <param name="keyUtf8">UTF-8 key bytes.</param>
         /// <param name="hit">When this method returns <see langword="true"/>, receives the <c>(col,row)</c> location.</param>
         /// <returns><see langword="true"/> if the key was found; otherwise <see langword="false"/>.</returns>
-        bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out (uint col, uint row) hit);
+        bool TryFindGlobal(ReadOnlySpan<byte> keyUtf8, out TryFindGlobalHit hit);
 
         /// <summary>
         /// Attempts to locate the row id of a key within a specific column using a UTF-8 key buffer.
