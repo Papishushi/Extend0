@@ -4,8 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyVersion>1.0.9521.33435</AssemblyVersion>
-		<FileVersion>1.0.9521.33435</FileVersion>
+		<AssemblyVersion>1.0.9522.182</AssemblyVersion>
+		<FileVersion>1.0.9522.182</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
 		<PackageId>Extend0</PackageId>
@@ -41,10 +41,10 @@
 	</ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
-	<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
-	  <PackageReference Include="Extend0.MetadataEntry.Generator" Version="1.0.9504" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.2" />
+	<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.2" />
+	<PackageReference Include="Extend0.MetadataEntry.Generator" Version="1.0.9504" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>
