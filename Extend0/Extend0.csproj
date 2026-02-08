@@ -4,8 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyVersion>1.0.9522.182</AssemblyVersion>
-		<FileVersion>1.0.9522.182</FileVersion>
+		<AssemblyVersion>1.0.9535.5115</AssemblyVersion>
+		<FileVersion>1.0.9535.5115</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
 		<PackageId>Extend0</PackageId>
@@ -22,7 +22,7 @@
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageReleaseNotes>
 		</PackageReleaseNotes>
-		<Version>1.0.9521</Version>
+		<Version>1.0.9535</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -44,7 +44,10 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.2" />
 	<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.2" />
-	<PackageReference Include="Extend0.MetadataEntry.Generator" Version="1.0.9504" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+  	<ProjectReference Include="..\Extend0.MetadataEntry.Generator\Extend0.MetadataEntry.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
