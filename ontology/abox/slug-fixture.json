@@ -1,0 +1,20 @@
+{
+  "examples": [
+    {
+      "input": "Extend0 Platform",
+      "slug": "extend0-platform"
+    },
+    {
+      "input": "Lifecycle System",
+      "slug": "lifecycle-system"
+    },
+    {
+      "input": "MetaDB Access",
+      "slug": "metadb-access"
+    },
+    {
+      "input": "Named Pipe Transport",
+      "slug": "named-pipe-transport"
+    }
+  ]
+}

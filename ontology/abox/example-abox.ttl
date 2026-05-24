@@ -1,0 +1,113 @@
+@prefix ns: <https://extend0.se777en.fyi/ns#> .
+@prefix ex: <https://extend0.se777en.fyi/abox#> .
+
+ex:extend0-platform
+    a ns:Extend0Platform ;
+    ns:hasConstituentSystem ex:lifecycle-system, ex:metadb-system .
+
+ex:lifecycle-system
+    a ns:LifecycleSystem ;
+    ns:governsAccessTo ex:metadb-access ;
+    ns:coordinatesOwnershipThrough ex:lifecycle-coordinator ;
+    ns:appliesWithinScope ex:process-scope, ex:machine-scope ;
+    ns:usesCoordinationStore ex:metadb-coordination-store ;
+    ns:recordsCoordinationStateIn ex:settings-table .
+
+ex:lifecycle-coordinator
+    a ns:LifecycleCoordinator ;
+    ns:coordinatesIdentity ex:metadb-identity ;
+    ns:protectsAccessSurface ex:metadb-access .
+
+ex:metadb-system
+    a ns:MetaDBSystem ;
+    ns:usesManager ex:metadb-manager ;
+    ns:containsTable ex:settings-table ;
+    ns:supportsStorageModel ex:durable-storage .
+
+ex:metadb-manager
+    a ns:MetaDBManager .
+
+ex:metadb-access
+    a ns:MetaDBSingletonAccessSurface ;
+    ns:providesAccessTo ex:metadb-system ;
+    ns:hasServiceIdentity ex:metadb-identity ;
+    ns:resolvesViaPattern ex:cross-process-singleton ;
+    ns:resolvesAs ex:proxy-resolution ;
+    ns:exposesContract ex:metadb-contract ;
+    ns:usesTransport ex:named-pipe-transport ;
+    ns:emitsHeartbeat ex:metadb-heartbeat .
+
+ex:metadb-identity
+    a ns:ServiceIdentity .
+
+ex:metadb-contract
+    a ns:MetaDBServiceContract .
+
+ex:cross-process-singleton
+    a ns:CrossProcessSingletonPattern .
+
+ex:proxy-resolution
+    a ns:ProxyResolution .
+
+ex:named-pipe-transport
+    a ns:NamedPipeTransport ;
+    ns:reachesEndpoint ex:named-pipe-endpoint .
+
+ex:named-pipe-endpoint
+    a ns:Endpoint .
+
+ex:process-scope
+    a ns:ProcessScope .
+
+ex:machine-scope
+    a ns:MachineScope .
+
+ex:metadb-coordination-store
+    a ns:MetadataCoordinationStore .
+
+ex:settings-table
+    a ns:MetadataTable ;
+    ns:conformsToSchema ex:settings-schema ;
+    ns:isBackedBy ex:durable-storage ;
+    ns:hasRow ex:settings-row-0 ;
+    ns:hasIndex ex:settings-key-index ;
+    ns:containsCoordinationRecord ex:metadb-ownership .
+
+ex:settings-schema
+    a ns:TableSchema ;
+    ns:definesColumn ex:entries-column .
+
+ex:entries-column
+    a ns:KeyedColumn, ns:ValueBearingColumn ;
+    ns:storesShape ex:metadata-entry-shape .
+
+ex:metadata-entry-shape
+    a ns:MetadataEntryShape .
+
+ex:settings-row-0
+    a ns:MetadataRow ;
+    ns:hasCell ex:settings-cell-0 .
+
+ex:settings-cell-0
+    a ns:MetadataCell ;
+    ns:belongsToRow ex:settings-row-0 ;
+    ns:belongsToColumn ex:entries-column .
+
+ex:settings-key-index
+    a ns:TableIndex ;
+    ns:indexesTable ex:settings-table .
+
+ex:durable-storage
+    a ns:DurableStorageModel .
+
+ex:metadb-ownership
+    a ns:OwnershipClaim ;
+    ns:assertsOwnershipOf ex:metadb-access ;
+    ns:assertsOwnershipIdentity ex:metadb-identity ;
+    ns:isBoundedByLease ex:metadb-lease .
+
+ex:metadb-lease
+    a ns:Lease .
+
+ex:metadb-heartbeat
+    a ns:HeartbeatSignal .

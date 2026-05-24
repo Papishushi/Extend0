@@ -1,0 +1,9 @@
+build/
+dist/
+*.spec
+!abox-doctor.spec
+version_info.txt
+.venv/
+*egg-info/
+pkg/
+*.pyz

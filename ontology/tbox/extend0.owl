@@ -1,0 +1,953 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+    xmlns="https://extend0.se777en.fyi/ns#"
+    xml:base="https://extend0.se777en.fyi/ns"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema#">
+
+  <owl:Ontology rdf:about="">
+    <rdfs:label xml:lang="en">Extend0 domain ontology</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      TBox for the stable, domain-defining concepts of Extend0. The ontology models what the
+      platform is and how its core concepts relate to one another, with special emphasis on
+      Lifecycle, MetaDB, transport-mediated access, and structured metadata state. Code symbols are
+      linked only as traceability hints and do not define the semantics.
+    </rdfs:comment>
+    <owl:versionInfo>1.2.0</owl:versionInfo>
+  </owl:Ontology>
+
+  <owl:AnnotationProperty rdf:about="#mapsToCodeSymbol">
+    <rdfs:label xml:lang="en">maps to code symbol</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      Annotation that links a domain concept to one or more relevant code symbols in the repository.
+      It is informative and traceability-oriented, not part of the domain semantics.
+    </rdfs:comment>
+  </owl:AnnotationProperty>
+
+  <owl:Class rdf:about="#Extend0Concept">
+    <rdfs:label xml:lang="en">Extend0 concept</rdfs:label>
+    <rdfs:comment xml:lang="en">Root class for stable concepts that define the Extend0 domain.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#System">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">System</rdfs:label>
+    <rdfs:comment xml:lang="en">A coherent functional system or product surface within Extend0.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#PlatformSystem">
+    <rdfs:subClassOf rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">Platform system</rdfs:label>
+    <rdfs:comment xml:lang="en">A composed top-level system made of multiple cooperating systems.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Subsystem">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Subsystem</rdfs:label>
+    <rdfs:comment xml:lang="en">A major functional area with its own responsibilities and vocabulary.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Capability">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Capability</rdfs:label>
+    <rdfs:comment xml:lang="en">A reusable behavior or responsibility provided by a subsystem or system.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#LifecycleSubsystem">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+    <rdfs:label xml:lang="en">Lifecycle subsystem</rdfs:label>
+    <mapsToCodeSymbol>Extend0.Lifecycle</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataSubsystem">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+    <rdfs:label xml:lang="en">Metadata subsystem</rdfs:label>
+    <mapsToCodeSymbol>Extend0.Metadata</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CodeGenerationSubsystem">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+    <rdfs:label xml:lang="en">Code generation subsystem</rdfs:label>
+    <mapsToCodeSymbol>Extend0.MetadataEntry.Generator</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.BlittableAdapter.Generator</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#AsyncUtilitySubsystem">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+    <rdfs:label xml:lang="en">Async utility subsystem</rdfs:label>
+    <mapsToCodeSymbol>Extend0.TaskExtensions</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SingletonLifecycleCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Singleton lifecycle capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CrossProcessCoordinationCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Cross-process coordination capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataPersistenceCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Metadata persistence capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataRelationshipCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Metadata relationship capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataIndexingCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Metadata indexing capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SchemaDrivenGenerationCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Schema-driven generation capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#BackgroundTaskReliabilityCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Background task reliability capability</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#UniqueAccessCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Unique access capability</rdfs:label>
+    <rdfs:comment xml:lang="en">A capability that enforces a single active owner or access path for a protected resource or service.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#DistributedCoordinationCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Distributed coordination capability</rdfs:label>
+    <rdfs:comment xml:lang="en">A capability that coordinates ownership or service access across more than one execution scope.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SingletonPattern">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Singleton pattern</rdfs:label>
+    <rdfs:comment xml:lang="en">A lifecycle pattern that guarantees a single active service instance within some scope.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ProcessSingletonPattern">
+    <rdfs:subClassOf rdf:resource="#SingletonPattern"/>
+    <rdfs:label xml:lang="en">Process singleton pattern</rdfs:label>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Singleton</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CrossProcessSingletonPattern">
+    <rdfs:subClassOf rdf:resource="#SingletonPattern"/>
+    <rdfs:label xml:lang="en">Cross-process singleton pattern</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A lifecycle pattern in which one process owns the live service and other processes consume the
+      same service through a stable access surface.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.CrossProcessSingleton&lt;TService&gt;</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ServiceContract">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Service contract</rdfs:label>
+    <rdfs:comment xml:lang="en">A stable behavioral contract exposed to consumers of a service.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CrossProcessServiceContract">
+    <rdfs:subClassOf rdf:resource="#ServiceContract"/>
+    <rdfs:label xml:lang="en">Cross-process service contract</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A service contract designed to remain stable when the active service may live in another process.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.ICrossProcessService</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ExecutionScope">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Execution scope</rdfs:label>
+    <rdfs:comment xml:lang="en">A boundary within which ownership, access, or coordination may be enforced.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ParticipantRole">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Participant role</rdfs:label>
+    <rdfs:comment xml:lang="en">A role played by a participant relative to a coordinated service identity or access surface.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#OwnerRole">
+    <rdfs:subClassOf rdf:resource="#ParticipantRole"/>
+    <rdfs:label xml:lang="en">Owner role</rdfs:label>
+    <rdfs:comment xml:lang="en">The role that actively owns and hosts the live service instance for a coordinated identity.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ClientRole">
+    <rdfs:subClassOf rdf:resource="#ParticipantRole"/>
+    <rdfs:label xml:lang="en">Client role</rdfs:label>
+    <rdfs:comment xml:lang="en">The role that consumes a coordinated service identity without owning the live service instance.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ServiceResolutionMode">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Service resolution mode</rdfs:label>
+    <rdfs:comment xml:lang="en">The way an access surface resolves a service for a participant in a given coordination situation.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#DirectInstanceResolution">
+    <rdfs:subClassOf rdf:resource="#ServiceResolutionMode"/>
+    <rdfs:label xml:lang="en">Direct instance resolution</rdfs:label>
+    <rdfs:comment xml:lang="en">Resolution mode in which the consumer receives the live in-process service instance.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ProxyResolution">
+    <rdfs:subClassOf rdf:resource="#ServiceResolutionMode"/>
+    <rdfs:label xml:lang="en">Proxy resolution</rdfs:label>
+    <rdfs:comment xml:lang="en">Resolution mode in which the consumer receives a proxy that forwards calls to the owner-held service.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ProcessScope">
+    <rdfs:subClassOf rdf:resource="#ExecutionScope"/>
+    <rdfs:label xml:lang="en">Process scope</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MachineScope">
+    <rdfs:subClassOf rdf:resource="#ExecutionScope"/>
+    <rdfs:label xml:lang="en">Machine scope</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#NetworkScope">
+    <rdfs:subClassOf rdf:resource="#ExecutionScope"/>
+    <rdfs:label xml:lang="en">Network scope</rdfs:label>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CoordinationRecord">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Coordination record</rdfs:label>
+    <rdfs:comment xml:lang="en">A persistent or shareable record used to arbitrate ownership, liveness, or unique access.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#OwnershipClaim">
+    <rdfs:subClassOf rdf:resource="#CoordinationRecord"/>
+    <rdfs:label xml:lang="en">Ownership claim</rdfs:label>
+    <rdfs:comment xml:lang="en">A claim that a service or participant currently owns a protected role or resource.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Lease">
+    <rdfs:subClassOf rdf:resource="#CoordinationRecord"/>
+    <rdfs:label xml:lang="en">Lease</rdfs:label>
+    <rdfs:comment xml:lang="en">A time-bounded ownership or liveness grant that can expire and be renewed.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#HeartbeatSignal">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Heartbeat signal</rdfs:label>
+    <rdfs:comment xml:lang="en">A liveness signal emitted by a hosted service or participant to indicate that it is currently active.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.Heartbeat</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#AccessSurface">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Access surface</rdfs:label>
+    <rdfs:comment xml:lang="en">A stable entry point through which consumers interact with a system or service.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ServiceIdentity">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Service identity</rdfs:label>
+    <rdfs:comment xml:lang="en">A stable identity used to distinguish one logical service or protected access surface from another.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Endpoint">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Endpoint</rdfs:label>
+    <rdfs:comment xml:lang="en">A reachable endpoint through which a transport can connect to an access surface.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Transport">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Transport</rdfs:label>
+    <rdfs:comment xml:lang="en">A communication mechanism used to reach or proxy a service across an execution boundary.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#LocalTransport">
+    <rdfs:subClassOf rdf:resource="#Transport"/>
+    <rdfs:label xml:lang="en">Local transport</rdfs:label>
+    <rdfs:comment xml:lang="en">A transport intended primarily for communication within one machine or local execution environment.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#RemoteCapableTransport">
+    <rdfs:subClassOf rdf:resource="#Transport"/>
+    <rdfs:label xml:lang="en">Remote-capable transport</rdfs:label>
+    <rdfs:comment xml:lang="en">A transport that can reach a service outside the current process or machine when the environment permits it.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#PipeTransport">
+    <rdfs:subClassOf rdf:resource="#Transport"/>
+    <rdfs:label xml:lang="en">Pipe transport</rdfs:label>
+    <rdfs:comment xml:lang="en">A transport based on pipe-style message channels.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#NamedPipeTransport">
+    <rdfs:subClassOf rdf:resource="#PipeTransport"/>
+    <rdfs:subClassOf rdf:resource="#LocalTransport"/>
+    <rdfs:subClassOf rdf:resource="#RemoteCapableTransport"/>
+    <rdfs:label xml:lang="en">Named pipe transport</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A named-pipe transport. It is commonly used for local IPC, but may also be reachable across a network in environments that support remote named pipes.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.NamedPipeClientTransport</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.NamedPipeServer</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#TcpTransport">
+    <rdfs:subClassOf rdf:resource="#RemoteCapableTransport"/>
+    <rdfs:label xml:lang="en">TCP transport</rdfs:label>
+    <rdfs:comment xml:lang="en">A transport based on direct TCP connectivity.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SingletonAccessSurface">
+    <rdfs:subClassOf rdf:resource="#AccessSurface"/>
+    <rdfs:label xml:lang="en">Singleton access surface</rdfs:label>
+    <rdfs:comment xml:lang="en">An access surface that resolves a service through singleton lifecycle semantics.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetaDBSystem">
+    <rdfs:subClassOf rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">MetaDB system</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      The Extend0 metadata database system for fixed-layout tables, schema-defined columns,
+      references, indexes, and stable access across one or many processes.
+    </rdfs:comment>
+    <mapsToCodeSymbol>MetaDB</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Metadata</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Extend0Platform">
+    <rdfs:subClassOf rdf:resource="#PlatformSystem"/>
+    <rdfs:label xml:lang="en">Extend0 platform</rdfs:label>
+    <rdfs:comment xml:lang="en">The overall Extend0 platform as a composition of cooperating systems such as lifecycle and metadata management.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#LifecycleSystem">
+    <rdfs:subClassOf rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">Lifecycle system</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      The system responsible for singleton ownership, unique access arbitration, service activation,
+      and coordination across process, machine, or wider network scopes.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#LifecycleCoordinator">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Lifecycle coordinator</rdfs:label>
+    <rdfs:comment xml:lang="en">A coordinator that determines who owns a service identity and how other participants reach it.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.CrossProcessOrchestator&lt;TService&gt;</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#UniqueAccessPolicy">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Unique access policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A policy describing the scope and arbitration rules for unique ownership of a service or resource.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CoordinationStore">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Coordination store</rdfs:label>
+    <rdfs:comment xml:lang="en">A durable or shareable data substrate used for coordination, leases, or ownership records.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataCoordinationStore">
+    <rdfs:subClassOf rdf:resource="#CoordinationStore"/>
+    <rdfs:label xml:lang="en">Metadata coordination store</rdfs:label>
+    <rdfs:comment xml:lang="en">A coordination store implemented through MetaDB tables and records.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetaDBManager">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">MetaDB manager</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      The operational manager that registers schemas, materializes tables, maintains indexes,
+      and coordinates table relationships within MetaDB.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Contract.IMetaDBManager</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Metadata.Internal.MetaDBManager</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetaDBServiceContract">
+    <rdfs:subClassOf rdf:resource="#CrossProcessServiceContract"/>
+    <rdfs:label xml:lang="en">MetaDB service contract</rdfs:label>
+    <rdfs:comment xml:lang="en">The service contract through which MetaDB operations remain available across process boundaries.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.CrossProcess.Contract.IMetaDBManagerRPCCompatible</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetaDBAccessSurface">
+    <rdfs:subClassOf rdf:resource="#AccessSurface"/>
+    <rdfs:label xml:lang="en">MetaDB access surface</rdfs:label>
+    <rdfs:comment xml:lang="en">A stable consumer-facing entry point to the MetaDB system.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetaDBSingletonAccessSurface">
+    <rdfs:subClassOf rdf:resource="#MetaDBAccessSurface"/>
+    <rdfs:subClassOf rdf:resource="#SingletonAccessSurface"/>
+    <rdfs:label xml:lang="en">MetaDB singleton access surface</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      The singleton-based access surface through which a process reaches the active MetaDB service,
+      regardless of whether the active service resolves locally or through cross-process indirection.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.CrossProcess.MetaDBManagerSingleton</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataTable">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Metadata table</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A logical metadata collection addressed by rows and columns and governed by a table schema.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Contract.IMetadataTable</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Metadata.Internal.MetadataTable</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataRow">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Metadata row</rdfs:label>
+    <rdfs:comment xml:lang="en">A logical row within a metadata table.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataCell">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Metadata cell</rdfs:label>
+    <rdfs:comment xml:lang="en">An addressable cell located at the intersection of one row and one column.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.MetadataCell</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#TableSchema">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Table schema</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A schema that defines the logical identity, column structure, and storage intent of a metadata table.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Schema.TableSpec</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Column">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Column</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A schema-defined table component whose cells share the same payload shape and addressing role.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Schema.ColumnConfiguration</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#KeyedColumn">
+    <rdfs:subClassOf rdf:resource="#Column"/>
+    <rdfs:label xml:lang="en">Keyed column</rdfs:label>
+    <rdfs:comment xml:lang="en">A column whose cells expose a key space that can participate in lookup or indexing.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#UnkeyedColumn">
+    <rdfs:subClassOf rdf:resource="#Column"/>
+    <rdfs:label xml:lang="en">Unkeyed column</rdfs:label>
+    <rdfs:comment xml:lang="en">A column whose cells do not contribute a separate key space.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ValueBearingColumn">
+    <rdfs:subClassOf rdf:resource="#Column"/>
+    <rdfs:label xml:lang="en">Value-bearing column</rdfs:label>
+    <rdfs:comment xml:lang="en">A column whose cells primarily hold direct values for the represented entity or event.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ReferenceBearingColumn">
+    <rdfs:subClassOf rdf:resource="#Column"/>
+    <rdfs:label xml:lang="en">Reference-bearing column</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A column whose cells primarily hold relationships to other table locations rather than standalone values.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Schema.TableSpec.Helpers.RefsColumn</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#DataShape">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Data shape</rdfs:label>
+    <rdfs:comment xml:lang="en">A stable logical or binary shape used as the payload model for column cells.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataEntryShape">
+    <rdfs:subClassOf rdf:resource="#DataShape"/>
+    <rdfs:label xml:lang="en">Metadata entry shape</rdfs:label>
+    <rdfs:comment xml:lang="en">A fixed-layout key/value shape used for metadata entries with explicit key and value regions.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Contract.IMetadataEntry</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#BlittableShape">
+    <rdfs:subClassOf rdf:resource="#DataShape"/>
+    <rdfs:label xml:lang="en">Blittable shape</rdfs:label>
+    <rdfs:comment xml:lang="en">A fixed layout that can be stored and moved without per-instance serialization logic.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ReferenceCollection">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Reference collection</rdfs:label>
+    <rdfs:comment xml:lang="en">A set or vector of references maintained inside one metadata cell.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Refs.MetadataTableRefVec</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CellReference">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Cell reference</rdfs:label>
+    <rdfs:comment xml:lang="en">
+      A reference to an addressable location in a metadata table, including the target table, column, and row.
+    </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Refs.MetadataTableRef</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#Index">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Index</rdfs:label>
+    <rdfs:comment xml:lang="en">A lookup structure that accelerates discovery of metadata content or relationships.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#TableIndex">
+    <rdfs:subClassOf rdf:resource="#Index"/>
+    <rdfs:label xml:lang="en">Table index</rdfs:label>
+    <rdfs:comment xml:lang="en">An index whose scope is one metadata table.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CrossTableIndex">
+    <rdfs:subClassOf rdf:resource="#Index"/>
+    <rdfs:label xml:lang="en">Cross-table index</rdfs:label>
+    <rdfs:comment xml:lang="en">An index whose scope spans more than one metadata table.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#GlobalLookupIndex">
+    <rdfs:subClassOf rdf:resource="#Index"/>
+    <rdfs:label xml:lang="en">Global lookup index</rdfs:label>
+    <rdfs:comment xml:lang="en">An index that supports global key-based lookup over one or many tables.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Indexing.Internal.BuiltIn.GlobalKeyIndex</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Metadata.Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageModel">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Storage model</rdfs:label>
+    <rdfs:comment xml:lang="en">A conceptual storage model used to back metadata tables.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#DurableStorageModel">
+    <rdfs:subClassOf rdf:resource="#StorageModel"/>
+    <rdfs:label xml:lang="en">Durable storage model</rdfs:label>
+    <rdfs:comment xml:lang="en">A storage model intended for persisted or mapped metadata tables.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.Internal.MappedStore</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#VolatileStorageModel">
+    <rdfs:subClassOf rdf:resource="#StorageModel"/>
+    <rdfs:label xml:lang="en">Volatile storage model</rdfs:label>
+    <rdfs:comment xml:lang="en">A storage model intended for in-memory or non-durable metadata tables.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.Internal.InMemoryStore</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#CapacityPolicy">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Capacity policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A policy that governs how column capacity is handled when a write requires more space.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.CapacityPolicy</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SourceGenerator">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Source generator</rdfs:label>
+    <rdfs:comment xml:lang="en">A generation component that derives code artifacts from declarative definitions.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataEntryGenerator">
+    <rdfs:subClassOf rdf:resource="#SourceGenerator"/>
+    <rdfs:label xml:lang="en">Metadata entry generator</rdfs:label>
+    <rdfs:comment xml:lang="en">A generator that emits fixed-layout metadata entry shapes from declared size combinations.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.MetadataEntry.Generator.MetadataEntryGenerator</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#BlittableAdapterGenerator">
+    <rdfs:subClassOf rdf:resource="#SourceGenerator"/>
+    <rdfs:label xml:lang="en">Blittable adapter generator</rdfs:label>
+    <rdfs:comment xml:lang="en">A generator that emits blittable shapes from external definitions.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.BlittableAdapter.Generator.BlittableAdapterGenerator</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#GeneratorDefinition">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Generator definition</rdfs:label>
+    <rdfs:comment xml:lang="en">A declarative artifact used as input to a source generator.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#MetadataEntryCatalog">
+    <rdfs:subClassOf rdf:resource="#GeneratorDefinition"/>
+    <rdfs:label xml:lang="en">Metadata entry catalog</rdfs:label>
+    <rdfs:comment xml:lang="en">A catalog of key/value size combinations that define generated metadata entry shapes.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.Generator.attributes.cs</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#BlittableDefinition">
+    <rdfs:subClassOf rdf:resource="#GeneratorDefinition"/>
+    <rdfs:label xml:lang="en">Blittable definition</rdfs:label>
+    <rdfs:comment xml:lang="en">An external definition that describes a blittable generated data shape.</rdfs:comment>
+    <mapsToCodeSymbol>*.blit.json</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:ObjectProperty rdf:about="#hasSubsystem">
+    <rdfs:domain rdf:resource="#System"/>
+    <rdfs:range rdf:resource="#Subsystem"/>
+    <rdfs:label xml:lang="en">has subsystem</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasConstituentSystem">
+    <rdfs:domain rdf:resource="#PlatformSystem"/>
+    <rdfs:range rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">has constituent system</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#dependsOnSystem">
+    <rdfs:domain rdf:resource="#System"/>
+    <rdfs:range rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">depends on system</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#providesCapability">
+    <rdfs:domain rdf:resource="#Subsystem"/>
+    <rdfs:range rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">provides capability</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#supportsSingletonPattern">
+    <rdfs:domain rdf:resource="#LifecycleSubsystem"/>
+    <rdfs:range rdf:resource="#SingletonPattern"/>
+    <rdfs:label xml:lang="en">supports singleton pattern</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#coordinatesOwnershipThrough">
+    <rdfs:domain rdf:resource="#LifecycleSystem"/>
+    <rdfs:range rdf:resource="#LifecycleCoordinator"/>
+    <rdfs:label xml:lang="en">coordinates ownership through</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#assignsRole">
+    <rdfs:domain rdf:resource="#LifecycleCoordinator"/>
+    <rdfs:range rdf:resource="#ParticipantRole"/>
+    <rdfs:label xml:lang="en">assigns role</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#governsAccessTo">
+    <rdfs:domain rdf:resource="#LifecycleSystem"/>
+    <rdfs:range rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">governs access to</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#appliesWithinScope">
+    <rdfs:domain rdf:resource="#UniqueAccessPolicy"/>
+    <rdfs:range rdf:resource="#ExecutionScope"/>
+    <rdfs:label xml:lang="en">applies within scope</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#usesCoordinationStore">
+    <rdfs:domain rdf:resource="#LifecycleSystem"/>
+    <rdfs:range rdf:resource="#CoordinationStore"/>
+    <rdfs:label xml:lang="en">uses coordination store</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#recordsCoordinationStateIn">
+    <rdfs:domain rdf:resource="#CoordinationStore"/>
+    <rdfs:range rdf:resource="#MetadataTable"/>
+    <rdfs:label xml:lang="en">records coordination state in</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#containsCoordinationRecord">
+    <rdfs:domain rdf:resource="#MetadataTable"/>
+    <rdfs:range rdf:resource="#CoordinationRecord"/>
+    <rdfs:label xml:lang="en">contains coordination record</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#emitsHeartbeat">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#HeartbeatSignal"/>
+    <rdfs:label xml:lang="en">emits heartbeat</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#isBoundedByLease">
+    <rdfs:domain rdf:resource="#OwnershipClaim"/>
+    <rdfs:range rdf:resource="#Lease"/>
+    <rdfs:label xml:lang="en">is bounded by lease</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#assertsOwnershipOf">
+    <rdfs:domain rdf:resource="#OwnershipClaim"/>
+    <rdfs:range rdf:resource="#AccessSurface"/>
+    <rdfs:label xml:lang="en">asserts ownership of</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#assertsOwnershipIdentity">
+    <rdfs:domain rdf:resource="#OwnershipClaim"/>
+    <rdfs:range rdf:resource="#ServiceIdentity"/>
+    <rdfs:label xml:lang="en">asserts ownership identity</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#protectsAccessSurface">
+    <rdfs:domain rdf:resource="#UniqueAccessPolicy"/>
+    <rdfs:range rdf:resource="#AccessSurface"/>
+    <rdfs:label xml:lang="en">protects access surface</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#providesAccessTo">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#System"/>
+    <rdfs:label xml:lang="en">provides access to</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasServiceIdentity">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#ServiceIdentity"/>
+    <rdfs:label xml:lang="en">has service identity</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#resolvesViaPattern">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#SingletonPattern"/>
+    <rdfs:label xml:lang="en">resolves via pattern</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#resolvesAs">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#ServiceResolutionMode"/>
+    <rdfs:label xml:lang="en">resolves as</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#exposesContract">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#ServiceContract"/>
+    <rdfs:label xml:lang="en">exposes contract</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#usesTransport">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#Transport"/>
+    <rdfs:label xml:lang="en">uses transport</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#reachesEndpoint">
+    <rdfs:domain rdf:resource="#Transport"/>
+    <rdfs:range rdf:resource="#Endpoint"/>
+    <rdfs:label xml:lang="en">reaches endpoint</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#coordinatesIdentity">
+    <rdfs:domain rdf:resource="#LifecycleCoordinator"/>
+    <rdfs:range rdf:resource="#ServiceIdentity"/>
+    <rdfs:label xml:lang="en">coordinates identity</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#participatesWithRole">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#ParticipantRole"/>
+    <rdfs:label xml:lang="en">participates with role</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#usesManager">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#MetaDBSystem"/>
+    <rdfs:range rdf:resource="#MetaDBManager"/>
+    <rdfs:label xml:lang="en">uses manager</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#managesTable">
+    <rdfs:domain rdf:resource="#MetaDBManager"/>
+    <rdfs:range rdf:resource="#MetadataTable"/>
+    <rdfs:label xml:lang="en">manages table</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#containsTable">
+    <rdfs:domain rdf:resource="#MetaDBSystem"/>
+    <rdfs:range rdf:resource="#MetadataTable"/>
+    <rdfs:label xml:lang="en">contains table</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#conformsToSchema">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#MetadataTable"/>
+    <rdfs:range rdf:resource="#TableSchema"/>
+    <rdfs:label xml:lang="en">conforms to schema</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#definesColumn">
+    <rdfs:domain rdf:resource="#TableSchema"/>
+    <rdfs:range rdf:resource="#Column"/>
+    <rdfs:label xml:lang="en">defines column</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasRow">
+    <rdfs:domain rdf:resource="#MetadataTable"/>
+    <rdfs:range rdf:resource="#MetadataRow"/>
+    <rdfs:label xml:lang="en">has row</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasCell">
+    <rdfs:domain rdf:resource="#MetadataRow"/>
+    <rdfs:range rdf:resource="#MetadataCell"/>
+    <rdfs:label xml:lang="en">has cell</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#belongsToColumn">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#MetadataCell"/>
+    <rdfs:range rdf:resource="#Column"/>
+    <rdfs:label xml:lang="en">belongs to column</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#belongsToRow">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#MetadataCell"/>
+    <rdfs:range rdf:resource="#MetadataRow"/>
+    <rdfs:label xml:lang="en">belongs to row</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#storesShape">
+    <rdfs:domain rdf:resource="#Column"/>
+    <rdfs:range rdf:resource="#DataShape"/>
+    <rdfs:label xml:lang="en">stores shape</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#storesReferenceCollection">
+    <rdfs:domain rdf:resource="#ReferenceBearingColumn"/>
+    <rdfs:range rdf:resource="#ReferenceCollection"/>
+    <rdfs:label xml:lang="en">stores reference collection</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#containsReference">
+    <rdfs:domain rdf:resource="#ReferenceCollection"/>
+    <rdfs:range rdf:resource="#CellReference"/>
+    <rdfs:label xml:lang="en">contains reference</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#referencesCell">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#CellReference"/>
+    <rdfs:range rdf:resource="#MetadataCell"/>
+    <rdfs:label xml:lang="en">references cell</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#referencesTable">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#CellReference"/>
+    <rdfs:range rdf:resource="#MetadataTable"/>
+    <rdfs:label xml:lang="en">references table</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#participatesInIndex">
+    <rdfs:domain rdf:resource="#Column"/>
+    <rdfs:range rdf:resource="#Index"/>
+    <rdfs:label xml:lang="en">participates in index</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasIndex">
+    <rdfs:domain rdf:resource="#MetadataTable"/>
+    <rdfs:range rdf:resource="#Index"/>
+    <rdfs:label xml:lang="en">has index</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#indexesTable">
+    <rdfs:domain rdf:resource="#TableIndex"/>
+    <rdfs:range rdf:resource="#MetadataTable"/>
+    <rdfs:label xml:lang="en">indexes table</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#spansTable">
+    <rdfs:domain rdf:resource="#CrossTableIndex"/>
+    <rdfs:range rdf:resource="#MetadataTable"/>
+    <rdfs:label xml:lang="en">spans table</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#supportsStorageModel">
+    <rdfs:domain rdf:resource="#MetaDBSystem"/>
+    <rdfs:range rdf:resource="#StorageModel"/>
+    <rdfs:label xml:lang="en">supports storage model</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#isBackedBy">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#MetadataTable"/>
+    <rdfs:range rdf:resource="#StorageModel"/>
+    <rdfs:label xml:lang="en">is backed by</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#usesCapacityPolicy">
+    <rdfs:domain rdf:resource="#MetaDBManager"/>
+    <rdfs:range rdf:resource="#CapacityPolicy"/>
+    <rdfs:label xml:lang="en">uses capacity policy</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#consumesDefinition">
+    <rdfs:domain rdf:resource="#SourceGenerator"/>
+    <rdfs:range rdf:resource="#GeneratorDefinition"/>
+    <rdfs:label xml:lang="en">consumes definition</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#emitsShape">
+    <rdfs:domain rdf:resource="#SourceGenerator"/>
+    <rdfs:range rdf:resource="#DataShape"/>
+    <rdfs:label xml:lang="en">emits shape</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:DatatypeProperty rdf:about="#hasLogicalName">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="en">has logical name</rdfs:label>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="#hasInitialCapacity">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#Column"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+    <rdfs:label xml:lang="en">has initial capacity</rdfs:label>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="#isReadOnly">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#Column"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+    <rdfs:label xml:lang="en">is read only</rdfs:label>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="#hasKeyByteCapacity">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#MetadataEntryShape"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+    <rdfs:label xml:lang="en">has key byte capacity</rdfs:label>
+  </owl:DatatypeProperty>
+
+  <owl:DatatypeProperty rdf:about="#hasValueByteCapacity">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="#DataShape"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+    <rdfs:label xml:lang="en">has value byte capacity</rdfs:label>
+  </owl:DatatypeProperty>
+
+  <owl:NamedIndividual rdf:about="#CapacityPolicyNone">
+    <rdf:type rdf:resource="#CapacityPolicy"/>
+    <rdfs:label xml:lang="en">none</rdfs:label>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.CapacityPolicy.None</mapsToCodeSymbol>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="#CapacityPolicyThrow">
+    <rdf:type rdf:resource="#CapacityPolicy"/>
+    <rdfs:label xml:lang="en">throw</rdfs:label>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.CapacityPolicy.Throw</mapsToCodeSymbol>
+  </owl:NamedIndividual>
+
+  <owl:NamedIndividual rdf:about="#CapacityPolicyAutoGrowZeroInit">
+    <rdf:type rdf:resource="#CapacityPolicy"/>
+    <rdfs:label xml:lang="en">auto grow zero init</rdfs:label>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.CapacityPolicy.AutoGrowZeroInit</mapsToCodeSymbol>
+  </owl:NamedIndividual>
+
+</rdf:RDF>

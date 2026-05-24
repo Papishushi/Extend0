@@ -1,0 +1,145 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ns: <https://extend0.se777en.fyi/ns#> .
+@prefix ex: <https://extend0.se777en.fyi/abox#> .
+
+ex:Extend0PlatformShape
+    a sh:NodeShape ;
+    sh:targetClass ns:Extend0Platform ;
+    sh:property [
+        sh:path ns:hasConstituentSystem ;
+        sh:minCount 2 ;
+        sh:class ns:System
+    ] .
+
+ex:LifecycleSystemShape
+    a sh:NodeShape ;
+    sh:targetClass ns:LifecycleSystem ;
+    sh:property [
+        sh:path ns:governsAccessTo ;
+        sh:minCount 1 ;
+        sh:class ns:AccessSurface
+    ] ;
+    sh:property [
+        sh:path ns:coordinatesOwnershipThrough ;
+        sh:minCount 1 ;
+        sh:class ns:LifecycleCoordinator
+    ] ;
+    sh:property [
+        sh:path ns:appliesWithinScope ;
+        sh:minCount 1 ;
+        sh:class ns:ExecutionScope
+    ] .
+
+ex:MetaDBSystemShape
+    a sh:NodeShape ;
+    sh:targetClass ns:MetaDBSystem ;
+    sh:property [
+        sh:path ns:usesManager ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ns:MetaDBManager
+    ] ;
+    sh:property [
+        sh:path ns:containsTable ;
+        sh:minCount 1 ;
+        sh:class ns:MetadataTable
+    ] ;
+    sh:property [
+        sh:path ns:supportsStorageModel ;
+        sh:minCount 1 ;
+        sh:class ns:StorageModel
+    ] .
+
+ex:AccessSurfaceShape
+    a sh:NodeShape ;
+    sh:targetClass ns:AccessSurface ;
+    sh:property [
+        sh:path ns:providesAccessTo ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ns:System
+    ] ;
+    sh:property [
+        sh:path ns:hasServiceIdentity ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ns:ServiceIdentity
+    ] ;
+    sh:property [
+        sh:path ns:resolvesViaPattern ;
+        sh:minCount 1 ;
+        sh:class ns:SingletonPattern
+    ] ;
+    sh:property [
+        sh:path ns:resolvesAs ;
+        sh:minCount 1 ;
+        sh:class ns:ServiceResolutionMode
+    ] ;
+    sh:property [
+        sh:path ns:exposesContract ;
+        sh:minCount 1 ;
+        sh:class ns:ServiceContract
+    ] .
+
+ex:TransportBackedAccessSurfaceShape
+    a sh:NodeShape ;
+    sh:targetClass ns:MetaDBSingletonAccessSurface ;
+    sh:property [
+        sh:path ns:usesTransport ;
+        sh:minCount 1 ;
+        sh:class ns:Transport
+    ] .
+
+ex:MetadataTableShape
+    a sh:NodeShape ;
+    sh:targetClass ns:MetadataTable ;
+    sh:property [
+        sh:path ns:conformsToSchema ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ns:TableSchema
+    ] ;
+    sh:property [
+        sh:path ns:isBackedBy ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ns:StorageModel
+    ] .
+
+ex:TableSchemaShape
+    a sh:NodeShape ;
+    sh:targetClass ns:TableSchema ;
+    sh:property [
+        sh:path ns:definesColumn ;
+        sh:minCount 1 ;
+        sh:class ns:Column
+    ] .
+
+ex:ColumnShape
+    a sh:NodeShape ;
+    sh:targetClass ns:Column ;
+    sh:property [
+        sh:path ns:storesShape ;
+        sh:minCount 1 ;
+        sh:class ns:DataShape
+    ] .
+
+ex:OwnershipClaimShape
+    a sh:NodeShape ;
+    sh:targetClass ns:OwnershipClaim ;
+    sh:property [
+        sh:path ns:assertsOwnershipOf ;
+        sh:minCount 1 ;
+        sh:class ns:AccessSurface
+    ] ;
+    sh:property [
+        sh:path ns:assertsOwnershipIdentity ;
+        sh:minCount 1 ;
+        sh:class ns:ServiceIdentity
+    ] ;
+    sh:property [
+        sh:path ns:isBoundedByLease ;
+        sh:minCount 1 ;
+        sh:class ns:Lease
+    ] .

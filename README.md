@@ -1,112 +1,97 @@
 # Extend0 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/8cf185b2f8204e80bb3419cbceb7362a)](https://app.codacy.com/gh/Papishushi/Extend0/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
-Extend0 is a small .NET utility library that provides three main building blocks:
+Extend0 major `1` is being shaped as the infrastructure core of a wider ecosystem, not as a flat utility package. Its current center of gravity is the consolidation of four cooperating architectural assets:
 
-- **Lifecycle primitives** for in-process and cross-process singletons, backed by named pipes and a lightweight RPC proxy.
-- **Task utilities** that make it safer to run fire-and-forget asynchronous work.
-- **Metadata storage and generators** for packing fixed-layout key/value pairs and blittable payloads into mapped tables without allocations.
+- `Lifecycle` for service identity, unique access, ownership, and transport-mediated resolution
+- `MetaDB` for structured metadata state, schemas, references, indexes, and coordination-ready storage
+- ontology for domain meaning and cross-system consistency
+- code generation for schema-driven derived artifacts
 
-The library is designed for services that need a single owner across multiple processes while still allowing simple in-process use when IPC is unnecessary, and for tools that need predictable, allocation-free metadata persistence.
+The immediate priority is platform-core consolidation: make the repository legible, internally consistent, and ready for the next layer of ecosystem work without pretending that every strategic direction is already implemented.
+
+## Major 1 Direction
+
+Extend0 major `1` should currently be read through these system boundaries:
+
+- `Lifecycle` governs who owns a service, how a singleton resolves in-process or cross-process, and how a consumer reaches a stable access surface.
+- `MetaDB` governs structured tables, schemas, rows, cells, references, indexes, and storage-backed operational state.
+- ontology governs the canonical vocabulary used to describe the platform above implementation detail.
+- code generation derives metadata-entry and blittable artifacts from declarative inputs.
+
+This direction is aligned with the wider `UByteC` ecosystem, but Extend0 is not yet claiming a completed platform unification, a full ontology runtime, or a finished language integration story.
+
+## Current Implementation Truth
+
+The architecture is ahead of the implementation in a few visible places, and this repository now treats those gaps explicitly instead of hiding them:
+
+- `Lifecycle` is architected around transport abstraction, but the current built-in cross-process transport is named pipes.
+- `MetaDB` is a first-class system, but the public access story is centered on `MetaDBManagerSingleton` and RPC-safe contracts rather than direct public construction of the internal `MetaDBManager`.
+- ontology is already part of the architecture contract, but the operational ontology subsystem is still in its foundation phase.
+- `UByteC` is a strategic ecosystem direction, not yet the implementation center of the next milestone.
 
 ## Installation
 
-Add project references from your solution. For example, from the repository root:
+Project references are currently the most reliable way to consume Extend0 while the major `1` platform story is being hardened:
 
 ```bash
 dotnet add <YourProject>.csproj reference Extend0/Extend0.csproj
-# Optional source generators
 dotnet add <YourProject>.csproj reference Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj
 dotnet add <YourProject>.csproj reference Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj
 ```
-This approach is recommended when you want to:
 
-- Develop directly against Extend0
-- Debug or modify internals
-- Keep source generators in lockstep with your code
+This is the recommended path when you want to:
 
-### GitHub Releases (prebuilt binaries)
+- develop directly against Extend0
+- debug or modify internals
+- keep source generators in lockstep with your code
+- avoid drift while packaging and generator-consumer workflows are still being tightened
 
-You can also use the **GitHub Releases** section of the repository:
+### NuGet and prebuilt binaries
 
-- Each release provides prebuilt DLLs for a fixed version
-- Useful when you want pinned binaries without building from source
-- Suitable for deployment, tooling, or restricted environments
-
-Source generators are published as separate artifacts when applicable.
-
-### NuGet packages
-
-Extend0 is available through the **NuGet registry**:
-
-- You can download the packages directly from **nuget.org**
-- You can install them using **Visual Studio NuGet Package Manager**
-- Or via the dotnet CLI:
-
-```bash
-dotnet add package Extend0
-```
-NuGet versions are aligned with GitHub releases.
+The main package is available through NuGet and repository releases remain useful for pinned binaries, but the safest onboarding path for source-generator-heavy work in the current phase is still direct project reference.
 
 ### Target framework
 
-The library currently targets: 
- - net9.0 (net10 is supported but not fully migrated.)
+The library currently targets:
 
-Dependencies are minimal:
- - Microsoft.Extensions.Logging.Abstractions (optional logging only)
+- `net9.0`
 
-## Cross-process singletons
+Dependencies are intentionally light:
 
-The `Extend0.Lifecycle.CrossProcess` namespace exposes the components needed to host a single service instance across processes:
+- `Microsoft.Extensions.Logging.Abstractions` for optional logging support
 
-- `CrossProcessSingleton<TService>` wires up ownership, IPC hosting, and the static `Service` accessor.
-- `CrossProcessServiceBase<TService>` provides diagnostics helpers (`PingAsync`, `GetServiceInfoAsync`, `CanConnectAsync`) and hosting utilities for named-pipe servers.
-- `CrossProcessSingletonOptions` controls whether you run in-process or cross-process, which pipe name to use, and how aggressively to overwrite existing owners.
+## Lifecycle
 
-### Quickstart
+`Lifecycle` is the system that gives Extend0 a stable service identity and unique-access story.
 
-The snippet below shows a simple clock service that runs as a cross-process singleton. The first process to start becomes the owner (hosting the named-pipe server); subsequent processes transparently act as clients through the generated proxy.
+Its current public concepts are:
+
+- `CrossProcessSingleton<TService>`
+- `CrossProcessServiceBase<TService>`
+- `ICrossProcessService`
+- `SingletonMode`
+- `CrossProcessSingletonOptions`
+
+The important semantic rule is that consumers use a stable access surface while the resolution changes depending on mode and ownership:
+
+- `SingletonMode.InProcess` resolves directly to the live instance inside the current process.
+- `SingletonMode.CrossProcess` resolves directly for the owner process and through a proxy for client processes.
+- the same access surface is preserved across those cases even though the resolution mode changes
+
+Named pipes are the current built-in transport used by the cross-process runtime, but the architecture treats transport as an abstraction rather than as the permanent center of the system.
+
+### Lifecycle quickstart
 
 ```csharp
 using Extend0.Lifecycle.CrossProcess;
 using Microsoft.Extensions.Logging;
 
-var closing = false;
-using var loggerFactory = LoggerFactory.Create(builder =>
-{
-    builder
-        .SetMinimumLevel(LogLevel.Debug)
-        .AddProvider(new SomeLoggerProvider...());
-});
+var loggerFactory = LoggerFactory.Create(builder => builder.SetMinimumLevel(LogLevel.Information));
+using var singleton = new ClockSingleton(loggerFactory);
 
-var loggerInstance = loggerFactory.CreateLogger<Clock>();
-var _instance = new ClockSingleton(loggerInstance);
-
-Console.CancelKeyPress += (_, __) => closing = true;
-
-while (!closing)
-{
-    Console.Clear();
-    try
-    {
-        Console.WriteLine(ClockSingleton.IsOwner
-            ? $"[Owner {ClockSingleton.Service.ContractName}]"
-            : $"[Client {ClockSingleton.Service.ContractName}]");
-
-        if (!ClockSingleton.IsOwner)
-        {
-            Console.WriteLine(await ClockSingleton.Service.PingAsync());
-            //Console.WriteLine(await ClockSingleton.Service.GetServiceInfoAsync());
-            Console.WriteLine(await ClockSingleton.Service.NowIsoAsync());
-        }
-    }
-    catch (RemoteInvocationException rEx) when (rEx.HResult == 426)
-    {
-        // Swallow upgrade-in-progress errors.
-    }
-
-    await Task.Delay(1000);
-}
+Console.WriteLine(ClockSingleton.IsOwner ? "Owner" : "Client");
+Console.WriteLine(await ClockSingleton.Service.PingAsync());
+Console.WriteLine(await ClockSingleton.Service.NowIsoAsync());
 
 public interface IClock : ICrossProcessService
 {
@@ -119,7 +104,7 @@ public sealed class Clock : CrossProcessServiceBase<IClock>, IClock
     public Task<string> NowIsoAsync() => Task.FromResult(DateTimeOffset.UtcNow.ToString("O"));
 }
 
-public sealed class ClockSingleton(ILogger logger) : CrossProcessSingleton<IClock>(
+public sealed class ClockSingleton(ILoggerFactory loggerFactory) : CrossProcessSingleton<IClock>(
     () => new Clock(),
     new()
     {
@@ -128,295 +113,100 @@ public sealed class ClockSingleton(ILogger logger) : CrossProcessSingleton<ICloc
         CrossProcessServer = ".",
         CrossProcessConnectTimeoutMs = 5000,
         Overwrite = true,
-        Logger = logger
-    })
+        Logger = loggerFactory.CreateLogger<CrossProcessSingletonOptions>()
+    },
+    loggerFactory)
 {
-    static ClockSingleton()
-    {
-        RpcDispatchProxy<IClock>.UpgradeHandler = static async ex =>
-        {
-            var loggerFactory = new LoggerFactory();
-            var logger = loggerFactory.CreateLogger<Clock>();
-
-            try
-            {
-                // Re-create singleton when the owner restarts.
-                _ = new ClockSingleton(logger);
-
-                Console.WriteLine("[Upgrade] Recreated ClockSingleton. IsOwner = {0}", IsOwner);
-
-                await Task.Yield();
-                return true;
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("[Upgrade] Failed to recreate ClockSingleton: {0}", e);
-                return false;
-            }
-        };
-    }
 }
 ```
 
-Key behaviors to remember:
-
-- Constructing `ClockSingleton` initializes the static `ClockSingleton.Service` property. Clients and owners use the same API.
-- `SingletonMode.CrossProcess` enforces a single owner across processes; switch to `SingletonMode.InProcess` to bypass IPC for tests.
-- `CrossProcessSingletonOptions.Overwrite` controls whether a new instance replaces an existing owner (useful for upgrades or crash recovery).
-- `CrossProcessServiceBase` implements the contract helpers (`PingAsync`, `GetServiceInfoAsync`, `CanConnectAsync`) so your service only needs to provide domain methods.
-
-## Metadata storage and generators
-
-Extend0’s metadata layer provides fixed-size, allocation-free key/value storage backed by memory-mapped files. Two source generators help you define the binary shapes that live in these tables:
-
-- **`Extend0.MetadataEntry.Generator`** reads `[assembly: GenerateMetadataEntry(keyBytes, valueBytes)]` attributes and emits blittable `MetadataEntry{Key}x{Value}` structs plus a typed `MetadataCell` wrapper. The repository declares a catalog of common shapes in [`Metadata/Generator.attributes.cs`](Extend0/Metadata/Generator.attributes.cs), covering small tag-style keys up to larger “chubby” entries.
-- **`Extend0.BlittableAdapter.Generator`** consumes `*.blit.json` files and generates blittable structs with inline UTF-8/binary buffers. These adapters are intended for use as typed value columns inside metadata tables.
-
-### Quickstart: defining and using a table
-
-1. Declare one or more entry shapes (or use the defaults in `Generator.attributes.cs`):
-
-    ```csharp
-    [assembly: Extend0.Metadata.CodeGen.GenerateMetadataEntry(64, 512)]
-    ```
-
-2. Describe a table layout using `TableSpec`, mixing entry cells and blittable payloads:
-
-    ```csharp
-    using Extend0.Metadata;
-    using Extend0.Metadata.Schema;
-
-    var spec = new TableSpec(
-        Name: "Settings",
-        MapPath: "./data/settings.meta",
-        Columns: new[]
-        {
-            // Key/value entry column with 64-byte keys and 512-byte values
-            TableSpec.Column<MetadataEntry64x512>("Entries", capacity: 512),
-
-            // Blittable payload column generated from a .blit.json file
-            TableSpec.Column<MyBlittablePayload>("Payload", capacity: 512)
-        });
-    spec.SaveToFile("./data/settings.spec.json");
-    ```
-
-3. Register and use the table through `MetaDBManager`:
-
-    ```csharp
-    using Extend0.Metadata;
-
-    var manager = new MetaDBManager(logger: null);
-    var tableId = manager.RegisterTable(spec, createNow: true);
-
-    if (manager.TryGetCreated(spec.Name, out var table) &&
-        table.TryGetCell("Entries", row: 0, out var cell))
-    {
-        // `cell` is a view over the fixed-size buffer described by the generated entry type.
-    }
-    ```
-
-This workflow keeps your on-disk layout deterministic while letting Roslyn generate the unsafe structs needed to interact with the metadata store safely.
-
-> **Concurrency and Access Failures:** MetaDB prevents concurrent writers by opening metadata files with `FileShare.Read`, which blocks other processes from writing to the same file simultaneously. When a second writer attempts to register or open a table that’s already mapped elsewhere, an `IOException` will be thrown. This is expected and must be handled by the caller. Public APIs like `RegisterTable`, `Open`, or any operation that triggers mapping (e.g., `createNow: true`) may surface these exceptions. Consumers should implement retry logic with backoff to wait for exclusive access. If multiple processes need to write to the same file, they should follow an **ephemeral access pattern** — acquire the table, perform the operation, and explicitly call `.Dispose()` on the `MetadataTable` when done. This releases the memory-mapped file and allows other writers to proceed. While disposed tables remain tracked internally, this has no side effects unless registration is done repeatedly with varying schemas or identifiers. In the future, I plan to provide a `CloseTable` method to fully unregister and dispose a table, clearing it from internal indexes for long-lived scenarios with dynamic table lifecycles.
-
-## MetaDB – Performance notes
-
-This section documents the current micro-benchmarks for `MetaDBManager` and its columnar storage engine.  
-All numbers below come from `MetaDBManagerBench` (BenchmarkDotNet) and are meant both as a sanity check and as a rough “performance contract” for future work.
-In benchmarks with large, sequential column operations, MetaDBManager becomes memory-bandwidth bound and behaves similarly to a linear memcpy (O(n)), saturating L1, L2 and L3 caches. So throughput is effectively limited by your hardware.
-
----
-
-### Benchmark setup
-
-```text
-BenchmarkDotNet v0.15.4  
-OS      : Windows 11 (24H2)
-CPU     : AMD Ryzen 7 4800H (8C / 16T @ 2.90 GHz)
-Runtime : .NET 9.0.8 (RyuJIT x64-v3)
-
-Job config:
-- Runtime=.NET 9.0
-- LaunchCount   = 1
-- WarmupCount   = 1
-- IterationCount= 5
-````
-
-Common parameters across most benchmarks:
-
-- `Cols`           : 7
-- `RowsPerCol`     : 24 or 2048 (small vs large tables)
-- `KeySize`        : 16 bytes
-- `ValueSize`      : 64 or 256 bytes
-- `Ops`            : 10,000 logical operations per benchmark
-- `ChildPoolSize`  : 16
-- `RefsPerBatch`   : 1, 4 or 16 (for ref-related tests)
-
----
-
-### Benchmark groups
-
-The suite is organized into high-level categories:
-
-1. **Copy**
-
-   - `Copy_A_to_B_Column0_AllRows`
-   - `Copy_InPlace_TableA_Col0_to_Col1_AllRows`
-   - Measures raw column copy throughput (inter-table and in-place).
-
-2. **Fill**
-
-   - `Fill_Column0_TableA`
-   - `Fill_Column0_TableB`
-   - `Fill_Typed_Small16`
-   - `Fill_Typed_Exact`
-   - `Fill_Raw_Writer`
-   - Measures different fill strategies (generic vs strongly-typed vs raw writer).
-
-4. **Refs**
-
-   - `EnsureRefVec_*`
-   - `LinkRef_*`
-   - `EnumerateRefs_CountSum`
-   - Focused on **reference vectors**, link operations and bulk linking from pools.
-
-5. **Register**
-
-   - `RegisterTable_Lazy_NoPersist`
-   - `RegisterTable_Eager_DisposeAndDelete`
-   - Exercises table registration / lifecycle paths, with and without persistence.
-
----
-
-### Copy performance (columnar moves)
-
-Representative results (KeySize=16, ValueSize=64):
-
-| Scenario                             | Rows/Col | ValueSize |    Mean (ns) | GB/s (rd+wr) |
-| ------------------------------------ | -------- | --------- | -----------: | -----------: |
-| `Copy_A_to_B_Column0_AllRows`        | 24       | 64        |     ~104–107 |       ~28–30 |
-| `Copy_InPlace_TableA_Col0_to_Col1_*` | 24       | 64        |     ~104–107 |       ~28–29 |
-| `Copy_A_to_B_Column0_AllRows`        | 2048     | 64        | ~3,709–3,727 |       ~70–71 |
-| `Copy_InPlace_TableA_Col0_to_Col1_*` | 2048     | 64        | ~3,709–3,739 |       ~70–71 |
-
-Key takeaways:
-
-- For **small tables** (24 rows) the copy kernels run around **100 ns** per op.
-- For **large tables** (2048 rows) we hit around **35 GB/s write** and **~70 GB/s aggregate read+write**.
-- In-place copies (`Col0 → Col1` in the same table) are within a few percent of inter-table copies, which is good: the in-place path does not introduce hidden overhead.
-
----
-
-### Fill performance
-
-Representative results for `RowsPerCol=24`, `KeySize=16`:
-
-| Method                | ValueSize | Mean (ns) | Relative to `Fill_Column0_TableA` |
-| --------------------- | --------- | --------: | --------------------------------: |
-| `Fill_Column0_TableA` | 64        |  ~439–457 |                             1.00× |
-| `Fill_Column0_TableB` | 64        |  ~420–450 |                       ~0.95–1.03× |
-| `Fill_Typed_Small16`  | 64        |  ~195–202 |                       ~0.44–0.46× |
-| `Fill_Raw_Writer`     | 64        |  ~410–417 |                       ~0.93–0.95× |
-| `Fill_Typed_Exact`    | 64        |  ~272–281 |                       ~0.62–0.65× |
-
-For `ValueSize=256` the patterns are similar:
-
-- `Fill_Typed_Small16` stays around **~200 ns**, outperforming the generic column-fill.
-- `Fill_Typed_Exact` is a bit slower for large values but still competitive vs the baseline column fill.
-- Raw writer sits close to the column fill baseline (it’s more of a “control” path here).
-
-High-level conclusions:
-
-- **Strongly-typed fills (`Fill_Typed_*`) are consistently the fastest way** to push data into the engine, especially for smaller value sizes.
-- The generic column fill (`Fill_Column0_TableA/B`) is competitive, but you pay around **2×** versus the specialized typed path on small structs.
-
----
-
-### Ref vectors & linking
-
-The ref-related benchmarks exercise the machinery that manages **reference vectors** and **bulk linking**.
-
-Representative small-table numbers (`RowsPerCol=24`, `ValueSize=64`):
-
-| Method                              |   Mean (ns) | Notes                                       |
-| ----------------------------------- | ----------: | ------------------------------------------- |
-| `EnsureRefVec_Cold_InitOnce`        |     ~2,8 µs | First allocation / cold path                |
-| `EnsureRefVec_Idempotent_Only`      | ~2,7–2,8 µs | “Already initialized” path (idempotent)     |
-| `EnsureRefVec_And_LinkRef_FromPool` | ~3,8–4,2 µs | Ensure + link in one go                     |
-| `LinkRef_Bulk_PerRow`               |     ~2,7 ns | Only the linking work (ref pool pre-primed) |
-
-On large tables (`RowsPerCol=2048`):
-
-- Ensure+link runs around **~360–550 µs**, depending on `ValueSize` and batch params.
-- Bulk linking alone (`LinkRef_Bulk_PerRow`) stays noticeably faster, roughly **0.7–0.8×** of the ensure+link combo.
-
-Design-wise:
-
-- Ensuring the ref vector has a **one-time cost** (cold path) that is acceptable given its rare usage.
-- The **idempotent** path is close in cost to pure linking, which means we can call `EnsureRefVec` defensively without paying a big penalty when it is already initialized.
-
----
-
-### Table registration
-
-The `Register` benchmarks focus on **table lifecycle**:
-
-* `RegisterTable_Lazy_NoPersist`
-
-  - Around **1.9–2.0 µs**.
-  - Allocations ≈ **4.7–4.8 KB**.
-  - This is the fast path for ephemeral tables.
-
-* `RegisterTable_Eager_DisposeAndDelete`
-
-  - Around **2.2 ms** and above.
-  - Allocations ≈ **11 KB** and visible `Gen0` activity.
-  - This path simulates a heavier “register + persist + dispose” lifecycle and is not expected to run frequently in hot loops.
-
-In other words:
-
-- **Lazy registration** is cheap enough to use at runtime for dynamic metadata.
-- **Eager + persistent** registration is more expensive by design, and should be used for long-lived / persisted tables (startup, migrations, etc.).
-
----
-
-### Summary
-
-- Column copies achieve **tens of GB/s** of effective throughput with both inter-table and in-place paths.
-- Typed fill paths (`Fill_Typed_*`) are the **preferred API for hot paths**, halving the cost versus generic column fills in typical configurations.
-- Integrity and enumeration benchmarks give us a baseline for **correctness checks** and highlight where allocations occur.
-- Ref-vector initialization and linking are within a small constant factor of raw linking, so the API can stay **ergonomic and defensive** without wrecking performance.
-- Table registration is split into **fast, lazy registration** and **heavier eager/persistent registration**, which matches the expected usage patterns.
-
-These numbers are my current “performance budget”. Any future changes to `MetaDBManager` should be validated against this suite to avoid silent regressions.
-
-## Task utilities
-
-`TaskExtensions.Forget` lets you safely execute background tasks while:
-
-- Observing and logging exceptions (optional `ILogger`).
-- Running custom callbacks on failure or completion.
-- Recording execution time when `measureDuration` is enabled.
-
-Example:
+## MetaDB
+
+`MetaDB` is the structured metadata system of Extend0. It is not just a persistence helper: it is the table-oriented state model used to define stable schemas, rows, cells, references, and indexes.
+
+Its current conceptual vocabulary is:
+
+- system
+- manager
+- table
+- schema
+- column
+- row
+- cell
+- reference
+- index
+- storage model
+- access surface
+
+The current public access story is centered on `MetaDBManagerSingleton` and `IMetaDBManagerRPCCompatible`. That surface works for same-process owners and cross-process clients, while preserving a stable contract name and singleton semantics.
+
+### MetaDB quickstart
 
 ```csharp
-SomeAsyncOperation()
-    .Forget(_logger,
-            onExceptionMessage: "Background operation failed",
-            onExceptionAction: ex => Telemetry.TrackException(ex),
-            finallyAction: () => _metrics.Increment("background.done"),
-            measureDuration: true);
+using Extend0.Metadata;
+using Extend0.Metadata.CrossProcess;
+using Extend0.Metadata.Schema;
+
+using var metaDb = new MetaDBManagerSingleton();
+
+var spec = new TableSpec(
+    Name: "Settings",
+    MapPath: "./data/settings.meta",
+    Columns: new[]
+    {
+        TableSpec.Column<MetadataEntry64x512>("Entries", capacity: 512),
+    });
+
+var tableId = MetaDBManagerSingleton.Service.RegisterTable(spec, createNow: true);
+var columnNames = MetaDBManagerSingleton.Service.GetColumnNames(tableId);
+var preview = MetaDBManagerSingleton.Service.PreviewTable(tableId);
+
+Console.WriteLine(string.Join(", ", columnNames));
+Console.WriteLine(preview);
 ```
 
-This pattern keeps fire-and-forget work from surfacing unobserved exceptions and provides consistent diagnostics hooks.
+This example is intentionally aligned with the public singleton surface instead of documenting direct construction of the internal `MetaDBManager`.
 
-## Building and testing
+## Ontology
 
-From the repository root:
+The ontology under `ontology/` is now part of the architecture contract of Extend0 major `1`.
 
-```bash
-dotnet build
-```
+Its role in the current phase is:
 
-The library contains no unit tests by default; add your own in consumer solutions as needed.
+- define stable domain concepts above implementation names
+- expose conceptual inconsistencies between code, docs, and architecture
+- keep demo-specific material out of the core TBox unless it becomes accepted architecture
+- prepare later ontology-aware and cross-service integration work without forcing it early
+
+The current TBox keeps these concepts central:
+
+- `Lifecycle`
+- `MetaDB`
+- `Transport`
+- `ServiceIdentity`
+- `AccessSurface`
+- `OwnershipClaim`
+- `Lease`
+- `HeartbeatSignal`
+
+## Code Generation
+
+Extend0 currently includes two source-generation surfaces:
+
+- `Extend0.MetadataEntry.Generator` for fixed-layout metadata entry shapes
+- `Extend0.BlittableAdapter.Generator` for blittable payload adapters
+
+In major `1`, these are treated as schema-driven artifact generation, not as isolated tooling.
+
+## Documentation and ADRs
+
+The architectural contract for major `1` lives in:
+
+- [`docs/Home.md`](docs/Home.md)
+- [`docs/ADR.md`](docs/ADR.md)
+- [`docs/ADR/1-000-EXTEND0-ADR-DEFINE-EXTEND0-MAJOR-VERSION-1.md`](docs/ADR/1-000-EXTEND0-ADR-DEFINE-EXTEND0-MAJOR-VERSION-1.md)
+- [`docs/ADR/1-003-ARCHITECTURE-ADR-MODEL-EXTEND0-AS-A-PLATFORM-OF-COOPERATING-SYSTEMS.md`](docs/ADR/1-003-ARCHITECTURE-ADR-MODEL-EXTEND0-AS-A-PLATFORM-OF-COOPERATING-SYSTEMS.md)
+- [`docs/ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md`](docs/ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md)
+- [`docs/ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md`](docs/ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)
+
+If you want the shortest possible read of the current direction, start with `README`, then `ADR 1-000`, `ADR 1-003`, `ADR 1-004`, and `ADR 1-005`.
