@@ -5,7 +5,9 @@
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<PackageType>Analyzer</PackageType>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<BuildOutputTargetFolder>analyzers/dotnet/cs</BuildOutputTargetFolder>
 		<AssemblyName>Extend0.MetadataEntry.Generator</AssemblyName>
 		<PackageId>Extend0.MetadataEntry.Generator</PackageId>
 		<Authors>Papishushi</Authors>
@@ -14,8 +16,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9535.5115</AssemblyVersion>
-		<FileVersion>1.0.9535.5115</FileVersion>
+		<AssemblyVersion>1.0.9535.8359</AssemblyVersion>
+		<FileVersion>1.0.9535.8359</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -23,6 +25,7 @@
 		<PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
+		<SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
 		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;</PackageTags>
 		<NeutralLanguage>en-001</NeutralLanguage>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
