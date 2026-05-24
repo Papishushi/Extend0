@@ -1,0 +1,3 @@
+name: ontology-query
+entry: SKILL.md
+description: Query the Extend0 ontology before diving into code when the task is about domain meaning, boundaries, or canonical vocabulary.

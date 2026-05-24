@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://extend0.se777en.fyi/ontology/diagnostics/fix-doc-schema.json",
+  "title": "Extend0 Ontology Fix Document",
+  "type": "object",
+  "required": [
+    "tool",
+    "generatedAtUtc",
+    "graphPaths",
+    "findings",
+    "unsupportedOperations"
+  ],
+  "properties": {
+    "tool": {
+      "type": "string"
+    },
+    "generatedAtUtc": {
+      "type": "string"
+    },
+    "graphPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "severity",
+          "summary",
+          "evidence",
+          "recommendedAction",
+          "supportedFix"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "recommendedAction": {
+            "type": "string"
+          },
+          "supportedFix": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "unsupportedOperations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

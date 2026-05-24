@@ -1,0 +1,18 @@
+[project]
+name = "extend0-ontology-diagnostics"
+version = "0.1.0"
+description = "Diagnostics scaffold for the Extend0 ontology foundation."
+requires-python = ">=3.10"
+dependencies = [
+  "rdflib>=7.0.0",
+  "pyshacl>=0.28.0",
+  "jsonschema>=4.0.0",
+  "pytest>=8.0.0",
+  "rich>=13.0.0"
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "..",
+  "../skills/ontology-query"
+]
