@@ -32,11 +32,16 @@ This page is for contributors working on structured metadata storage, schema han
 
 ## Current Public Access Truth
 
-The current public cross-process and owner-facing entry point is `MetaDBManagerSingleton`, with `IMetaDBManagerRPCCompatible` as the main RPC-safe service contract.
+The current public access model has two explicit entry surfaces:
+
+- `MetaDB.CreateManager(...)` for same-process/local access through `IMetaDBManager`
+- `MetaDB.CreateSingleton(...)` for owner/client shared access through `MetaDBManagerSingleton`
+
+The main RPC-safe cross-process contract remains `IMetaDBManagerRPCCompatible`.
 
 That means:
 
-- the singleton is the stable access surface
+- the system now has a public local access surface and a public singleton access surface
 - the manager concept is still central to the domain
 - but the internal concrete `MetaDBManager` should not be documented as the public entry point unless the public API changes
 

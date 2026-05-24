@@ -319,6 +319,7 @@
       The Extend0 metadata database system for fixed-layout tables, schema-defined columns,
       references, indexes, and stable access across one or many processes.
     </rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Metadata.MetaDB</mapsToCodeSymbol>
     <mapsToCodeSymbol>MetaDB</mapsToCodeSymbol>
     <mapsToCodeSymbol>Extend0.Metadata</mapsToCodeSymbol>
   </owl:Class>

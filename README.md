@@ -138,16 +138,41 @@ Its current conceptual vocabulary is:
 - storage model
 - access surface
 
-The current public access story is centered on `MetaDBManagerSingleton` and `IMetaDBManagerRPCCompatible`. That surface works for same-process owners and cross-process clients, while preserving a stable contract name and singleton semantics.
+The current public access story now has two explicit entry surfaces:
 
-### MetaDB quickstart
+- `MetaDB.CreateManager(...)` for same-process/local usage through `IMetaDBManager`
+- `MetaDB.CreateSingleton(...)` for shared owner/client usage through `MetaDBManagerSingleton` and `IMetaDBManagerRPCCompatible`
+
+### MetaDB quickstart: same-process
+
+```csharp
+using Extend0.Metadata;
+using Extend0.Metadata.Schema;
+
+using var manager = MetaDB.CreateManager();
+
+var spec = new TableSpec(
+    Name: "Settings",
+    MapPath: "./data/settings.meta",
+    Columns: new[]
+    {
+        TableSpec.Column<MetadataEntry64x512>("Entries", capacity: 512),
+    });
+
+var tableId = manager.RegisterTable(spec, createNow: true);
+var table = manager.GetOrCreate(tableId);
+
+Console.WriteLine(table.Id);
+```
+
+### MetaDB quickstart: shared singleton
 
 ```csharp
 using Extend0.Metadata;
 using Extend0.Metadata.CrossProcess;
 using Extend0.Metadata.Schema;
 
-using var metaDb = new MetaDBManagerSingleton();
+using var metaDb = MetaDB.CreateSingleton();
 
 var spec = new TableSpec(
     Name: "Settings",
@@ -165,7 +190,7 @@ Console.WriteLine(string.Join(", ", columnNames));
 Console.WriteLine(preview);
 ```
 
-This example is intentionally aligned with the public singleton surface instead of documenting direct construction of the internal `MetaDBManager`.
+These examples are intentionally aligned with the public access surfaces instead of documenting direct construction of the internal `MetaDBManager`.
 
 ## Ontology
 
