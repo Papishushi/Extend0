@@ -344,7 +344,7 @@
     <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
     <rdfs:label xml:lang="en">Lifecycle coordinator</rdfs:label>
     <rdfs:comment xml:lang="en">A coordinator that determines who owns a service identity and how other participants reach it.</rdfs:comment>
-    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.CrossProcessOrchestator&lt;TService&gt;</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.CrossProcessOrchestrator&lt;TService&gt;</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#UniqueAccessPolicy">

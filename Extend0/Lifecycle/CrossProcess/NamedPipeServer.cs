@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace Extend0.Lifecycle.CrossProcess
 {
     /// <summary>
-    /// Lightweight JSON-RPC host over <see cref="NamedPipeServerStream"/> for a single concurrent client.
+    /// Lightweight JSON-RPC host over <see cref="NamedPipeServerStream"/> for multiple concurrent clients.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -31,8 +31,8 @@ namespace Extend0.Lifecycle.CrossProcess
     /// </para>
     /// <para><b>Handshake:</b> after connection, the server writes a single line:
     /// <c>HELLO &lt;fingerprint&gt;</c>, where <seealso cref="CrossProcessUtils.CurrentFingerprint"/> identifies the hosting binary.</para>
-    /// <para><b>Concurrency:</b> this server is configured for one connection at a time
-    /// (<c>maxNumberOfServerInstances = 1</c>). It will accept a new client after the current one disconnects.</para>
+    /// <para><b>Concurrency:</b> this server accepts multiple clients over separate pipe instances and
+    /// dispatches each connected client to its own handler.</para>
     /// <para><b>Lifetime:</b> call <see cref="Dispose"/> or <see cref="DisposeAsync"/> to cancel the accept loop and
     /// stop the server gracefully. <see cref="StopAsync"/> can be used to await shutdown explicitly.</para>
     /// </remarks>

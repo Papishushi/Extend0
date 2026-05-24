@@ -229,8 +229,8 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
         if (options.Mode == SingletonMode.CrossProcess)
         {
             if (loggerFactory is not null)
-                CrossProcessOrchestator<TService>.s_LoggerFactory = loggerFactory;
-            var h = CrossProcessOrchestator<TService>.GetOrStart(factory, serverName: options.CrossProcessServer, name: options.CrossProcessName, connectTimeoutMs: options.CrossProcessConnectTimeoutMs);
+                CrossProcessOrchestrator<TService>.s_LoggerFactory = loggerFactory;
+            var h = CrossProcessOrchestrator<TService>.GetOrStart(factory, serverName: options.CrossProcessServer, name: options.CrossProcessName, connectTimeoutMs: options.CrossProcessConnectTimeoutMs);
 
             _handle = h;
             _service = h.Service;

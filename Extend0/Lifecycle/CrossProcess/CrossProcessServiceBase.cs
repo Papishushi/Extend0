@@ -18,7 +18,8 @@ namespace Extend0.Lifecycle.CrossProcess
         public virtual string ContractName => typeof(TService).FullName ?? typeof(TService).Name;
 
         /// <summary>
-        /// The pipe name used by the host (if known). Override if you want it surfaced in diagnostics.
+        /// The named-pipe endpoint used by the host (if known). Override if you want it surfaced in diagnostics.
+        /// This remains for compatibility with the current built-in named-pipe transport.
         /// </summary>
         protected virtual string? PipeName => null;
 
@@ -26,6 +27,24 @@ namespace Extend0.Lifecycle.CrossProcess
         /// The server/machine name used by the host (if known). Override if you want it surfaced in diagnostics.
         /// </summary>
         protected virtual string? ServerName => null;
+
+        /// <summary>
+        /// Transport-neutral endpoint name surfaced in diagnostics and connectivity probes.
+        /// Defaults to <see cref="PipeName"/> for the current built-in transport.
+        /// </summary>
+        protected virtual string? EndpointName => PipeName;
+
+        /// <summary>
+        /// Transport-neutral endpoint server/machine name surfaced in diagnostics and connectivity probes.
+        /// Defaults to <see cref="ServerName"/>.
+        /// </summary>
+        protected virtual string? EndpointServerName => ServerName;
+
+        /// <summary>
+        /// Logical transport kind surfaced in diagnostics.
+        /// Defaults to <c>"named-pipe"</c> when an endpoint name is available.
+        /// </summary>
+        protected virtual string? TransportKind => EndpointName is null ? null : "named-pipe";
 
         /// <summary>
         /// Returns a lightweight heartbeat snapshot for this service instance.
@@ -53,7 +72,7 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A completed <see cref="Task{TResult}"/> whose result describes the service
         /// contract, implementation type, assembly version, fingerprint, host machine,
-        /// process identity, start time and the associated pipe name.
+        /// process identity, start time and the associated transport endpoint details.
         /// </returns>
         /// <remarks>
         /// The returned <see cref="ServiceInfo"/> is suitable for diagnostics, logging,
@@ -74,43 +93,75 @@ namespace Extend0.Lifecycle.CrossProcess
                 proc.ProcessName,
                 _startUtc,
                 PipeName
-            );
+            )
+            {
+                EndpointName = EndpointName,
+                EndpointServerName = EndpointServerName,
+                TransportKind = TransportKind
+            };
 
             return Task.FromResult(info);
         }
 
         /// <summary>
-        /// Probes the configured named pipe to determine whether a server is currently listening.
+        /// Probes the configured transport endpoint to determine whether a server is currently listening.
         /// </summary>
         /// <returns>
-        /// A task whose result is <c>true</c> if a connection to <see cref="PipeName"/>
-        /// on <see cref="ServerName"/> is established within a short timeout;
+        /// A task whose result is <c>true</c> if a connection to the configured endpoint
+        /// is established within a short timeout;
         /// otherwise, <c>false</c>.
         /// </returns>
         /// <remarks>
-        /// If <see cref="PipeName"/> is <see langword="null"/> or empty, the method
+        /// <para>
+        /// The default implementation probes the current built-in named-pipe transport.
+        /// Services that expose a different transport should override
+        /// <see cref="ProbeConnectivityCoreAsync(CancellationToken)"/>.
+        /// </para>
+        /// <para>
+        /// If <see cref="EndpointName"/> is <see langword="null"/> or empty, the method
         /// returns <c>false</c> without attempting a connection. All exceptions are
         /// swallowed and treated as a negative result.
+        /// </para>
         /// </remarks>
         public async Task<bool> CanConnectAsync()
         {
             try
             {
-                if (string.IsNullOrEmpty(PipeName)) return false;
-                using var client = new NamedPipeClientStream(
-                    ServerName ?? ".",
-                    PipeName,
-                    PipeDirection.InOut,
-                    PipeOptions.Asynchronous);
-
                 using var cts = new CancellationTokenSource(200);
-                await client.ConnectAsync(cts.Token).ConfigureAwait(false);
-                return true;
+                return await ProbeConnectivityCoreAsync(cts.Token).ConfigureAwait(false);
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Core transport-specific connectivity probe used by <see cref="CanConnectAsync"/>.
+        /// </summary>
+        /// <param name="ct">Cancellation token controlling the probe timeout.</param>
+        /// <returns>
+        /// A task whose result is <c>true</c> when the configured endpoint accepts a connection;
+        /// otherwise, <c>false</c>.
+        /// </returns>
+        /// <remarks>
+        /// The default implementation assumes the current built-in named-pipe transport.
+        /// Override this method to support other transport kinds without changing the public contract.
+        /// </remarks>
+        protected virtual async Task<bool> ProbeConnectivityCoreAsync(CancellationToken ct)
+        {
+            var endpointName = EndpointName;
+            if (string.IsNullOrEmpty(endpointName))
+                return false;
+
+            using var client = new NamedPipeClientStream(
+                EndpointServerName ?? ".",
+                endpointName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+
+            await client.ConnectAsync(ct).ConfigureAwait(false);
+            return true;
         }
     }
 }

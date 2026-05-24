@@ -54,11 +54,11 @@
         Task<ServiceInfo> GetServiceInfoAsync();
 
         /// <summary>
-        /// Probes the configured named pipe to determine whether a server is
+        /// Probes the configured transport endpoint to determine whether a server is
         /// currently listening for connections.
         /// </summary>
         /// <returns>
-        /// A task whose result is <c>true</c> if a connection to the pipe can be
+        /// A task whose result is <c>true</c> if a connection to the configured endpoint can be
         /// established within a short timeout; otherwise, <c>false</c>.
         /// </returns>
         Task<bool> CanConnectAsync();

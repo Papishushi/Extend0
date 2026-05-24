@@ -7,8 +7,8 @@
     /// <remarks>
     /// <para>
     /// Use these options when constructing a cross-process capable singleton to control whether the
-    /// instance should be hosted locally (in-process) or exposed as a machine-wide singleton with
-    /// IPC proxies for non-owner processes.
+    /// instance should be hosted locally (in-process) or exposed through a cross-process singleton
+    /// with IPC proxies for non-owner processes.
     /// </para>
     /// </remarks>
     /// <example>

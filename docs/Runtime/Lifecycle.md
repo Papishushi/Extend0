@@ -35,8 +35,7 @@ This page is for contributors working on singleton behavior, ownership, transpor
 
 ## Current Cleanup Targets
 
-- `CrossProcessOrchestator` naming typo
-- pipe-centric wording in `ICrossProcessService` and `ServiceInfo`
+- remaining pipe-centric compatibility surface around `ServiceInfo.PipeName`
 - architecture/runtime gap between abstract transport and named-pipe-centered orchestration
 
 ## Governing ADRs
