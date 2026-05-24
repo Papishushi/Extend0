@@ -189,6 +189,17 @@ The current TBox keeps these concepts central:
 - `Lease`
 - `HeartbeatSignal`
 
+The current ontology tooling is intentionally lightweight but already usable:
+
+```bash
+python ontology/skills/ontology-query/query.py classes
+python ontology/skills/ontology-query/query.py class MetaDBSystem
+python ontology/skills/ontology-query/query.py sparql "SELECT ?c WHERE { ?c rdf:type owl:Class . }"
+python ontology/diagnostics/abox-doctor.py
+```
+
+The query tool is designed for quick human or AI inspection of the TBox and example ABox, while `abox-doctor.py` provides a minimal diagnostic and fix-document scaffold for the current phase.
+
 ## Code Generation
 
 Extend0 currently includes two source-generation surfaces:

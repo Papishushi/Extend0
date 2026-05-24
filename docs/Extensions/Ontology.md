@@ -33,6 +33,30 @@ Ontology is a major `1` architecture artifact used to:
 - move scenario-specific or demo-specific material into ABox examples and tests
 - treat ontology review as a gate for major naming or boundary changes in docs and architecture
 
+## Operational Tooling
+
+The ontology foundation now includes two lightweight operational surfaces:
+
+- `ontology/skills/ontology-query/query.py` for local JSON-based ontology queries
+- `ontology/diagnostics/abox-doctor.py` for minimal diagnostics and fix-document projection
+
+Canonical commands:
+
+```bash
+python ontology/skills/ontology-query/query.py classes
+python ontology/skills/ontology-query/query.py class LifecycleSystem
+python ontology/skills/ontology-query/query.py find transport
+python ontology/skills/ontology-query/query.py sparql "SELECT ?c WHERE { ?c rdf:type owl:Class . }"
+python ontology/diagnostics/abox-doctor.py
+python ontology/diagnostics/abox-doctor.py --emit-fix-doc
+```
+
+## Current Limits
+
+- the query tool supports a deliberately small SPARQL-like subset
+- the doctor is read-only and does not mutate ontology files
+- full RDF, SHACL, and repair automation are deferred until a later phase
+
 ## Governing ADRs
 
 - [ADR 1-002](../ADR/1-002-EXTEND0-ADR-ADOPT-ONTOLOGY-AS-DOMAIN-SOURCE-OF-TRUTH.md)
