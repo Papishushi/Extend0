@@ -929,13 +929,13 @@ namespace Extend0.Metadata.Internal
         /// </remarks>
         internal static async Task<bool> TryDeleteWithRetries(string path, int attempts = 8)
         {
-            for (int i = 0; i < attempts; i++)
+            for (int i = 0; i < attempts - 1; i++)
             {
                 try { File.Delete(path); return true; }
                 catch (FileNotFoundException) { return true; }
                 catch (DirectoryNotFoundException) { return true; }
-                catch (IOException) when (i < attempts - 1) { await Task.Delay(10 * (i + 1)); }
-                catch (UnauthorizedAccessException) when (i < attempts - 1) { await Task.Delay(10 * (i + 1)); }
+                catch (IOException) { await Task.Delay(10 * (i + 1)); }
+                catch (UnauthorizedAccessException) { await Task.Delay(10 * (i + 1)); }
             }
 
             // Last try
@@ -1090,6 +1090,10 @@ namespace Extend0.Metadata.Internal
         {
             if (stats.Deleted > 0)
                 return busyDelayMs;
+
+            // No attempts means no contention signal yet; use a lighter backoff.
+            if (stats.Attempts == 0)
+                return idleDelayMs / 2;
 
             // If essentially everything is locked, don't spin.
             if (stats.SuccessRate < 0.05)

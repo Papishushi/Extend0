@@ -107,6 +107,18 @@ namespace Extend0.Metadata.Internal
         internal static string Preview(ReadOnlySpan<byte> v, int maxChars) => v.Length == 0 ? "" : Utf8Preview(v, maxChars);
 
         /// <summary>
+        /// Returns the number of bytes before the first <c>0</c> terminator, or the full span length when none exists.
+        /// </summary>
+        private static int CStrLenHint(ReadOnlySpan<byte> v)
+        {
+            for (int i = 0; i < v.Length; i++)
+                if (v[i] == 0)
+                    return i;
+
+            return v.Length;
+        }
+
+        /// <summary>
         /// Safely truncates a string to a maximum length and appends an ellipsis when needed.
         /// </summary>
         /// <param name="s">The input string to truncate.</param>
@@ -137,11 +149,12 @@ namespace Extend0.Metadata.Internal
         /// <see langword="true"/> if the bytes decode cleanly to UTF-8 without replacement characters
         /// and do not contain control characters other than TAB, CR, or LF; otherwise <see langword="false"/>.
         /// </returns>
-        private static bool TryDecodePrintableUtf8(ReadOnlySpan<byte> v, out string text)
+        private static bool TryDecodePrintableUtf8(ReadOnlySpan<byte> v, int lenHint, out string text)
         {
+            var slice = v[..Math.Clamp(lenHint, 0, v.Length)];
             try
             {
-                text = s_Utf8Strict.GetString(v);
+                text = s_Utf8Strict.GetString(slice);
             }
             catch
             {
@@ -169,7 +182,9 @@ namespace Extend0.Metadata.Internal
         /// </returns>
         private static string Utf8Preview(ReadOnlySpan<byte> v, int maxChars)
         {
-            if (!TryDecodePrintableUtf8(v, out var s)) return HexPreview(v, maxChars);
+            int lenHint = CStrLenHint(v);
+            var previewSlice = v[..lenHint];
+            if (!TryDecodePrintableUtf8(v, lenHint, out var s)) return HexPreview(previewSlice, maxChars);
             return SafeEllipsis(s, maxChars);
         }
     }

@@ -21,6 +21,8 @@ namespace Extend0.Metadata
         /// </remarks>
         private sealed class ManagedTable(Guid id, TableSpec? spec, Func<TableSpec?, IMetadataTable> factory)
         {
+            private TableSpec? _spec = spec;
+
             /// <summary>
             /// Stable identifier assigned to this managed table at registration time.
             /// </summary>
@@ -29,7 +31,7 @@ namespace Extend0.Metadata
             /// <summary>
             /// Optional logical name of the table, taken from the original <see cref="TableSpec"/>.
             /// </summary>
-            public string? Name => spec?.Name;
+            public string? Name { get; } = spec?.Name;
 
             /// <summary>
             /// Factory used to create the underlying <see cref="IMetadataTable"/> from the stored spec.
@@ -49,6 +51,11 @@ namespace Extend0.Metadata
             /// Indicates whether the underlying <see cref="IMetadataTable"/> has already been created and published.
             /// </summary>
             public bool IsCreated => _table is not null;
+
+            /// <summary>
+            /// Table specification retained while the table remains lazy.
+            /// </summary>
+            internal TableSpec? StoredSpec => _spec;
 
             /// <summary>
             /// Lazily created and cached <see cref="IMetadataTable"/> instance.
@@ -73,17 +80,33 @@ namespace Extend0.Metadata
                     if (t is not null) return t;
 
                     // create
-                    t = _factory(spec);
+                    t = _factory(_spec);
                     var published = Interlocked.CompareExchange(ref _table, t, null);
                     if (published is null)
                     {
                         // we “won”; drop spec to free memory sooner
-                        spec = null;
+                        _spec = null;
                         return t;
                     }
 
-                    // someone else published first: discard ours and use the published
+                    // Someone else published first. Dispose the unpublished candidate so
+                    // mapped stores or other unmanaged resources do not leak under races.
+                    if (!ReferenceEquals(t, published))
+                        DisposeUnpublishedCandidate(t);
+
                     return published;
+                }
+            }
+
+            private static void DisposeUnpublishedCandidate(IMetadataTable table)
+            {
+                try
+                {
+                    table.Dispose();
+                }
+                catch
+                {
+                    // Cleanup must not mask the successfully published table.
                 }
             }
         }

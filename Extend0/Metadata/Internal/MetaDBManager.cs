@@ -1,5 +1,6 @@
 ﻿using Extend0.Metadata.Contract;
 using Extend0.Metadata.Diagnostics;
+using Extend0.Metadata.CodeGen;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal.BuiltIn;
 using Extend0.Metadata.Indexing.Registries;
@@ -195,7 +196,7 @@ namespace Extend0.Metadata
         /// <summary>
         /// Gets an enumeration of all registered table identifiers.
         /// </summary>
-        public IEnumerable<Guid> TableIds => _byId.Keys;
+        public IEnumerable<Guid> TableIds => _byName.Values.ToArray();
 
         /// <summary>
         /// Registry of table identifiers by unique name (case-sensitive, <see cref="StringComparer.Ordinal"/>).
@@ -343,9 +344,39 @@ namespace Extend0.Metadata
             if (Indexes.TryGet(CROSS_GLOBAL_KEY_INDEX, out var idx) && idx is GlobalMultiTableKeyIndex gk)
                 return gk;
 
-            var created = new GlobalMultiTableKeyIndex(CROSS_GLOBAL_KEY_INDEX);
+            var created = new GlobalMultiTableKeyIndex(CROSS_GLOBAL_KEY_INDEX, keySize: ResolveCrossGlobalKeySize());
             Indexes.Add(created);
             return created;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EnsureBuiltInCrossTableIndexesRegistered()
+        {
+            _ = GetOrCreateCrossGlobalKeyIndex();
+        }
+
+        private int ResolveCrossGlobalKeySize()
+        {
+            const int fallbackKeySize = 32;
+            var maxKeySize = 0;
+
+            foreach (var managed in _byId.Values)
+            {
+                if (managed is null)
+                    continue;
+
+                var spec = managed.IsCreated
+                    ? managed.Table.Spec
+                    : managed.StoredSpec;
+
+                if (spec?.Columns is null)
+                    continue;
+
+                foreach (var column in spec.Value.Columns)
+                    maxKeySize = Math.Max(maxKeySize, column.Size.GetKeySize());
+            }
+
+            return maxKeySize > 0 ? Math.Max(maxKeySize, fallbackKeySize) : fallbackKeySize;
         }
 
         /// <summary>
@@ -795,15 +826,15 @@ namespace Extend0.Metadata
         /// <returns>
         /// <see langword="true"/> if a managed table was found for the given
         /// <paramref name="id"/> and its underlying <see cref="IMetadataTable"/>
-        /// could be obtained; otherwise <see langword="false"/>.
+        /// had already been created; otherwise <see langword="false"/>.
         /// </returns>
         /// <remarks>
         /// <para>
         /// This is a non-throwing probe around the internal id registry:
         /// it returns <see langword="false"/> when no entry exists, when the
-        /// managed wrapper is <see langword="null"/>, or in any other failure
-        /// scenario, and never forces creation beyond accessing
-        /// <see cref="ManagedTable.Table"/>.
+        /// managed wrapper is <see langword="null"/>, when the table is still
+        /// lazy and not yet created, or in any other failure scenario. It
+        /// deliberately does not force lazy table materialization.
         /// </para>
         /// <para>
         /// The <see cref="NotNullWhenAttribute"/> on <paramref name="table"/>
@@ -817,6 +848,7 @@ namespace Extend0.Metadata
             var found = _byId.TryGetValue(id, out ManagedTable? managed);
             if (!found) return false;
             if (managed is null) return false;
+            if (!managed.IsCreated) return false;
             table = managed.Table;
             return true;
         }
@@ -850,6 +882,7 @@ namespace Extend0.Metadata
         /// </exception>
         public Guid RegisterTable(TableSpec spec, bool createNow = false)
         {
+            ThrowIfDisposed();
             MetaDBManagerHelpers.ValidateTableSpec(spec);
 
             if (_isLogActivated) Log.TableRegistering(_log!, spec.Name);
@@ -2508,12 +2541,17 @@ namespace Extend0.Metadata
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="operationName"/> or <paramref name="action"/> is <c>null</c>.
         /// </exception>
-        public void Run(string operationName, Action<IMetaDBManager> action, object? state = null) =>
+        public void Run(string operationName, Action<IMetaDBManager> action, object? state = null)
+        {
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(action);
+
             RunCore(operationName, (mgr) =>
             {
                 action(mgr);
                 return Task.CompletedTask;
             }, state).GetAwaiter().GetResult();
+        }
 
         /// <summary>
         /// Asynchronous version of <see cref="Run(string, Action{IMetaDBManager}, object?)"/>.
@@ -2528,8 +2566,13 @@ namespace Extend0.Metadata
         /// <exception cref="ArgumentNullException">
         /// Thrown when <paramref name="operationName"/> or <paramref name="action"/> is <c>null</c>.
         /// </exception>
-        public async Task RunAsync(string operationName, Func<IMetaDBManager, Task> action, object? state = null) =>
+        public async Task RunAsync(string operationName, Func<IMetaDBManager, Task> action, object? state = null)
+        {
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(action);
+
             await RunCore(operationName, action, state).ConfigureAwait(false);
+        }
 
         /// <summary>
         /// Executes a named operation and, upon successful completion, triggers an index rebuild
@@ -2558,12 +2601,17 @@ namespace Extend0.Metadata
             Action<IMetaDBManager> action,
             object? state = null,
             bool strict = true,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(action);
+
             Run(operationName, mgr =>
             {
                 action(mgr);
                 mgr.RebuildAllIndexes(strict, cancellationToken).Forget();
             }, state);
+        }
 
         /// <summary>
         /// Executes a named asynchronous operation and, upon successful completion, rebuilds indexes
@@ -2590,12 +2638,17 @@ namespace Extend0.Metadata
             Func<IMetaDBManager, Task> action,
             object? state = null,
             bool strict = true,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(action);
+
             await RunCore(operationName, async mgr =>
             {
                 await action(mgr).ConfigureAwait(false);
                 await mgr.RebuildAllIndexes(strict, cancellationToken).ConfigureAwait(false);
             }, state).ConfigureAwait(false);
+        }
 
         /// <summary>
         /// Executes a named operation and, upon successful completion, triggers an index rebuild
@@ -2626,12 +2679,17 @@ namespace Extend0.Metadata
             Action<IMetaDBManager> action,
             object? state,
             bool strict = true,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(action);
+
             Run(operationName, mgr =>
             {
                 action(mgr);
                 mgr.RebuildIndexes(tableId, strict, cancellationToken).Forget();
             }, state);
+        }
 
         /// <summary>
         /// Executes a named asynchronous operation and, upon successful completion, rebuilds indexes
@@ -2660,12 +2718,17 @@ namespace Extend0.Metadata
             Func<IMetaDBManager, Task> action,
             object? state,
             bool strict = true,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(action);
+
             await RunCore(operationName, async mgr =>
             {
                 await action(mgr).ConfigureAwait(false);
                 await mgr.RebuildIndexes(tableId, strict, cancellationToken).ConfigureAwait(false);
             }, state).ConfigureAwait(false);
+        }
 
         private async Task RunCore(string operationName, Func<IMetaDBManager, Task> action, object? state = null)
         {
@@ -2794,6 +2857,7 @@ namespace Extend0.Metadata
 
             // Clear everything (ephemeral by design)
             Indexes.ClearAll();
+            EnsureBuiltInCrossTableIndexesRegistered();
 
             ConcurrentQueue<InvalidOperationException>? errors = null;
 

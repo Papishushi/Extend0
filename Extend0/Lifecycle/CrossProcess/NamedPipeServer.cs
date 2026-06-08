@@ -29,8 +29,9 @@ namespace Extend0.Lifecycle.CrossProcess
     ///   <item><description>Any other type → <c>{"ok":true,"r":value}</c></description></item>
     /// </list>
     /// </para>
-    /// <para><b>Handshake:</b> after connection, the server writes a single line:
-    /// <c>HELLO &lt;fingerprint&gt;</c>, where <seealso cref="CrossProcessUtils.CurrentFingerprint"/> identifies the hosting binary.</para>
+    /// <para><b>Handshake:</b> after connection, the server writes a single line including
+    /// the current fingerprint, transport kind, protocol identifier and protocol version.
+    /// Clients validate this before issuing RPC calls.</para>
     /// <para><b>Concurrency:</b> this server accepts multiple clients over separate pipe instances and
     /// dispatches each connected client to its own handler.</para>
     /// <para><b>Lifetime:</b> call <see cref="Dispose"/> or <see cref="DisposeAsync"/> to cancel the accept loop and
@@ -46,7 +47,7 @@ namespace Extend0.Lifecycle.CrossProcess
     /// </example>
     /// <seealso cref="NamedPipeClientTransport"/>
     /// <seealso cref="CrossProcessUtils"/>
-    internal sealed class NamedPipeServer : IDisposable, IAsyncDisposable
+    internal sealed class NamedPipeServer : ICrossProcessServerHost
     {
         private readonly string _pipeName;
         private readonly object _impl;
@@ -78,7 +79,7 @@ namespace Extend0.Lifecycle.CrossProcess
         /// Accepts clients and dispatches each one to a dedicated handler,
         /// allowing multiple concurrent clients. Each handler processes NDJSON requests
         /// until the client disconnects or cancellation is requested.
-        /// Writes a <c>HELLO &lt;fingerprint&gt;</c> greeting on connect.
+        /// Writes a protocol-aware greeting on connect so clients can verify transport and wire compatibility.
         /// </summary>
         /// <remarks>This is the server’s background loop; it completes on disposal or cancellation.</remarks>
         private async Task AcceptLoopAsync()
@@ -204,7 +205,8 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A task that completes when the handshake line has been written.
         /// </returns>
-        private static Task SendHandshakeAsync(StreamWriter writer) => writer.WriteLineAsync($"HELLO {CrossProcessUtils.CurrentFingerprint}");
+        private static Task SendHandshakeAsync(StreamWriter writer) =>
+            writer.WriteLineAsync(CrossProcessHandshake.BuildHelloLine(NamedPipeTransportProtocol.Descriptor));
 
         /// <summary>
         /// Main NDJSON processing loop for a single client connection.

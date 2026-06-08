@@ -377,8 +377,10 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
     /// </returns>
     /// <remarks>
     /// <para>
-    /// <b>Fast path:</b> no content scan is performed. Use only when the caller already holds the stored key instance (e.g., obtained from
-    /// an internal enumeration). Passing a non-stored buffer will simply return <see langword="false"/>.
+    /// <b>Exact identity:</b> use only when the caller already holds the stored key instance (e.g., obtained from
+    /// an internal enumeration). Because the partition dictionary compares <see cref="byte"/>[] keys by content,
+    /// this method first verifies reference identity before removing the entry.
+    /// Passing a different buffer with equivalent bytes returns <see langword="false"/>.
     /// </para>
     /// <para>
     /// <b>Pooling:</b> on success, <paramref name="storedKey"/> is returned to the pool. If the partition becomes empty, it is removed.
@@ -395,8 +397,21 @@ internal sealed class ColumnKeyIndex(string name, int capacity = 0)
         try
         {
             if (!Index.TryGetValue(col, out var dict)) return false;
-            if (!dict.Remove(storedKey)) return false;
-            ReturnPooledKey(storedKey);
+
+            byte[]? exactKey = null;
+            foreach (var key in dict.Keys)
+            {
+                if (!ReferenceEquals(key, storedKey))
+                    continue;
+
+                exactKey = key;
+                break;
+            }
+
+            if (exactKey is null) return false;
+            if (!dict.Remove(exactKey)) return false;
+
+            ReturnPooledKey(exactKey);
             if (dict.Count == 0) Index.Remove(col);
             return true;
         }

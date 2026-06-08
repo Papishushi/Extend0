@@ -18,6 +18,7 @@ This page is for contributors working on singleton behavior, ownership, transpor
 - `cross-process resolution`
 - `transport`
 - `heartbeat`
+- `transport factory`
 
 ## Resolution Model
 
@@ -30,13 +31,13 @@ This page is for contributors working on singleton behavior, ownership, transpor
 ## Current Implementation Truth
 
 - named pipes are the current built-in transport used by the cross-process runtime
-- the architecture already treats transport as an abstraction, but the runtime is not yet fully pluggable end-to-end
+- the runtime now supports custom client and owner-side server transport factories for callers that provide compatible endpoint semantics and protocol descriptors
 - the current public contract still contains pipe-centric naming in places, and that is a known cleanup target rather than accepted conceptual truth
 
 ## Current Cleanup Targets
 
 - remaining pipe-centric compatibility surface around `ServiceInfo.PipeName`
-- architecture/runtime gap between abstract transport and named-pipe-centered orchestration
+- built-in transport coverage is still named-pipe-centered even though custom transports can be injected
 
 ## Governing ADRs
 

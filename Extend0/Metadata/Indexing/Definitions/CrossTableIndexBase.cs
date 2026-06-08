@@ -140,8 +140,28 @@ namespace Extend0.Metadata.Indexing.Definitions
             Rwls.EnterWriteLock();
             try
             {
-                foreach (var table in Index.Values)
-                    removed |= table.Remove(key);
+                Guid[]? emptyTables = null;
+                var emptyCount = 0;
+
+                foreach (var kvp in Index)
+                {
+                    if (!kvp.Value.Remove(key))
+                        continue;
+
+                    removed = true;
+
+                    if (kvp.Value.Count != 0)
+                        continue;
+
+                    emptyTables ??= new Guid[Index.Count];
+                    emptyTables[emptyCount++] = kvp.Key;
+                }
+
+                if (emptyTables is not null)
+                {
+                    for (var i = 0; i < emptyCount; i++)
+                        Index.Remove(emptyTables[i]);
+                }
             }
             finally { Rwls.ExitWriteLock(); }
             return removed;
@@ -229,7 +249,16 @@ namespace Extend0.Metadata.Indexing.Definitions
         {
             ThrowIfDisposed();
             Rwls.EnterWriteLock();
-            try { return Index.TryGetValue(tableId, out var dict) && dict.Remove(key); }
+            try
+            {
+                if (!Index.TryGetValue(tableId, out var dict) || !dict.Remove(key))
+                    return false;
+
+                if (dict.Count == 0)
+                    Index.Remove(tableId);
+
+                return true;
+            }
             finally { Rwls.ExitWriteLock(); }
         }
 
@@ -517,10 +546,12 @@ namespace Extend0.Metadata.Indexing.Definitions
         /// </remarks>
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
                 return;
 
-            Clear();
+            Rwls.EnterWriteLock();
+            try { _index.Clear(); }
+            finally { Rwls.ExitWriteLock(); }
 
             Rwls.Dispose();
             GC.SuppressFinalize(this);

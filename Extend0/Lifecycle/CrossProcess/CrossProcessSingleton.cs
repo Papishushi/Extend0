@@ -79,7 +79,18 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// <exception cref="InvalidOperationException">
     /// Thrown if the static service is already initialized and <see cref="SingletonOptions.Overwrite"/> is <see langword="false"/>.
     /// </exception>
-    public CrossProcessSingleton(Func<TService> factory, CrossProcessSingletonOptions options, ILoggerFactory? loggerFactory = null) : base(options) => InitializeStatic(factory, options, out _crossHandleInstance, loggerFactory);
+    public CrossProcessSingleton(Func<TService> factory, CrossProcessSingletonOptions options, ILoggerFactory? loggerFactory = null) : base(options)
+    {
+        try
+        {
+            InitializeStatic(factory, options, out _crossHandleInstance, loggerFactory);
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+    }
 
     /// <summary>
     /// Releases managed resources held by this singleton. In cross-process mode, disposes the
@@ -230,7 +241,16 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
         {
             if (loggerFactory is not null)
                 CrossProcessOrchestrator<TService>.s_LoggerFactory = loggerFactory;
-            var h = CrossProcessOrchestrator<TService>.GetOrStart(factory, serverName: options.CrossProcessServer, name: options.CrossProcessName, connectTimeoutMs: options.CrossProcessConnectTimeoutMs);
+            var h = CrossProcessOrchestrator<TService>.GetOrStart(
+                factory,
+                transportKind: options.TransportKind,
+                protocolDescriptor: options.ProtocolDescriptor,
+                endpointName: options.CrossProcessEndpointName,
+                serverName: options.CrossProcessServer,
+                name: options.CrossProcessName,
+                connectTimeoutMs: options.CrossProcessConnectTimeoutMs,
+                clientTransportFactory: options.ClientTransportFactory,
+                serverTransportFactory: options.ServerTransportFactory);
 
             _handle = h;
             _service = h.Service;

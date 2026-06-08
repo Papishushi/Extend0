@@ -20,9 +20,9 @@ namespace Extend0.Lifecycle.CrossProcess
     /// <list type="number">
     ///   <item>
     ///     <description>
-    ///       Connects to the named pipe and reads a single greeting line in the form
-    ///       <c>"HELLO &lt;fingerprint&gt;"</c>. If the greeting is missing or malformed,
-    ///       the constructor throws an <see cref="IOException"/>.
+    ///       Connects to the named pipe and reads a single greeting line containing the
+    ///       server fingerprint, transport kind and wire protocol identity. If the greeting
+    ///       is missing, malformed or incompatible, the constructor throws an <see cref="IOException"/>.
     ///     </description>
     ///   </item>
     ///   <item>
@@ -51,6 +51,9 @@ namespace Extend0.Lifecycle.CrossProcess
     /// </remarks>
     internal sealed class NamedPipeClientTransport : IClientTransport
     {
+        /// <inheritdoc/>
+        public TransportKind Kind => TransportKind.NamedPipe;
+
         /// <summary>
         /// Underlying named pipe stream used to send and receive raw bytes.
         /// </summary>
@@ -68,7 +71,7 @@ namespace Extend0.Lifecycle.CrossProcess
 
         /// <summary>
         /// Initializes a new transport and connects to the specified named pipe on the given server.
-        /// Performs a simple handshake by reading the server greeting line.
+        /// Performs a protocol-aware handshake by reading and validating the server greeting line.
         /// </summary>
         /// <param name="serverName">
         /// The target server/machine name. Use <c>"."</c> for the local machine.
@@ -78,7 +81,7 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <param name="timeoutMs">Connection timeout in milliseconds.</param>
         /// <exception cref="TimeoutException">The connection attempt timed out.</exception>
         /// <exception cref="IOException">
-        /// The server handshake was invalid (no <c>HELLO</c> line) or the pipe I/O failed.
+        /// The server handshake was invalid or incompatible, or the pipe I/O failed.
         /// </exception>
         /// <exception cref="ObjectDisposedException">The transport was disposed during initialization.</exception>
         /// <remarks>
@@ -97,10 +100,13 @@ namespace Extend0.Lifecycle.CrossProcess
                 AutoFlush = true
             };
 
-            // Handshake: read server fingerprint
+            // Handshake: read and validate server protocol identity before issuing RPC calls.
             var serverHello = _reader.ReadLine();
-            if (serverHello is null || !serverHello.StartsWith("HELLO ", StringComparison.Ordinal))
-                throw new IOException("Invalid server handshake.");
+            if (serverHello is null)
+                throw new IOException("Invalid server handshake: missing greeting.");
+
+            if (!CrossProcessHandshake.TryValidateHelloLine(serverHello, NamedPipeTransportProtocol.Descriptor, out var handshakeError))
+                throw new IOException($"Invalid server handshake: {handshakeError}");
         }
 
         /// <summary>

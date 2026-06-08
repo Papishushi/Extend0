@@ -14,9 +14,9 @@
         /// Cancellation is checked at the beginning of <see cref="MoveNextAsync"/> only.
         /// </para>
         /// </remarks>
-        public readonly struct AsyncEnumerator : IAsyncEnumerator<CellRowColumnValueEntry>
+        public struct AsyncEnumerator : IAsyncEnumerator<CellRowColumnValueEntry>
         {
-            private readonly Enumerator _e;
+            private Enumerator _e;
             private readonly CancellationToken _ct;
 
             /// <summary>
@@ -33,7 +33,7 @@
             /// <summary>
             /// Gets the current element in the sequence.
             /// </summary>
-            public readonly CellRowColumnValueEntry Current => _e.Current;
+            public CellRowColumnValueEntry Current => _e.Current;
 
             /// <summary>
             /// Advances the enumerator asynchronously to the next element in the sequence.

@@ -25,6 +25,11 @@ namespace Extend0.Lifecycle.CrossProcess
     public interface IClientTransport : IDisposable
     {
         /// <summary>
+        /// Logical kind of transport used by this client instance.
+        /// </summary>
+        TransportKind Kind { get; }
+
+        /// <summary>
         /// Invokes a remote method over the transport and returns the raw JSON reply.
         /// </summary>
         /// <param name="method">Logical method name to invoke on the remote service.</param>

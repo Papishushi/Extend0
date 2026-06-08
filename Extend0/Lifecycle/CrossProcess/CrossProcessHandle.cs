@@ -44,9 +44,9 @@
 
         private readonly Mutex? _mutex;
         private readonly CancellationTokenSource? _cts;
-        private readonly NamedPipeServer? _server;
+        private readonly ICrossProcessServerHost? _server;
         private readonly IClientTransport? _transport;
-        private bool _disposed;
+        private int _disposed;
 
         /// <summary>
         /// Initializes a new handle.
@@ -57,12 +57,12 @@
         /// <param name="isOwner">Whether this handle represents the hosting (owner) side.</param>
         /// <param name="mutex">The process-wide mutex used to establish ownership (owner only).</param>
         /// <param name="cts">Cancellation token source used to stop the server loop (owner only).</param>
-        /// <param name="server">The named-pipe server hosting the service (owner only).</param>
+        /// <param name="server">The owner-side server host responsible for exposing the service (owner only).</param>
         /// <param name="transport">The client transport used by the proxy (non-owner only).</param>
         /// <exception cref="ArgumentNullException"><paramref name="service"/> is <c>null</c>.</exception>
         internal CrossProcessHandle(
             TService service, bool isOwner, Mutex? mutex, CancellationTokenSource? cts,
-            NamedPipeServer? server, IClientTransport? transport)
+            ICrossProcessServerHost? server, IClientTransport? transport)
         {
             Service    = service ?? throw new ArgumentNullException(nameof(service));
             IsOwner    = isOwner;
@@ -86,8 +86,7 @@
         /// </remarks>
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
             DisposeTransport();
             CancelCts();
@@ -163,7 +162,7 @@
         /// </remarks>
         public async ValueTask DisposeAsync()
         {
-            if (Interlocked.Exchange(ref _disposed, true)) return;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
             DisposeTransport();
             CancelCts();

@@ -16,6 +16,7 @@
     /// var opts = new CrossProcessSingletonOptions
     /// {
     ///     Mode = SingletonMode.CrossProcess,
+    ///     TransportKind = TransportKind.NamedPipe,
     ///     CrossProcessName = "Extend0.Clock",   // optional logical name
     ///     CrossProcessConnectTimeoutMs = 5000,  // client connect timeout
     ///     Overwrite = false,                    // from SingletonOptions
@@ -35,10 +36,33 @@
         public SingletonMode Mode { get; init; } = SingletonMode.InProcess;
 
         /// <summary>
+        /// Selects the transport kind used when <see cref="Mode"/> is <see cref="SingletonMode.CrossProcess"/>.
+        /// The current built-in implementation supports <see cref="CrossProcess.TransportKind.NamedPipe"/>.
+        /// Other values require compatible custom client/server factories and an explicit protocol descriptor;
+        /// unsupported built-in selection fails explicitly.
+        /// </summary>
+        public TransportKind TransportKind { get; init; } = TransportKind.NamedPipe;
+
+        /// <summary>
+        /// Optional explicit wire-protocol descriptor for the selected transport.
+        /// Built-in transports use their built-in descriptors when this is omitted.
+        /// Custom transport pairs should typically provide this so both client and owner
+        /// receive the same protocol identity and version through their factory contexts.
+        /// </summary>
+        public CrossProcessProtocolDescriptor? ProtocolDescriptor { get; init; }
+
+        /// <summary>
+        /// Optional explicit endpoint name override for the selected transport.
+        /// When omitted, the transport factory derives the endpoint from the logical service identity.
+        /// </summary>
+        public string? CrossProcessEndpointName { get; init; }
+
+        /// <summary>
         /// Target server/machine name used by client transports when connecting to the cross-process owner.
         /// Use <c>"."</c> for the local machine.
         /// On Windows you may specify a remote computer name (e.g., <c>"HOST123"</c>) when the chosen transport supports it
-        /// (e.g., named pipes). On Linux/macOS this value is typically ignored and connections are local-only.
+        /// (for example <see cref="CrossProcess.TransportKind.NamedPipe"/>). On Linux/macOS this value is typically ignored
+        /// by local-only transports.
         /// </summary>
         public string CrossProcessServer { get; init; } = ".";
 
@@ -53,5 +77,21 @@
         /// Ignored when becoming the owner (hosting path).
         /// </summary>
         public int CrossProcessConnectTimeoutMs { get; init; } = 3000;
+
+        /// <summary>
+        /// Optional user-supplied client transport factory.
+        /// When provided, the non-owner attach path uses this factory before falling back to built-in transports.
+        /// This allows callers to inject custom <see cref="IClientTransport"/> implementations without changing
+        /// singleton orchestration code.
+        /// </summary>
+        public Func<ClientTransportFactoryContext, IClientTransport>? ClientTransportFactory { get; init; }
+
+        /// <summary>
+        /// Optional user-supplied owner-side server host factory.
+        /// When provided, the owner hosting path uses this factory before falling back to built-in hosts.
+        /// Pair this with <see cref="ClientTransportFactory"/> to fully support custom transports outside the
+        /// built-in transport set.
+        /// </summary>
+        public Func<ServerTransportFactoryContext, ICrossProcessServerHost>? ServerTransportFactory { get; init; }
     }
 }

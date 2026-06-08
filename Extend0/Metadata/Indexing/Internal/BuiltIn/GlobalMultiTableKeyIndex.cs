@@ -761,22 +761,18 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
         Rwls.EnterWriteLock();
         try
         {
+            foreach (var tableMap in Index.Values)
+                foreach (var key in tableMap.Keys)
+                    ReturnPooledKey(key);
+            Index.Clear();
+
             foreach (var tableId in manager.TableIds)
             {
                 if (!manager.TryGetManaged(tableId, out var table))
                     continue;
 
-                if (!Index.TryGetValue(tableId, out var existing))
-                {
-                    existing = new Dictionary<byte[], Hit>(ByteArrayComparer.Ordinal);
-                    Index[tableId] = existing;
-                }
-                else
-                {
-                    foreach (var key in existing.Keys)
-                        ReturnPooledKey(key);
-                    existing.Clear();
-                }
+                var existing = new Dictionary<byte[], Hit>(ByteArrayComparer.Ordinal);
+                Index[tableId] = existing;
 
                 await foreach (var entry in table.EnumerateCells().AsAsync())
                 {

@@ -2,6 +2,7 @@
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage.Contract;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Extend0.Metadata.Storage.Internal
 {
@@ -45,6 +46,27 @@ namespace Extend0.Metadata.Storage.Internal
         /// <returns>A 64-bit value encoding <paramref name="c"/> and <paramref name="r"/>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static ulong Pack(uint c, uint r) => (ulong)c << 32 | r;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe MetadataCell CreateCell(in ColumnConfiguration meta)
+        {
+            var totalBytes = meta.Size.GetKeySize() + meta.Size.GetValueSize();
+            if (totalBytes <= 0)
+                throw new ArgumentOutOfRangeException(nameof(meta), "Column entry size must be greater than zero.");
+
+            var ptr = (void*)NativeMemory.AllocZeroed((nuint)totalBytes);
+            try
+            {
+                var cell = MetadataCell.FromPointer(meta.Size, ptr, owns: true);
+                cell.TrySetKey(meta.Name);
+                return cell;
+            }
+            catch
+            {
+                NativeMemory.Free(ptr);
+                throw;
+            }
+        }
 
         /// <summary>
         /// Creates a new in-memory store from the given column configurations.
@@ -107,8 +129,7 @@ namespace Extend0.Metadata.Storage.Internal
             var k = Pack(col, row);
             if (_cells.TryGetValue(k, out var cell)) return cell;
 
-            cell = new MetadataCell(meta.Size);
-            cell.TrySetKey(meta.Name);
+            cell = CreateCell(meta);
             _cells[k] = cell;
 
             // Track logical length (max row index + 1)
@@ -181,8 +202,7 @@ namespace Extend0.Metadata.Storage.Internal
                 var key = Pack(column, r);
                 if (_cells.ContainsKey(key)) continue; // defensive (should not happen)
 
-                var cell = new MetadataCell(meta.Size);
-                cell.TrySetKey(meta.Name);
+                var cell = CreateCell(meta);
 
                 if (zeroInit)
                 {

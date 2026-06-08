@@ -15,7 +15,7 @@
       Lifecycle, MetaDB, transport-mediated access, and structured metadata state. Code symbols are
       linked only as traceability hints and do not define the semantics.
     </rdfs:comment>
-    <owl:versionInfo>1.2.0</owl:versionInfo>
+    <owl:versionInfo>1.2.1</owl:versionInfo>
   </owl:Ontology>
 
   <owl:AnnotationProperty rdf:about="#mapsToCodeSymbol">
@@ -641,8 +641,9 @@
 
   <owl:ObjectProperty rdf:about="#governsAccessTo">
     <rdfs:domain rdf:resource="#LifecycleSystem"/>
-    <rdfs:range rdf:resource="#System"/>
+    <rdfs:range rdf:resource="#AccessSurface"/>
     <rdfs:label xml:lang="en">governs access to</rdfs:label>
+    <rdfs:comment xml:lang="en">Relates Lifecycle to the access surface whose ownership and resolution it governs.</rdfs:comment>
   </owl:ObjectProperty>
 
   <owl:ObjectProperty rdf:about="#appliesWithinScope">

@@ -4,6 +4,7 @@ using Extend0.Metadata.CrossProcess.DTO;
 using Extend0.Metadata.CrossProcess.HResult;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Storage;
+using Extend0.Lifecycle.CrossProcess;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -143,8 +144,9 @@ namespace Extend0.Metadata.CrossProcess.Internal
             // preview prefers VALUE, fallback to KEY, else null
             string? preview = null;
             var prevSource = !result.Value.IsEmpty ? result.Value : result.HasKey ? result.Key : default;
+            var prevLenHint = !result.Value.IsEmpty ? valLenHint : result.HasKey ? keyLenHint : 0;
             if (!prevSource.IsEmpty)
-                preview = MakePreview(prevSource, 48);
+                preview = MakePreview(prevSource, prevLenHint, 48);
 
             return new CellResultDTO(
                 HasCell: true,
@@ -328,7 +330,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// Capacity behavior:
         /// <list type="bullet">
         ///   <item><description><see cref="CapacityPolicy.None"/>: no growth attempt; returns false on failure.</description></item>
-        ///   <item><description><see cref="CapacityPolicy.TryGrow"/>: attempts growth; returns false if still failing.</description></item>
+        ///   <item><description><see cref="CapacityPolicy.AutoGrowZeroInit"/>: attempts growth; returns false if still failing.</description></item>
         ///   <item><description><see cref="CapacityPolicy.Throw"/>: throws when capacity cannot be ensured.</description></item>
         /// </list>
         /// </param>
@@ -368,38 +370,48 @@ namespace Extend0.Metadata.CrossProcess.Internal
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static bool IsBuiltIn(ITableIndex idx)
             => idx is Indexing.Internal.BuiltIn.ColumnKeyIndex
-            || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex;
+            || idx is Indexing.Internal.BuiltIn.GlobalKeyIndex
+            || idx is Indexing.Internal.BuiltIn.GlobalMultiTableKeyIndex;
 
         /// <summary>
         /// Produces a compact preview for diagnostics: printable UTF-8 when possible, otherwise hex, truncated to <paramref name="maxChars"/>.
         /// </summary>
-        private static string MakePreview(ReadOnlySpan<byte> data, int maxChars)
+        private static string MakePreview(ReadOnlySpan<byte> data, int lenHint, int maxChars)
         {
-            var s = TryDecodePrintableUtf8(data, data.Length);
+            int effectiveLen = Math.Clamp(lenHint, 0, data.Length);
+            var previewSlice = data[..effectiveLen];
+
+            var s = TryDecodePrintableUtf8(data, effectiveLen);
             if (s is not null) return EllipsisSafe(s, maxChars);
 
             // hex preview
             if (maxChars <= 0) return string.Empty;
             int maxBytes = Math.Max(0, (maxChars - 1) / 2);
-            int bytes = Math.Min(maxBytes, data.Length);
+            int bytes = Math.Min(maxBytes, previewSlice.Length);
 
-            Span<char> chars = stackalloc char[bytes * 2 + (bytes < data.Length ? 1 : 0)];
+            Span<char> chars = stackalloc char[bytes * 2 + (bytes < previewSlice.Length ? 1 : 0)];
             int ci = 0;
 
             static char Hex(byte x) => (char)(x < 10 ? '0' + x : 'A' + (x - 10));
 
             for (int i = 0; i < bytes; i++)
             {
-                byte b = data[i];
+                byte b = previewSlice[i];
                 chars[ci++] = Hex((byte)(b >> 4));
                 chars[ci++] = Hex((byte)(b & 0xF));
             }
 
-            if (bytes < data.Length)
+            if (bytes < previewSlice.Length)
                 chars[ci++] = '…';
 
             return new string(chars[..ci]);
         }
+
+        /// <summary>
+        /// Test-only bridge for preview formatting branches that are difficult to trigger via public RPC APIs.
+        /// </summary>
+        internal static string MakePreviewForTests(byte[] data, int lenHint, int maxChars)
+            => MakePreview(data, lenHint, maxChars);
 
         /// <summary>
         /// Converts a runtime index instance into an <see cref="IndexInfoDTO"/> snapshot.
@@ -601,6 +613,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
             {
                 ArgumentNullException or ArgumentException or FormatException => RpcErr.InvalidArg,
                 KeyNotFoundException => RpcErr.NotFound,
+                RemoteInvocationException rie when rie.HResult == 404 => RpcErr.NotFound,
                 NotSupportedException => RpcErr.NotSupported,
                 UnauthorizedAccessException => RpcErr.Protected,
                 ObjectDisposedException => RpcErr.Disposed,

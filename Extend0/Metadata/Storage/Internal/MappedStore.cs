@@ -544,10 +544,11 @@ namespace Extend0.Metadata.Storage.Internal
             int needed = name.Length + 1 + rowLen;  // "name" + ':' + row
             if (needed >= cap)
             {
-                // Not enough room: truncate column name to leave space for ":row"
-                int maxName = Math.Max(0, cap - 1 - rowLen);
+                // Not enough room: truncate column name but always leave one trailing NUL byte
+                // so MetadataCell can still recover the key via its C-like UTF-8 helpers.
+                int maxName = Math.Max(0, cap - 2 - rowLen);
                 needed = maxName + 1 + rowLen;
-                if (needed >= cap) return cell; // still no room: leave key empty
+                if (needed >= cap) return cell; // still no room (or only room for ":row" without a terminator)
 
                 var dst = new Span<byte>(CellPtr(col, row), cap);
                 dst.Clear();
@@ -659,7 +660,7 @@ namespace Extend0.Metadata.Storage.Internal
             if (minRows == 0) return true;
             if (column >= _hdr->ColumnCount) return false;
 
-            ref var cd = ref _cols[column];
+            ref readonly var cd = ref _cols[column];
 
             // Validate sizes (we only grow rows; key/value sizes are fixed)
             int keySize = meta.Size.GetKeySize();
@@ -671,6 +672,7 @@ namespace Extend0.Metadata.Storage.Internal
 
             uint oldCap = cd.RowCapacity;
             uint newCap = minRows;
+            long oldOffset = cd.BaseOffset;
 
             long entrySize = (long)cd.KeySize + cd.ValueSize;
             long oldBytes = entrySize * oldCap;
@@ -683,12 +685,11 @@ namespace Extend0.Metadata.Storage.Internal
             // Ensure mapping covers the new length
             Remap(newFileLen);
 
-            // After remap, pointers are refreshed; re-take ref
+            // After remap, pointers are refreshed; re-take ref without depending on the old mapped ref.
             ref var cd2 = ref _cols[column];
-            Debug.Assert(cd2.BaseOffset == cd.BaseOffset); // same struct instance in file
 
             // Copy existing payload to new spot
-            byte* oldBase = _base + cd2.BaseOffset;
+            byte* oldBase = _base + oldOffset;
             byte* newBase = _base + newOffset;
 
             Buffer.MemoryCopy(oldBase, newBase, newBytes, oldBytes);

@@ -76,5 +76,43 @@ namespace Extend0.Metadata.Schema
             SaveToFile(full, overwrite);
             return full;
         }
+
+        /// <summary>
+        /// Compares two <see cref="TableSpec"/> values structurally, including their column layouts by value.
+        /// </summary>
+        public bool Equals(TableSpec other)
+        {
+            if (!string.Equals(Name, other.Name, StringComparison.Ordinal))
+                return false;
+
+            if (!string.Equals(MapPath, other.MapPath, StringComparison.Ordinal))
+                return false;
+
+            if (ReferenceEquals(Columns, other.Columns))
+                return true;
+
+            if (Columns is null || other.Columns is null || Columns.Length != other.Columns.Length)
+                return false;
+
+            return Columns.AsSpan().SequenceEqual(other.Columns);
+        }
+
+        /// <summary>
+        /// Computes a structural hash code for this <see cref="TableSpec"/>, including all column definitions.
+        /// </summary>
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+            hash.Add(Name, StringComparer.Ordinal);
+            hash.Add(MapPath, StringComparer.Ordinal);
+
+            if (Columns is not null)
+            {
+                foreach (var column in Columns)
+                    hash.Add(column);
+            }
+
+            return hash.ToHashCode();
+        }
     }
 }

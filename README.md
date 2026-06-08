@@ -54,11 +54,13 @@ The main package is available through NuGet and repository releases remain usefu
 
 The library currently targets:
 
-- `net9.0`
+- `net10.0`
 
-Dependencies are intentionally light:
+Current runtime logging dependencies are:
 
-- `Microsoft.Extensions.Logging.Abstractions` for optional logging support
+- `Microsoft.Extensions.Logging`
+- `Microsoft.Extensions.Logging.Abstractions`
+- `Microsoft.Extensions.Logging.Console`
 
 ## Lifecycle
 
@@ -156,13 +158,14 @@ var spec = new TableSpec(
     MapPath: "./data/settings.meta",
     Columns: new[]
     {
-        TableSpec.Column<MetadataEntry64x512>("Entries", capacity: 512),
+        TableSpec.Helpers.Column("Entries", capacity: 512, keyBytes: 64, valueBytes: 512),
     });
 
 var tableId = manager.RegisterTable(spec, createNow: true);
 var table = manager.GetOrCreate(tableId);
 
-Console.WriteLine(table.Id);
+Console.WriteLine(tableId);
+Console.WriteLine(string.Join(", ", table.GetColumnNames()));
 ```
 
 ### MetaDB quickstart: shared singleton
@@ -179,7 +182,7 @@ var spec = new TableSpec(
     MapPath: "./data/settings.meta",
     Columns: new[]
     {
-        TableSpec.Column<MetadataEntry64x512>("Entries", capacity: 512),
+        TableSpec.Helpers.Column("Entries", capacity: 512, keyBytes: 64, valueBytes: 512),
     });
 
 var tableId = MetaDBManagerSingleton.Service.RegisterTable(spec, createNow: true);
@@ -233,6 +236,7 @@ Extend0 currently includes two source-generation surfaces:
 - `Extend0.BlittableAdapter.Generator` for blittable payload adapters
 
 In major `1`, these are treated as schema-driven artifact generation, not as isolated tooling.
+The metadata-entry catalog shipped in `Extend0/Metadata/Generator.attributes.cs` provides built-in shapes, but consumers can declare additional `[GenerateMetadataEntry(keyBytes, valueBytes)]` entries in their own assemblies when they need custom blittable layouts.
 
 ## Documentation and ADRs
 

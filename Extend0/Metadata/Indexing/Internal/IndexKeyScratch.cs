@@ -38,13 +38,13 @@ internal static class IndexKeyScratch
     [ThreadStatic] private static byte[]? _b128;
     [ThreadStatic] private static byte[]? _b256;
     [ThreadStatic] private static byte[]? _b512;
-    [ThreadStatic] private static byte[]?[] _temp;
+    [ThreadStatic] private static byte[]?[]? _temp;
+    private static readonly int s_tempSize;
 
     static IndexKeyScratch()
     {
         var env = Environment.GetEnvironmentVariable(nameof(IndexKeyScratch));
-        if (string.IsNullOrEmpty(env)) _temp = new byte[256][];
-        else _temp = new byte[int.Parse(env)][];
+        s_tempSize = string.IsNullOrEmpty(env) ? 256 : int.Parse(env);
     }
 
     /// <summary>
@@ -81,7 +81,7 @@ internal static class IndexKeyScratch
         128 => _b128 ??= new byte[128],
         256 => _b256 ??= new byte[256],
         512 => _b512 ??= new byte[512],
-        _ => _temp[size] ??= new byte[size], // uncommon size: allocate and cache
+        _ => (_temp ??= new byte[s_tempSize][])[size] ??= new byte[size], // uncommon size: allocate and cache per-thread
     };
 
     /// <summary>

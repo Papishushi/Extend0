@@ -88,6 +88,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
             Func<TableSpec?, IMetadataTable>? factory = null,
             CapacityPolicy capacityPolicy = CapacityPolicy.Throw,
             string? deleteQueuePath = null)
+            : base(logger)
         {
             _innerManager = new(logger, factory, capacityPolicy, deleteQueuePath);
             _cleanupLoop = Task.Run(async () =>
@@ -909,6 +910,9 @@ namespace Extend0.Metadata.CrossProcess.Internal
             {
                 if (tableId == Guid.Empty)
                     return new(IndexMutationStatusDTO.TableNotOpen, null, "Empty tableId.");
+
+                if (!_innerManager.TableIds.Contains(tableId))
+                    return new(IndexMutationStatusDTO.TableNotOpen, null, "Unknown tableId.");
 
                 if (string.IsNullOrWhiteSpace(request.Name))
                     return new(IndexMutationStatusDTO.InvalidName, null, "Invalid index name.");

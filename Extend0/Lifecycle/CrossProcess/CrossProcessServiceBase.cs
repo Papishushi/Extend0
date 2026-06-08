@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.IO.Pipes;
 
+using Microsoft.Extensions.Logging;
+
 namespace Extend0.Lifecycle.CrossProcess
 {
     /// <summary>ICrossProcessService
@@ -10,6 +12,16 @@ namespace Extend0.Lifecycle.CrossProcess
     public abstract class CrossProcessServiceBase<TService> : ICrossProcessService where TService : class, ICrossProcessService
     {
         private readonly DateTimeOffset _startUtc = DateTimeOffset.UtcNow;
+        protected ILogger? Logger { get; }
+
+        protected CrossProcessServiceBase()
+        {
+        }
+
+        protected CrossProcessServiceBase(ILogger? logger)
+        {
+            Logger = logger;
+        }
 
         /// <summary>
         /// Logical contract name reported by <see cref="GetServiceInfoAsync"/>.
@@ -42,9 +54,9 @@ namespace Extend0.Lifecycle.CrossProcess
 
         /// <summary>
         /// Logical transport kind surfaced in diagnostics.
-        /// Defaults to <c>"named-pipe"</c> when an endpoint name is available.
+        /// Defaults to <see cref="TransportKind.NamedPipe"/> when an endpoint name is available.
         /// </summary>
-        protected virtual string? TransportKind => EndpointName is null ? null : "named-pipe";
+        protected virtual TransportKind EndpointTransportKind => EndpointName is null ? TransportKind.None : TransportKind.NamedPipe;
 
         /// <summary>
         /// Returns a lightweight heartbeat snapshot for this service instance.
@@ -92,13 +104,10 @@ namespace Extend0.Lifecycle.CrossProcess
                 Environment.ProcessId,
                 proc.ProcessName,
                 _startUtc,
-                PipeName
-            )
-            {
-                EndpointName = EndpointName,
-                EndpointServerName = EndpointServerName,
-                TransportKind = TransportKind
-            };
+                PipeName,
+                EndpointName,
+                EndpointServerName,
+                EndpointTransportKind);
 
             return Task.FromResult(info);
         }
@@ -119,8 +128,9 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </para>
         /// <para>
         /// If <see cref="EndpointName"/> is <see langword="null"/> or empty, the method
-        /// returns <c>false</c> without attempting a connection. All exceptions are
-        /// swallowed and treated as a negative result.
+        /// returns <c>false</c> without attempting a connection. Probe cancellation
+        /// (including timeout) is treated as a negative result. Other failures are
+        /// logged as warnings and also treated as a negative result.
         /// </para>
         /// </remarks>
         public async Task<bool> CanConnectAsync()
@@ -130,8 +140,26 @@ namespace Extend0.Lifecycle.CrossProcess
                 using var cts = new CancellationTokenSource(200);
                 return await ProbeConnectivityCoreAsync(cts.Token).ConfigureAwait(false);
             }
-            catch
+            catch (OperationCanceledException ex)
             {
+                Logger?.LogDebug(
+                    ex,
+                    "Connectivity probe timed out or was canceled for {ContractName} via {TransportKind} endpoint {EndpointServerName}/{EndpointName}.",
+                    ContractName,
+                    EndpointTransportKind,
+                    EndpointServerName ?? ".",
+                    EndpointName ?? "<none>");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogWarning(
+                    ex,
+                    "Connectivity probe failed for {ContractName} via {TransportKind} endpoint {EndpointServerName}/{EndpointName}.",
+                    ContractName,
+                    EndpointTransportKind,
+                    EndpointServerName ?? ".",
+                    EndpointName ?? "<none>");
                 return false;
             }
         }

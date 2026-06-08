@@ -102,10 +102,12 @@ namespace Extend0.Metadata.Indexing.Definitions
         /// </remarks>
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
                 return;
 
-            Clear();
+            Rwls.EnterWriteLock();
+            try { _index.Clear(); }
+            finally { Rwls.ExitWriteLock(); }
 
             Rwls.Dispose();
             GC.SuppressFinalize(this);
