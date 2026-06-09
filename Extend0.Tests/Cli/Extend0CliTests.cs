@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Xml.Linq;
 using Extend0.Cli;
 using Extend0.Lifecycle.CrossProcess;
 using Extend0.Metadata.Schema;
@@ -36,6 +37,18 @@ public sealed class Extend0CliTests
 
         Assert.Equal(2, exitCode);
         Assert.Contains("Unknown command", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CliProject_IsConfiguredAsDotnetTool()
+    {
+        var projectPath = Path.Combine(FindRepositoryRoot(), "Extend0.Cli", "Extend0.Cli.csproj");
+        var document = XDocument.Load(projectPath);
+
+        Assert.Equal("true", GetProjectProperty(document, "IsPackable"), ignoreCase: true);
+        Assert.Equal("true", GetProjectProperty(document, "PackAsTool"), ignoreCase: true);
+        Assert.Equal("Extend0.Cli", GetProjectProperty(document, "PackageId"));
+        Assert.Equal("extend0", GetProjectProperty(document, "ToolCommandName"));
     }
 
     [Fact]
@@ -702,6 +715,28 @@ public sealed class Extend0CliTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, contents);
     }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "Extend0.Cli", "Extend0.Cli.csproj")))
+                return directory.FullName;
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
+    }
+
+    private static string GetProjectProperty(XDocument document, string name) =>
+        document
+            .Descendants(name)
+            .FirstOrDefault()
+            ?.Value
+            .Trim()
+        ?? string.Empty;
 
     private interface ICliProbeService : ICrossProcessService
     {

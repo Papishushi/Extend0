@@ -54,6 +54,8 @@ The main package is available through NuGet and repository releases remain usefu
 
 `Extend0.Cli` is the command-line entry point for repository and platform diagnostics. It currently provides repo diagnostics, lifecycle probing, MetaDB inspection/validation, and ontology inspection/validation commands that are useful for humans and automation.
 
+Run from source during development:
+
 ```bash
 dotnet run --project Extend0.Cli -- doctor
 dotnet run --project Extend0.Cli -- doctor --json
@@ -72,6 +74,16 @@ dotnet run --project Extend0.Cli -- ontology validate --json
 ```
 
 Use `lifecycle probe --connect` when an owner process is expected to be reachable and you want the probe to test the client transport and handshake.
+
+Pack and install as a dotnet tool when testing the distributable command:
+
+```bash
+dotnet pack Extend0.Cli/Extend0.Cli.csproj -c Release
+dotnet tool install --global Extend0.Cli --add-source Extend0.Cli/bin/Release
+extend0 --help
+```
+
+If the tool is already installed, use `dotnet tool update --global Extend0.Cli --add-source Extend0.Cli/bin/Release`.
 
 The CLI is intentionally repo-first in this phase. Future commands should hang from the same entry point, for example richer transport diagnostics, deeper MetaDB storage checks, and SPARQL-backed `ontology query`.
 

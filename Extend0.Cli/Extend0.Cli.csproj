@@ -5,10 +5,44 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
     <AssemblyName>Extend0.Cli</AssemblyName>
+    <PackageId>Extend0.Cli</PackageId>
     <ToolCommandName>extend0</ToolCommandName>
+    <Authors>Papishushi</Authors>
+    <Description>Command-line diagnostics and validation surface for Extend0 platform contracts.</Description>
+    <AssemblyVersion>1.0.9641.4010</AssemblyVersion>
+    <FileVersion>1.0.9641.4010</FileVersion>
+    <Version>1.0.9535</Version>
+    <PackageIcon>Extend0.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Copyright>MIT License</Copyright>
+    <PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>extend0;cli;diagnostics;metadb;lifecycle;ontology;validation;dotnet-tool;</PackageTags>
+    <NeutralLanguage>en-001</NeutralLanguage>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageReleaseNotes>
+      Adds the Extend0 CLI as the major 1 platform diagnostic surface.
+    </PackageReleaseNotes>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\Extend0.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\LICENSE.txt">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Extend0\Extend0.csproj" />

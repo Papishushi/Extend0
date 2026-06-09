@@ -31,14 +31,16 @@ For a contributor trying to understand the repository today, the recommended rea
 5. [ADR 1-003](ADR/1-003-ARCHITECTURE-ADR-MODEL-EXTEND0-AS-A-PLATFORM-OF-COOPERATING-SYSTEMS.md)
 6. [ADR 1-004](ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md)
 7. [ADR 1-005](ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)
+8. [ADR 1-010](ADR/1-010-ARCHITECTURE-ADR-ADOPT-CLI-AS-PLATFORM-DIAGNOSTIC-SURFACE.md)
 
 ## What Extend0 Is Right Now
 
-Extend0 major `1` is currently being consolidated as a platform of cooperating systems with four architectural centers:
+Extend0 major `1` is currently being consolidated as a platform of cooperating systems with four architectural centers and one diagnostic surface:
 
 - `Lifecycle`
 - `MetaDB`
 - ontology
 - code generation
+- CLI diagnostics
 
-The repository is deliberately treating those four areas as one coherent platform story instead of as unrelated libraries.
+The repository is deliberately treating those areas as one coherent platform story instead of as unrelated libraries.
