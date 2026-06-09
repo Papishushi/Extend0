@@ -11,6 +11,16 @@ public static class MetaDbValidateCommand
         WriteIndented = true
     };
 
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private const uint SingleFileMagic = 0x4C42544D;
+    private const ushort SingleFileVersion = 1;
+    private const int SingleFileHeaderSize = 16;
+    private const int SingleFileColumnDescSize = 20;
+
     static MetaDbValidateCommand()
     {
         JsonOptions.Converters.Add(new JsonStringEnumConverter());
@@ -81,6 +91,7 @@ public static class MetaDbValidateCommand
         ValidateStorage(inspect, findings);
         ValidateColumns(inspect, findings);
         ValidateSidecarConventions(inspect, findings);
+        var runtime = ValidateRuntimeStorage(inspect, findings);
 
         return MetaDbValidateReport.Create(
             inspect.InputPath,
@@ -92,6 +103,7 @@ public static class MetaDbValidateCommand
             inspect.Columns,
             EstimateLogicalBytes(inspect),
             EstimateStorageBytes(inspect),
+            runtime,
             findings);
     }
 
@@ -226,6 +238,261 @@ public static class MetaDbValidateCommand
         return remainder == 0 ? value : checked(value + multiple - remainder);
     }
 
+    private static MetaDbRuntimeStorageReport ValidateRuntimeStorage(MetaDbInspectReport inspect, List<ValidationFinding> findings) =>
+        inspect.Storage.Layout switch
+        {
+            TableStorageLayout.SingleFile => ValidateSingleFileRuntimeStorage(inspect, findings),
+            TableStorageLayout.Chunked => ValidateChunkedRuntimeStorage(inspect, findings),
+            _ => new MetaDbRuntimeStorageReport(false, inspect.Storage.Layout.ToString(), null, null, null, null, null)
+        };
+
+    private static MetaDbRuntimeStorageReport ValidateSingleFileRuntimeStorage(MetaDbInspectReport inspect, List<ValidationFinding> findings)
+    {
+        var mapPath = Path.GetFullPath(inspect.MapPath);
+        if (!File.Exists(mapPath))
+        {
+            findings.Add(ValidationFinding.Info("single-file-runtime-storage", "Backing map file is not materialized yet; only the TableSpec was validated."));
+            return new MetaDbRuntimeStorageReport(false, "SingleFile", mapPath, null, null, null, null);
+        }
+
+        var fileInfo = new FileInfo(mapPath);
+        findings.Add(ValidationFinding.Info("single-file-runtime-storage", $"Backing map file exists ({fileInfo.Length} bytes)."));
+
+        if (fileInfo.Length < SingleFileHeaderSize)
+        {
+            findings.Add(ValidationFinding.Error("single-file-header", $"Backing map file is too small to contain a metadata header ({fileInfo.Length} bytes)."));
+            return new MetaDbRuntimeStorageReport(true, "SingleFile", mapPath, fileInfo.Length, null, null, null);
+        }
+
+        try
+        {
+            using var stream = new FileStream(mapPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new BinaryReader(stream);
+
+            var header = ReadSingleFileHeader(reader);
+            if (header.Magic == SingleFileMagic)
+                findings.Add(ValidationFinding.Info("single-file-magic", "Single-file header magic matches MTBL."));
+            else
+                findings.Add(ValidationFinding.Error("single-file-magic", $"Single-file header magic is 0x{header.Magic:X8}, expected 0x{SingleFileMagic:X8}."));
+
+            if (header.Version == SingleFileVersion)
+                findings.Add(ValidationFinding.Info("single-file-version", $"Single-file format version is {SingleFileVersion}."));
+            else
+                findings.Add(ValidationFinding.Error("single-file-version", $"Single-file format version is {header.Version}, expected {SingleFileVersion}."));
+
+            if (header.ColumnCount == inspect.ColumnCount)
+                findings.Add(ValidationFinding.Info("single-file-column-count", $"Single-file header declares {header.ColumnCount} columns."));
+            else
+                findings.Add(ValidationFinding.Error("single-file-column-count", $"Single-file header declares {header.ColumnCount} columns, but TableSpec declares {inspect.ColumnCount}."));
+
+            var descriptorTableBytes = checked((long)header.ColumnCount * SingleFileColumnDescSize);
+            if (header.ColumnsTableOffset < SingleFileHeaderSize || header.ColumnsTableOffset + descriptorTableBytes > stream.Length)
+            {
+                findings.Add(ValidationFinding.Error("single-file-column-table", "Single-file column descriptor table is outside the backing file."));
+                return new MetaDbRuntimeStorageReport(true, "SingleFile", mapPath, fileInfo.Length, header.ColumnCount, null, null);
+            }
+
+            stream.Position = header.ColumnsTableOffset;
+            var descriptors = new List<SingleFileColumnDescriptor>(header.ColumnCount);
+            for (var i = 0; i < header.ColumnCount; i++)
+                descriptors.Add(ReadSingleFileColumnDescriptor(reader));
+
+            var declaredRows = 0L;
+            var requiredBytes = header.ColumnsTableOffset + descriptorTableBytes;
+            for (var i = 0; i < descriptors.Count; i++)
+            {
+                var descriptor = descriptors[i];
+                declaredRows += descriptor.RowCapacity;
+                requiredBytes = Math.Max(requiredBytes, checked(descriptor.BaseOffset + descriptor.EntrySizeBytes * descriptor.RowCapacity));
+
+                if (i >= inspect.Columns.Count)
+                    continue;
+
+                var column = inspect.Columns[i];
+                if (descriptor.KeySize != column.KeyBytes || descriptor.ValueSize != column.ValueBytes)
+                {
+                    findings.Add(ValidationFinding.Error(
+                        "single-file-column-shape",
+                        $"Column {i} runtime shape ({descriptor.KeySize},{descriptor.ValueSize}) does not match TableSpec ({column.KeyBytes},{column.ValueBytes})."));
+                }
+
+                if (descriptor.RowCapacity < column.InitialCapacity)
+                {
+                    findings.Add(ValidationFinding.Error(
+                        "single-file-column-capacity",
+                        $"Column '{column.Name}' runtime capacity {descriptor.RowCapacity} is below TableSpec initial capacity {column.InitialCapacity}."));
+                }
+
+                if (descriptor.EntrySizeBytes <= 0)
+                    findings.Add(ValidationFinding.Error("single-file-column-entry-size", $"Column {i} has non-positive runtime entry size."));
+
+                if (descriptor.BaseOffset < SingleFileHeaderSize)
+                    findings.Add(ValidationFinding.Error("single-file-column-offset", $"Column {i} base offset {descriptor.BaseOffset} is invalid."));
+            }
+
+            if (requiredBytes <= stream.Length)
+                findings.Add(ValidationFinding.Info("single-file-physical-size", $"Backing map file covers the declared runtime capacity ({requiredBytes} required bytes)."));
+            else
+                findings.Add(ValidationFinding.Error("single-file-physical-size", $"Backing map file is {stream.Length} bytes but declared runtime capacity requires {requiredBytes} bytes."));
+
+            return new MetaDbRuntimeStorageReport(true, "SingleFile", mapPath, fileInfo.Length, header.ColumnCount, declaredRows, requiredBytes);
+        }
+        catch (Exception ex)
+        {
+            findings.Add(ValidationFinding.Error("single-file-runtime-storage", $"Could not read backing map file: {ex.Message}"));
+            return new MetaDbRuntimeStorageReport(true, "SingleFile", mapPath, fileInfo.Length, null, null, null);
+        }
+    }
+
+    private static MetaDbRuntimeStorageReport ValidateChunkedRuntimeStorage(MetaDbInspectReport inspect, List<ValidationFinding> findings)
+    {
+        var tableDirectory = Path.GetFullPath(inspect.MapPath);
+        var manifestPath = Path.Combine(tableDirectory, "manifest.json");
+        var chunksDirectory = Path.Combine(tableDirectory, "chunks");
+
+        if (!File.Exists(manifestPath))
+        {
+            if (Directory.Exists(chunksDirectory) && Directory.EnumerateFiles(chunksDirectory, "*.chk").Any())
+                findings.Add(ValidationFinding.Error("chunked-manifest", "Chunk files exist but manifest.json is missing."));
+            else
+                findings.Add(ValidationFinding.Info("chunked-runtime-storage", "Chunked table is not materialized yet; only the TableSpec was validated."));
+
+            return new MetaDbRuntimeStorageReport(false, "Chunked", tableDirectory, null, null, null, null);
+        }
+
+        ChunkedManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<ChunkedManifest>(File.ReadAllText(manifestPath), ManifestJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            findings.Add(ValidationFinding.Error("chunked-manifest", $"Could not read manifest.json: {ex.Message}"));
+            return new MetaDbRuntimeStorageReport(true, "Chunked", tableDirectory, null, null, null, null);
+        }
+
+        if (manifest is null)
+        {
+            findings.Add(ValidationFinding.Error("chunked-manifest", "manifest.json is empty or invalid."));
+            return new MetaDbRuntimeStorageReport(true, "Chunked", tableDirectory, null, null, null, null);
+        }
+
+        findings.Add(ValidationFinding.Info("chunked-manifest", $"Found chunked manifest '{manifestPath}'."));
+
+        if (manifest.Version == 1)
+            findings.Add(ValidationFinding.Info("chunked-manifest-version", "Chunked manifest version is 1."));
+        else
+            findings.Add(ValidationFinding.Error("chunked-manifest-version", $"Chunked manifest version is {manifest.Version}, expected 1."));
+
+        if (manifest.ChunkSize == inspect.Storage.ChunkSize)
+            findings.Add(ValidationFinding.Info("chunked-manifest-chunk-size", $"Manifest chunk size is {manifest.ChunkSize}."));
+        else
+            findings.Add(ValidationFinding.Error("chunked-manifest-chunk-size", $"Manifest chunk size is {manifest.ChunkSize}, but TableSpec declares {inspect.Storage.ChunkSize}."));
+
+        if (manifest.Columns.Length == inspect.ColumnCount)
+            findings.Add(ValidationFinding.Info("chunked-manifest-column-count", $"Manifest declares {manifest.Columns.Length} columns."));
+        else
+            findings.Add(ValidationFinding.Error("chunked-manifest-column-count", $"Manifest declares {manifest.Columns.Length} columns, but TableSpec declares {inspect.ColumnCount}."));
+
+        if (!Directory.Exists(chunksDirectory))
+        {
+            findings.Add(ValidationFinding.Error("chunked-chunks-directory", $"Missing chunks directory '{chunksDirectory}'."));
+            return new MetaDbRuntimeStorageReport(true, "Chunked", tableDirectory, 0, manifest.Columns.Length, manifest.Columns.Sum(static c => (long)c.RowCapacity), 0);
+        }
+
+        var expectedChunks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var physicalBytes = 0L;
+        var requiredBytes = 0L;
+        var declaredRows = 0L;
+
+        for (var i = 0; i < manifest.Columns.Length; i++)
+        {
+            var column = manifest.Columns[i];
+            declaredRows += column.RowCapacity;
+
+            if (i < inspect.Columns.Count)
+            {
+                var specColumn = inspect.Columns[i];
+                if (column.KeySize != specColumn.KeyBytes || column.ValueSize != specColumn.ValueBytes)
+                {
+                    findings.Add(ValidationFinding.Error(
+                        "chunked-column-shape",
+                        $"Column {i} manifest shape ({column.KeySize},{column.ValueSize}) does not match TableSpec ({specColumn.KeyBytes},{specColumn.ValueBytes})."));
+                }
+
+                if (column.RowCapacity < specColumn.InitialCapacity)
+                {
+                    findings.Add(ValidationFinding.Error(
+                        "chunked-column-capacity",
+                        $"Column '{specColumn.Name}' manifest capacity {column.RowCapacity} is below TableSpec initial capacity {specColumn.InitialCapacity}."));
+                }
+            }
+
+            var entrySize = checked(column.KeySize + column.ValueSize);
+            if (entrySize <= 0)
+            {
+                findings.Add(ValidationFinding.Error("chunked-column-entry-size", $"Column {i} has non-positive manifest entry size."));
+                continue;
+            }
+
+            if (manifest.ChunkSize < entrySize)
+            {
+                findings.Add(ValidationFinding.Error("chunked-column-entry-size", $"Column {i} entry size {entrySize} is larger than manifest chunk size {manifest.ChunkSize}."));
+                continue;
+            }
+
+            var rowsPerChunk = (uint)(manifest.ChunkSize / entrySize);
+            var requiredChunkCount = column.RowCapacity == 0
+                ? 0
+                : checked((int)((column.RowCapacity + rowsPerChunk - 1) / rowsPerChunk));
+            requiredBytes += checked((long)requiredChunkCount * manifest.ChunkSize);
+
+            for (var chunk = 0; chunk < requiredChunkCount; chunk++)
+            {
+                var chunkPath = Path.Combine(chunksDirectory, $"c{i:D4}_{chunk:D6}.chk");
+                expectedChunks.Add(Path.GetFullPath(chunkPath));
+
+                if (!File.Exists(chunkPath))
+                {
+                    findings.Add(ValidationFinding.Error("chunked-chunk-missing", $"Missing chunk file '{chunkPath}'."));
+                    continue;
+                }
+
+                var length = new FileInfo(chunkPath).Length;
+                physicalBytes += length;
+                if (length != manifest.ChunkSize)
+                    findings.Add(ValidationFinding.Error("chunked-chunk-size", $"Chunk '{chunkPath}' is {length} bytes, expected {manifest.ChunkSize}."));
+            }
+        }
+
+        foreach (var chunkPath in Directory.EnumerateFiles(chunksDirectory, "*.chk"))
+        {
+            var fullChunkPath = Path.GetFullPath(chunkPath);
+            if (!expectedChunks.Contains(fullChunkPath))
+            {
+                physicalBytes += new FileInfo(fullChunkPath).Length;
+                findings.Add(ValidationFinding.Warning("chunked-orphan-chunk", $"Chunk file '{fullChunkPath}' is not referenced by the manifest capacity."));
+            }
+        }
+
+        findings.Add(ValidationFinding.Info("chunked-physical-size", $"Chunked runtime storage has {physicalBytes} physical bytes; manifest capacity requires {requiredBytes} bytes."));
+        return new MetaDbRuntimeStorageReport(true, "Chunked", tableDirectory, physicalBytes, manifest.Columns.Length, declaredRows, requiredBytes);
+    }
+
+    private static SingleFileHeader ReadSingleFileHeader(BinaryReader reader) =>
+        new(
+            reader.ReadUInt32(),
+            reader.ReadUInt16(),
+            reader.ReadUInt16(),
+            reader.ReadInt64());
+
+    private static SingleFileColumnDescriptor ReadSingleFileColumnDescriptor(BinaryReader reader) =>
+        new(
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadUInt32(),
+            reader.ReadInt64());
+
     private static void WriteHumanReport(TextWriter output, MetaDbValidateReport report)
     {
         output.WriteLine("Extend0 MetaDB validate");
@@ -238,6 +505,9 @@ public static class MetaDbValidateCommand
         output.WriteLine($"Columns: {report.ColumnCount}");
         output.WriteLine($"Estimated logical bytes: {report.EstimatedLogicalBytes}");
         output.WriteLine($"Estimated storage bytes: {report.EstimatedStorageBytes}");
+        output.WriteLine($"Runtime storage exists: {report.RuntimeStorage.Exists}");
+        if (report.RuntimeStorage.PhysicalBytes is not null)
+            output.WriteLine($"Runtime physical bytes: {report.RuntimeStorage.PhysicalBytes}");
         output.WriteLine();
 
         foreach (var finding in report.Findings)
@@ -280,6 +550,7 @@ public sealed record MetaDbValidateReport(
     IReadOnlyList<MetaDbColumnReport> Columns,
     long EstimatedLogicalBytes,
     long EstimatedStorageBytes,
+    MetaDbRuntimeStorageReport RuntimeStorage,
     IReadOnlyList<ValidationFinding> Findings,
     int InfoCount,
     int WarningCount,
@@ -295,6 +566,7 @@ public sealed record MetaDbValidateReport(
         IReadOnlyList<MetaDbColumnReport> columns,
         long estimatedLogicalBytes,
         long estimatedStorageBytes,
+        MetaDbRuntimeStorageReport runtimeStorage,
         IReadOnlyList<ValidationFinding> findings) =>
         new(
             inputPath,
@@ -306,8 +578,43 @@ public sealed record MetaDbValidateReport(
             columns,
             estimatedLogicalBytes,
             estimatedStorageBytes,
+            runtimeStorage,
             findings,
             findings.Count(static f => f.Severity == ValidationSeverity.Info),
             findings.Count(static f => f.Severity == ValidationSeverity.Warning),
             findings.Count(static f => f.Severity == ValidationSeverity.Error));
+}
+
+public sealed record MetaDbRuntimeStorageReport(
+    bool Exists,
+    string Layout,
+    string? Path,
+    long? PhysicalBytes,
+    int? RuntimeColumnCount,
+    long? RuntimeDeclaredRows,
+    long? RequiredBytes);
+
+internal sealed record SingleFileHeader(uint Magic, ushort Version, ushort ColumnCount, long ColumnsTableOffset);
+
+internal sealed record SingleFileColumnDescriptor(int KeySize, int ValueSize, uint RowCapacity, long BaseOffset)
+{
+    public long EntrySizeBytes => checked((long)KeySize + ValueSize);
+}
+
+internal sealed record ChunkedManifest
+{
+    public int Version { get; init; }
+
+    public int ChunkSize { get; init; }
+
+    public ChunkedManifestColumn[] Columns { get; init; } = [];
+}
+
+internal sealed record ChunkedManifestColumn
+{
+    public int KeySize { get; init; }
+
+    public int ValueSize { get; init; }
+
+    public uint RowCapacity { get; init; }
 }

@@ -115,10 +115,42 @@ public static class OntologyValidateCommand
         else
             findings.Add(ValidationFinding.Info("tbox-object-properties", $"TBox defines {inspect.TBox.ObjectPropertyCount} object properties."));
 
+        ValidateRequiredConcepts(inspect.TBox.Path, findings);
+
         if (TBoxPropertyHasRange(inspect.TBox.Path, "governsAccessTo", "AccessSurface"))
             findings.Add(ValidationFinding.Info("governs-access-range", "governsAccessTo ranges over AccessSurface."));
         else
             findings.Add(ValidationFinding.Error("governs-access-range", "governsAccessTo must range over AccessSurface."));
+    }
+
+    private static void ValidateRequiredConcepts(string tboxPath, List<ValidationFinding> findings)
+    {
+        var classes = GetTBoxClassLocalNames(tboxPath);
+        var requiredConcepts = new[]
+        {
+            new RequiredConcept("Lifecycle", ["Lifecycle", "LifecycleSystem"]),
+            new RequiredConcept("MetaDB", ["MetaDB", "MetaDBSystem"]),
+            new RequiredConcept("Transport", ["Transport"]),
+            new RequiredConcept("ServiceIdentity", ["ServiceIdentity"]),
+            new RequiredConcept("AccessSurface", ["AccessSurface"]),
+            new RequiredConcept("Ownership", ["Ownership", "OwnershipClaim"]),
+            new RequiredConcept("Lease", ["Lease"]),
+            new RequiredConcept("HeartbeatSignal", ["HeartbeatSignal"])
+        };
+
+        foreach (var required in requiredConcepts)
+        {
+            var matched = required.AcceptedClassNames.FirstOrDefault(classes.Contains);
+            if (matched is not null)
+            {
+                findings.Add(ValidationFinding.Info("required-concept", $"Required concept '{required.Concept}' is represented by class '{matched}'."));
+                continue;
+            }
+
+            findings.Add(ValidationFinding.Error(
+                "required-concept",
+                $"Required concept '{required.Concept}' is missing. Accepted class names: {string.Join(", ", required.AcceptedClassNames)}."));
+        }
     }
 
     private static void ValidateABoxSchema(OntologyInspectReport inspect, List<ValidationFinding> findings)
@@ -195,6 +227,20 @@ public static class OntologyValidateCommand
             .Any(element => string.Equals(LocalName(element.Attribute(rdf + "resource")?.Value), expectedRange, StringComparison.Ordinal));
     }
 
+    private static HashSet<string> GetTBoxClassLocalNames(string path)
+    {
+        XNamespace owl = "http://www.w3.org/2002/07/owl#";
+        XNamespace rdf = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+
+        var doc = XDocument.Load(path);
+        return doc
+            .Descendants(owl + "Class")
+            .Select(element => LocalName(element.Attribute(rdf + "about")?.Value))
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(static name => name!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
     private static string? LocalName(string? iri)
     {
         if (string.IsNullOrWhiteSpace(iri))
@@ -250,6 +296,8 @@ public static class OntologyValidateCommand
         writer.WriteLine("  -h, --help       Show command help.");
     }
 }
+
+internal sealed record RequiredConcept(string Concept, string[] AcceptedClassNames);
 
 public sealed record OntologyValidateReport(
     string RepositoryRoot,

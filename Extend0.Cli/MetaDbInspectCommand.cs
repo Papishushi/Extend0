@@ -117,6 +117,25 @@ public static class MetaDbInspectCommand
                 return true;
             }
 
+            var directory = Path.GetDirectoryName(fullInput);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                var siblingSpecs = Directory.EnumerateFiles(directory, "*.tablespec.json").ToArray();
+                if (siblingSpecs.Length == 1)
+                {
+                    specPath = siblingSpecs[0];
+                    error = string.Empty;
+                    return true;
+                }
+
+                if (siblingSpecs.Length > 1)
+                {
+                    specPath = string.Empty;
+                    error = $"Input file '{fullInput}' has no direct sidecar and multiple TableSpec files exist in '{directory}'. Pass one explicitly.";
+                    return false;
+                }
+            }
+
             specPath = string.Empty;
             error = $"Input file '{fullInput}' is not a TableSpec and no sidecar '{sidecar}' exists.";
             return false;

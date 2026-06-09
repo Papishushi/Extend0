@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Extend0.Cli;
+using Extend0.Lifecycle.CrossProcess;
 using Extend0.Metadata.Schema;
+using Extend0.Testing.Lifecycle.CrossProcess;
+using Extend0.Testing.Metadata.Storage;
 
 namespace Extend0.Tests.Cli;
 
@@ -96,6 +99,32 @@ public sealed class Extend0CliTests
 
         Assert.Equal(1, exitCode);
         Assert.Contains("does not have a built-in protocol descriptor", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleProbe_WithLiveNamedPipeOwner_ConnectsAndValidatesHandshake()
+    {
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-probe-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new CliProbeService(endpointName),
+            CancellationToken.None);
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "probe", "--endpoint", endpointName, "--connect", "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.True(document.RootElement.GetProperty("ConnectAttempted").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("Connected").GetBoolean());
+        Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
         Assert.Equal(string.Empty, error.ToString());
     }
 
@@ -344,6 +373,76 @@ public sealed class Extend0CliTests
     }
 
     [Fact]
+    public async Task MetaDbValidate_WithMaterializedSingleFileTable_ValidatesRuntimeHeader()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "runtime.meta");
+            var spec = new TableSpec("RuntimeSettings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+
+            using (MetadataStorageHarness.CreateMappedStore(spec))
+            {
+            }
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", mapPath, "--json"], output, error, root);
+
+            using var document = JsonDocument.Parse(output.ToString());
+            Assert.Equal(0, exitCode);
+            Assert.True(document.RootElement.GetProperty("RuntimeStorage").GetProperty("Exists").GetBoolean());
+            Assert.True(document.RootElement.GetProperty("RuntimeStorage").GetProperty("PhysicalBytes").GetInt64() > 0);
+            Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithMissingChunkFile_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var tableDirectory = Path.Combine(root, "chunked-runtime");
+            var spec = new TableSpec("ChunkedRuntime", tableDirectory,
+            [
+                TableSpec.Helpers.Column("Value", capacity: 1, keyBytes: 16, valueBytes: 64)
+            ])
+            {
+                Storage = TableStorageOptions.Chunked(chunkSize: 256)
+            };
+
+            using (MetadataStorageHarness.CreateSegmentedMappedStore(spec))
+            {
+            }
+
+            File.Delete(Path.Combine(tableDirectory, "chunks", "c0000_000000.chk"));
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", tableDirectory], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("chunked-chunk-missing", output.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task OntologyInspect_WithHealthyRepo_PrintsTBoxSummary()
     {
         var root = CreateHealthyRepository();
@@ -358,7 +457,7 @@ public sealed class Extend0CliTests
             Assert.Equal(0, exitCode);
             Assert.Contains("Extend0 ontology inspect", text, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Version: 1.2.3", text, StringComparison.Ordinal);
-            Assert.Contains("Classes: 2", text, StringComparison.Ordinal);
+            Assert.Contains("Classes: 9", text, StringComparison.Ordinal);
             Assert.Contains("Object properties: 1", text, StringComparison.Ordinal);
             Assert.Contains("- Extend0Concept", text, StringComparison.Ordinal);
             Assert.Equal(string.Empty, error.ToString());
@@ -385,7 +484,7 @@ public sealed class Extend0CliTests
             Assert.True(document.RootElement.GetProperty("TBox").GetProperty("Exists").GetBoolean());
             Assert.Equal("https://extend0.se777en.fyi/ns#", document.RootElement.GetProperty("TBox").GetProperty("Namespace").GetString());
             Assert.Equal("1.2.3", document.RootElement.GetProperty("TBox").GetProperty("Version").GetString());
-            Assert.Equal(2, document.RootElement.GetProperty("TBox").GetProperty("ClassCount").GetInt32());
+            Assert.Equal(9, document.RootElement.GetProperty("TBox").GetProperty("ClassCount").GetInt32());
             Assert.Equal(string.Empty, error.ToString());
         }
         finally
@@ -501,6 +600,32 @@ public sealed class Extend0CliTests
         }
     }
 
+    [Fact]
+    public async Task OntologyValidate_WhenRequiredConceptIsMissing_ReturnsFailure()
+    {
+        var root = CreateHealthyRepository();
+        try
+        {
+            var tboxPath = Path.Combine(root, "ontology", "tbox", "extend0.owl");
+            var tbox = File.ReadAllText(tboxPath)
+                .Replace("""<owl:Class rdf:about="#HeartbeatSignal" />""", string.Empty, StringComparison.Ordinal);
+            File.WriteAllText(tboxPath, tbox);
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["ontology", "validate", "--repo", root], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Required concept 'HeartbeatSignal' is missing", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateHealthyRepository()
     {
         var root = CreateTempDirectory();
@@ -527,7 +652,14 @@ public sealed class Extend0CliTests
                 <owl:versionInfo>1.2.3</owl:versionInfo>
               </owl:Ontology>
               <owl:Class rdf:about="#Extend0Concept" />
+              <owl:Class rdf:about="#LifecycleSystem" />
+              <owl:Class rdf:about="#MetaDBSystem" />
+              <owl:Class rdf:about="#Transport" />
+              <owl:Class rdf:about="#ServiceIdentity" />
               <owl:Class rdf:about="#AccessSurface" />
+              <owl:Class rdf:about="#OwnershipClaim" />
+              <owl:Class rdf:about="#Lease" />
+              <owl:Class rdf:about="#HeartbeatSignal" />
               <owl:ObjectProperty rdf:about="#governsAccessTo">
                 <rdfs:range rdf:resource="#AccessSurface" />
               </owl:ObjectProperty>
@@ -569,5 +701,22 @@ public sealed class Extend0CliTests
         var path = Path.Combine(root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, contents);
+    }
+
+    private interface ICliProbeService : ICrossProcessService
+    {
+        Task<string> EchoAsync(string value);
+    }
+
+    private sealed class CliProbeService(string endpointName)
+        : CrossProcessServiceBase<ICliProbeService>, ICliProbeService
+    {
+        protected override string? PipeName => endpointName;
+
+        protected override string? EndpointName => endpointName;
+
+        protected override string? EndpointServerName => ".";
+
+        public Task<string> EchoAsync(string value) => Task.FromResult(value);
     }
 }
