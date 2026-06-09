@@ -16,6 +16,7 @@ public sealed class Extend0CliTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("extend0 doctor", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 ontology inspect", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(string.Empty, error.ToString());
     }
 
@@ -184,6 +185,78 @@ public sealed class Extend0CliTests
         }
     }
 
+    [Fact]
+    public async Task OntologyInspect_WithHealthyRepo_PrintsTBoxSummary()
+    {
+        var root = CreateHealthyRepository();
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["ontology", "inspect", "--repo", root], output, error, root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Extend0 ontology inspect", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Version: 1.2.3", text, StringComparison.Ordinal);
+            Assert.Contains("Classes: 2", text, StringComparison.Ordinal);
+            Assert.Contains("Object properties: 1", text, StringComparison.Ordinal);
+            Assert.Contains("- Extend0Concept", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OntologyInspect_WithHealthyRepo_CanEmitJson()
+    {
+        var root = CreateHealthyRepository();
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["ontology", "inspect", "--repo", root, "--json"], output, error, root);
+
+            using var document = JsonDocument.Parse(output.ToString());
+            Assert.Equal(0, exitCode);
+            Assert.True(document.RootElement.GetProperty("TBox").GetProperty("Exists").GetBoolean());
+            Assert.Equal("https://extend0.se777en.fyi/ns#", document.RootElement.GetProperty("TBox").GetProperty("Namespace").GetString());
+            Assert.Equal("1.2.3", document.RootElement.GetProperty("TBox").GetProperty("Version").GetString());
+            Assert.Equal(2, document.RootElement.GetProperty("TBox").GetProperty("ClassCount").GetInt32());
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OntologyInspect_WhenTBoxIsMissing_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["ontology", "inspect", "--repo", root], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("[error] TBox missing", output.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateHealthyRepository()
     {
         var root = CreateTempDirectory();
@@ -200,10 +273,21 @@ public sealed class Extend0CliTests
         Write(root, Path.Combine("docs", "ADR.md"), "# ADR");
         Write(root, Path.Combine("docs", "ADR", "1-000-EXTEND0-ADR-DEFINE-EXTEND0-MAJOR-VERSION-1.md"), "# ADR 000");
         Write(root, Path.Combine("ontology", "tbox", "extend0.owl"), """
-            <rdf:RDF>
+            <rdf:RDF
+                xmlns="https://extend0.se777en.fyi/ns#"
+                xml:base="https://extend0.se777en.fyi/ns"
+                xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+                xmlns:owl="http://www.w3.org/2002/07/owl#">
+              <owl:Ontology rdf:about="">
+                <owl:versionInfo>1.2.3</owl:versionInfo>
+              </owl:Ontology>
+              <owl:Class rdf:about="#Extend0Concept" />
+              <owl:Class rdf:about="#AccessSurface" />
               <owl:ObjectProperty rdf:about="#governsAccessTo">
-                <rdfs:range rdf:resource="#AccessSurface"/>
+                <rdfs:range rdf:resource="#AccessSurface" />
               </owl:ObjectProperty>
+              <owl:NamedIndividual rdf:about="#ExampleIndividual" />
             </rdf:RDF>
             """);
         Write(root, Path.Combine("ontology", "abox", "abox-schema.ttl"), "@prefix ns: <https://extend0.se777en.fyi/ns#> .");
