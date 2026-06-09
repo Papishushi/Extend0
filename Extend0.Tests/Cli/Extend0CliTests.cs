@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Extend0.Cli;
+using Extend0.Metadata.Schema;
 
 namespace Extend0.Tests.Cli;
 
@@ -90,6 +91,92 @@ public sealed class Extend0CliTests
 
             Assert.Equal(1, exitCode);
             Assert.Contains("[error] solution", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbInspect_WithSidecarSpec_PrintsColumnReport()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 64, valueBytes: 512)
+            ]);
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "inspect", mapPath], output, error, root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Extend0 MetaDB inspect", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Name: Settings", text, StringComparison.Ordinal);
+            Assert.Contains("[0] Entries: key=64, value=512", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbInspect_WithChunkedDirectory_CanEmitJson()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var tableDirectory = Path.Combine(root, "chunked-settings");
+            var spec = new TableSpec("ChunkedSettings", tableDirectory,
+            [
+                TableSpec.Helpers.Column("Value", capacity: 2, keyBytes: 16, valueBytes: 64)
+            ])
+            {
+                Storage = TableStorageOptions.Chunked(chunkSize: 1024)
+            };
+            spec.SaveToFile(Path.Combine(tableDirectory, "tablespec.json"));
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "inspect", tableDirectory, "--json"], output, error, root);
+
+            using var document = JsonDocument.Parse(output.ToString());
+            Assert.Equal(0, exitCode);
+            Assert.Equal("ChunkedSettings", document.RootElement.GetProperty("Name").GetString());
+            Assert.Equal(1, document.RootElement.GetProperty("ColumnCount").GetInt32());
+            Assert.Equal("Chunked", document.RootElement.GetProperty("Storage").GetProperty("Layout").GetString());
+            Assert.Equal(1024, document.RootElement.GetProperty("Storage").GetProperty("ChunkSize").GetInt32());
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbInspect_WhenSpecIsMissing_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "inspect", "missing.meta"], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("No TableSpec found", error.ToString(), StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

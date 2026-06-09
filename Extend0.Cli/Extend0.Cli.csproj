@@ -10,4 +10,8 @@
     <ToolCommandName>extend0</ToolCommandName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Extend0\Extend0.csproj" />
+  </ItemGroup>
+
 </Project>
