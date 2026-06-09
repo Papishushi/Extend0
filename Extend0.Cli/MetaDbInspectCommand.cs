@@ -71,7 +71,7 @@ public static class MetaDbInspectCommand
         }
     }
 
-    private static bool TryResolveSpecPath(string inputPath, out string specPath, out string error)
+    internal static bool TryResolveSpecPath(string inputPath, out string specPath, out string error)
     {
         var fullInput = Path.GetFullPath(inputPath);
 

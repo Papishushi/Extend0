@@ -23,6 +23,8 @@ public static class OntologyCommand
         var command = args[0];
         if (string.Equals(command, "inspect", StringComparison.OrdinalIgnoreCase))
             return OntologyInspectCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "validate", StringComparison.OrdinalIgnoreCase))
+            return OntologyValidateCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
 
         error.WriteLine($"Unknown ontology command '{command}'.");
         error.WriteLine();
@@ -39,8 +41,10 @@ public static class OntologyCommand
     {
         writer.WriteLine("Usage:");
         writer.WriteLine("  extend0 ontology inspect [--repo <path>] [--json]");
+        writer.WriteLine("  extend0 ontology validate [--repo <path>] [--json]");
         writer.WriteLine();
         writer.WriteLine("Commands:");
         writer.WriteLine("  inspect    Inspect TBox/ABox files and structural ontology metadata.");
+        writer.WriteLine("  validate   Validate ontology contract, scaffolds, namespaces, and core relationships.");
     }
 }

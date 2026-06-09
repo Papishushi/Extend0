@@ -56,7 +56,7 @@ public static class OntologyInspectCommand
         }
     }
 
-    private static OntologyInspectReport BuildReport(string repositoryRoot)
+    internal static OntologyInspectReport BuildReport(string repositoryRoot)
     {
         var root = Path.GetFullPath(repositoryRoot);
         var tboxPath = Path.Combine(root, "ontology", "tbox", "extend0.owl");

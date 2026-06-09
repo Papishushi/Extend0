@@ -23,6 +23,8 @@ public static class Extend0Cli
         var command = args[0];
         if (string.Equals(command, "doctor", StringComparison.OrdinalIgnoreCase))
             return DoctorCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "lifecycle", StringComparison.OrdinalIgnoreCase))
+            return LifecycleCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
         if (string.Equals(command, "metadb", StringComparison.OrdinalIgnoreCase))
             return MetaDbCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
         if (string.Equals(command, "ontology", StringComparison.OrdinalIgnoreCase))
@@ -45,12 +47,16 @@ public static class Extend0Cli
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  extend0 doctor [--repo <path>] [--json]");
+        writer.WriteLine("  extend0 lifecycle probe [--name <identity>] [--transport <kind>] [--connect] [--json]");
         writer.WriteLine("  extend0 metadb inspect <path> [--json]");
+        writer.WriteLine("  extend0 metadb validate <path> [--json]");
         writer.WriteLine("  extend0 ontology inspect [--repo <path>] [--json]");
+        writer.WriteLine("  extend0 ontology validate [--repo <path>] [--json]");
         writer.WriteLine("  extend0 --help");
         writer.WriteLine();
         writer.WriteLine("Commands:");
         writer.WriteLine("  doctor    Inspect the repository contract for docs, ontology, tests, and core project alignment.");
+        writer.WriteLine("  lifecycle Probe lifecycle transport, protocol, endpoint, and optional connectivity.");
         writer.WriteLine("  metadb    Inspect MetaDB specs and storage metadata.");
         writer.WriteLine("  ontology  Inspect ontology files and structural TBox metadata.");
     }

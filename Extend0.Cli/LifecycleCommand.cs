@@ -1,6 +1,6 @@
 namespace Extend0.Cli;
 
-public static class MetaDbCommand
+public static class LifecycleCommand
 {
     public static Task<int> RunAsync(
         string[] args,
@@ -21,12 +21,10 @@ public static class MetaDbCommand
         }
 
         var command = args[0];
-        if (string.Equals(command, "inspect", StringComparison.OrdinalIgnoreCase))
-            return MetaDbInspectCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
-        if (string.Equals(command, "validate", StringComparison.OrdinalIgnoreCase))
-            return MetaDbValidateCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "probe", StringComparison.OrdinalIgnoreCase))
+            return LifecycleProbeCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
 
-        error.WriteLine($"Unknown metadb command '{command}'.");
+        error.WriteLine($"Unknown lifecycle command '{command}'.");
         error.WriteLine();
         WriteHelp(error);
         return Task.FromResult(2);
@@ -40,11 +38,9 @@ public static class MetaDbCommand
     private static void WriteHelp(TextWriter writer)
     {
         writer.WriteLine("Usage:");
-        writer.WriteLine("  extend0 metadb inspect <path> [--json]");
-        writer.WriteLine("  extend0 metadb validate <path> [--json]");
+        writer.WriteLine("  extend0 lifecycle probe [--name <identity>] [--transport <kind>] [--endpoint <name>] [--connect] [--json]");
         writer.WriteLine();
         writer.WriteLine("Commands:");
-        writer.WriteLine("  inspect    Read a TableSpec from a spec file, map path sidecar, or chunked table directory.");
-        writer.WriteLine("  validate   Validate TableSpec shape, layout guardrails, and sidecar conventions.");
+        writer.WriteLine("  probe    Resolve lifecycle transport/protocol/endpoint details and optionally test connectivity.");
     }
 }
