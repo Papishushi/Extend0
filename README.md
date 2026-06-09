@@ -50,6 +50,18 @@ This is the recommended path when you want to:
 
 The main package is available through NuGet and repository releases remain useful for pinned binaries, but the safest onboarding path for source-generator-heavy work in the current phase is still direct project reference.
 
+## CLI
+
+`Extend0.Cli` is the command-line entry point for repository and platform diagnostics. The first supported command is `doctor`, which checks the major `1` repository contract across the solution, core project, docs/ADR, ontology, and test harness surfaces.
+
+```bash
+dotnet run --project Extend0.Cli -- doctor
+dotnet run --project Extend0.Cli -- doctor --json
+dotnet run --project Extend0.Cli -- doctor --repo <path-to-extend0>
+```
+
+The CLI is intentionally repo-first in this phase. Future commands should hang from the same entry point, for example `metadb inspect`, `lifecycle probe`, and `ontology query`.
+
 ### Target framework
 
 The library currently targets:

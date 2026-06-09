@@ -27,6 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Extend0.Cli\Extend0.Cli.csproj" />
     <ProjectReference Include="..\Extend0.MetadataEntry.Generator\Extend0.MetadataEntry.Generator.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Extend0.Testing\Extend0.Testing.csproj" />
   </ItemGroup>
