@@ -50,6 +50,9 @@ public static class Extend0Cli
         writer.WriteLine("  extend0 lifecycle probe [--name <identity>] [--transport <kind>] [--connect] [--json]");
         writer.WriteLine("  extend0 metadb inspect <path> [--json]");
         writer.WriteLine("  extend0 metadb validate <path> [--json]");
+        writer.WriteLine("  extend0 metadb schema <source> <target> [--json]");
+        writer.WriteLine("  extend0 metadb snapshot <path> --out <snapshot-dir> [--json]");
+        writer.WriteLine("  extend0 metadb restore <snapshot-dir> --map-path <path> [--json]");
         writer.WriteLine("  extend0 ontology inspect [--repo <path>] [--json]");
         writer.WriteLine("  extend0 ontology validate [--repo <path>] [--json]");
         writer.WriteLine("  extend0 --help");
@@ -57,7 +60,7 @@ public static class Extend0Cli
         writer.WriteLine("Commands:");
         writer.WriteLine("  doctor    Inspect the repository contract for docs, ontology, tests, and core project alignment.");
         writer.WriteLine("  lifecycle Probe lifecycle transport, protocol, endpoint, and optional connectivity.");
-        writer.WriteLine("  metadb    Inspect MetaDB specs and storage metadata.");
+        writer.WriteLine("  metadb    Inspect, validate, compare, snapshot, and restore MetaDB specs/storage.");
         writer.WriteLine("  ontology  Inspect ontology files and structural TBox metadata.");
     }
 }

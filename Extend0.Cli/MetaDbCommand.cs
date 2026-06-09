@@ -25,6 +25,12 @@ public static class MetaDbCommand
             return MetaDbInspectCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
         if (string.Equals(command, "validate", StringComparison.OrdinalIgnoreCase))
             return MetaDbValidateCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "schema", StringComparison.OrdinalIgnoreCase))
+            return MetaDbSchemaCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "snapshot", StringComparison.OrdinalIgnoreCase))
+            return MetaDbSnapshotCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "restore", StringComparison.OrdinalIgnoreCase))
+            return MetaDbRestoreCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
 
         error.WriteLine($"Unknown metadb command '{command}'.");
         error.WriteLine();
@@ -42,9 +48,15 @@ public static class MetaDbCommand
         writer.WriteLine("Usage:");
         writer.WriteLine("  extend0 metadb inspect <path> [--json]");
         writer.WriteLine("  extend0 metadb validate <path> [--json]");
+        writer.WriteLine("  extend0 metadb schema <source> <target> [--json]");
+        writer.WriteLine("  extend0 metadb snapshot <path> --out <snapshot-dir> [--label <text>] [--overwrite] [--json]");
+        writer.WriteLine("  extend0 metadb restore <snapshot-dir> --map-path <path> [--overwrite] [--json]");
         writer.WriteLine();
         writer.WriteLine("Commands:");
         writer.WriteLine("  inspect    Read a TableSpec from a spec file, map path sidecar, or chunked table directory.");
         writer.WriteLine("  validate   Validate TableSpec shape, layout guardrails, and sidecar conventions.");
+        writer.WriteLine("  schema     Compare two TableSpecs and print compatibility plus migration plan.");
+        writer.WriteLine("  snapshot   Capture a TableSpec and materialized runtime storage files.");
+        writer.WriteLine("  restore    Restore a snapshot to an explicit map path or chunked table directory.");
     }
 }

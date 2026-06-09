@@ -43,6 +43,7 @@ Future ADRs may supersede earlier decisions, but they must do so explicitly and 
 | [1-008](ADR/1-008-CODEGEN-ADR-ADOPT-SCHEMA-DRIVEN-GENERATION-PIPELINE.md) | Adopt Schema-Driven Generation Pipeline | Accepted | Defines the generation pipeline used to derive metadata and blittable code artifacts from declarative inputs. |
 | [1-009](ADR/1-009-ARCHITECTURE-ADR-PRIORITIZE-PLATFORM-CORE-CONSOLIDATION-FOR-MAJOR-1.md) | Prioritize Platform-Core Consolidation for Major 1 | Accepted | Sets the current execution direction: align docs, ontology, Lifecycle, and MetaDB before expanding the platform surface. |
 | [1-010](ADR/1-010-ARCHITECTURE-ADR-ADOPT-CLI-AS-PLATFORM-DIAGNOSTIC-SURFACE.md) | Adopt CLI as Platform Diagnostic Surface | Accepted | Defines `Extend0.Cli` as the major `1` diagnostic surface and fixes command grouping, exit codes, JSON output, and dotnet tool packaging rules. |
+| [1-011](ADR/1-011-METADB-ADR-ADOPT-SCHEMA-VERSIONING-MIGRATIONS-AND-SNAPSHOTS.md) | Adopt Schema Versioning, Migrations, and Snapshots for MetaDB | Accepted | Defines `TableSpec` versioning, compatibility validation, migration planning, table-level snapshots, and restore rules for MetaDB. |
 
 ## Usage Notes
 

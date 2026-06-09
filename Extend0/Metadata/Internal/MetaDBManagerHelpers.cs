@@ -490,14 +490,7 @@ namespace Extend0.Metadata.Internal
         /// </exception>
         internal static void ValidateTableSpec(TableSpec spec)
         {
-            if (string.IsNullOrWhiteSpace(spec.Name))
-                throw new ArgumentException("TableSpec.Name cannot be null or whitespace.", nameof(spec));
-
-            if (string.IsNullOrWhiteSpace(spec.MapPath))
-                throw new ArgumentException("TableSpec.MapPath cannot be null or whitespace.", nameof(spec));
-
-            if (spec.Columns is null || spec.Columns.Length == 0)
-                throw new ArgumentException("TableSpec.Columns must contain at least one column.", nameof(spec));
+            spec.Validate();
         }
 
         /// <summary>

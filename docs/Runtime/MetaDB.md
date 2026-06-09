@@ -51,8 +51,24 @@ That means:
 - preserve the conceptual distinction between the `MetaDB` system and the manager that operates it
 - keep demo tables out of the core domain vocabulary unless they become accepted architecture
 
+## Schema Evolution
+
+`TableSpec` is the schema contract for a MetaDB table.
+
+Under major `1`:
+
+- every persisted `TableSpec` should declare `schemaVersion`
+- legacy specs without `schemaVersion` are interpreted as effective version `1`
+- schema compatibility should be checked before changing storage shape
+- migration planning describes whether a change is metadata-only, a storage rewrite, a data transform, or unsupported
+- snapshots are table-level filesystem artifacts that capture the normalized spec and materialized runtime files when present
+- restore is explicit about the target path and relocates the restored `TableSpec.MapPath`
+
+Schema migration planning is intentionally conservative. It may say that a change is known and planned without claiming that Extend0 can apply the change automatically.
+
 ## Governing ADRs
 
 - [ADR 1-005](../ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)
 - [ADR 1-007](../ADR/1-007-METADB-ADR-DEFINE-TABLE-SCHEMA-STORAGE-AND-INDEXING-PIPELINE.md)
 - [ADR 1-009](../ADR/1-009-ARCHITECTURE-ADR-PRIORITIZE-PLATFORM-CORE-CONSOLIDATION-FOR-MAJOR-1.md)
+- [ADR 1-011](../ADR/1-011-METADB-ADR-ADOPT-SCHEMA-VERSIONING-MIGRATIONS-AND-SNAPSHOTS.md)

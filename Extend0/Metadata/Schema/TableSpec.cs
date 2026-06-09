@@ -13,6 +13,31 @@ namespace Extend0.Metadata.Schema
     public readonly partial record struct TableSpec(string Name, string MapPath, ColumnConfiguration[] Columns)
     {
         /// <summary>
+        /// Current semantic schema version used when a persisted legacy spec omits <see cref="SchemaVersion"/>.
+        /// </summary>
+        public const int CurrentSchemaVersion = 1;
+
+        /// <summary>
+        /// Semantic version of this table schema. Legacy JSON files that omit the value are treated as version 1.
+        /// </summary>
+        public int SchemaVersion { get; init; }
+
+        /// <summary>
+        /// Optional stable logical identifier for a schema family across map-path relocations.
+        /// </summary>
+        public string? SchemaId { get; init; }
+
+        /// <summary>
+        /// Optional human-readable schema note. This is documentation metadata, not a compatibility boundary.
+        /// </summary>
+        public string? SchemaDescription { get; init; }
+
+        /// <summary>
+        /// Gets the semantic schema version after applying the legacy default.
+        /// </summary>
+        public int EffectiveSchemaVersion => SchemaVersion <= 0 ? CurrentSchemaVersion : SchemaVersion;
+
+        /// <summary>
         /// Gets storage-level options for mapped tables. The default layout is <see cref="TableStorageLayout.SingleFile"/>.
         /// </summary>
         public TableStorageOptions Storage { get; init; }
@@ -32,6 +57,12 @@ namespace Extend0.Metadata.Schema
                 throw new ArgumentException("TableSpec.MapPath cannot be empty.");
             if (Columns is null || Columns.Length == 0)
                 throw new ArgumentException("TableSpec.Columns must contain at least one column.");
+            if (SchemaVersion < 0)
+                throw new ArgumentOutOfRangeException(nameof(SchemaVersion), "TableSpec.SchemaVersion cannot be negative.");
+            if (SchemaId is not null && string.IsNullOrWhiteSpace(SchemaId))
+                throw new ArgumentException("TableSpec.SchemaId cannot be empty when provided.");
+            if (SchemaDescription is not null && string.IsNullOrWhiteSpace(SchemaDescription))
+                throw new ArgumentException("TableSpec.SchemaDescription cannot be empty when provided.");
 
             Storage.Validate();
         }
@@ -51,7 +82,8 @@ namespace Extend0.Metadata.Schema
         /// </exception>
         public void SaveToFile(string specPath, bool overwrite = true)
         {
-            Validate();
+            var normalized = NormalizeForPersistence();
+            normalized.Validate();
             var dir = Path.GetDirectoryName(specPath);
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
@@ -59,7 +91,7 @@ namespace Extend0.Metadata.Schema
             if (!overwrite && File.Exists(specPath))
                 throw new IOException($"File already exists: {specPath}");
 
-            var json = JsonSerializer.Serialize(this, Helpers.Json);
+            var json = JsonSerializer.Serialize(normalized, Helpers.Json);
             File.WriteAllText(specPath, json, Encoding.UTF8);
         }
 
@@ -107,6 +139,15 @@ namespace Extend0.Metadata.Schema
             if (Storage.Normalize() != other.Storage.Normalize())
                 return false;
 
+            if (EffectiveSchemaVersion != other.EffectiveSchemaVersion)
+                return false;
+
+            if (!string.Equals(SchemaId, other.SchemaId, StringComparison.Ordinal))
+                return false;
+
+            if (!string.Equals(SchemaDescription, other.SchemaDescription, StringComparison.Ordinal))
+                return false;
+
             if (ReferenceEquals(Columns, other.Columns))
                 return true;
 
@@ -125,6 +166,9 @@ namespace Extend0.Metadata.Schema
             hash.Add(Name, StringComparer.Ordinal);
             hash.Add(MapPath, StringComparer.Ordinal);
             hash.Add(Storage.Normalize());
+            hash.Add(EffectiveSchemaVersion);
+            hash.Add(SchemaId, StringComparer.Ordinal);
+            hash.Add(SchemaDescription, StringComparer.Ordinal);
 
             if (Columns is not null)
             {
@@ -134,5 +178,10 @@ namespace Extend0.Metadata.Schema
 
             return hash.ToHashCode();
         }
+
+        internal TableSpec NormalizeForPersistence() =>
+            SchemaVersion <= 0
+                ? this with { SchemaVersion = CurrentSchemaVersion }
+                : this;
     }
 }

@@ -22,6 +22,9 @@ public sealed class Extend0CliTests
         Assert.Contains("extend0 doctor", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 lifecycle probe", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb validate", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 metadb schema", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 metadb snapshot", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 metadb restore", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 ontology inspect", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 ontology validate", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(string.Empty, error.ToString());
@@ -481,6 +484,145 @@ public sealed class Extend0CliTests
             Assert.Equal(1, exitCode);
             Assert.Contains("chunked-chunk-missing", output.ToString(), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbSchema_WithAddedColumnAndVersionBump_PrintsMigrationPlan()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var sourcePath = Path.Combine(root, "source.tablespec.json");
+            var targetPath = Path.Combine(root, "target.tablespec.json");
+            var source = new TableSpec("Settings", Path.Combine(root, "settings.meta"),
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            var target = source with
+            {
+                SchemaVersion = 2,
+                Columns =
+                [
+                    .. source.Columns,
+                    TableSpec.Helpers.Column("Labels", capacity: 4, keyBytes: 16, valueBytes: 64)
+                ]
+            };
+            source.SaveToFile(sourcePath);
+            target.SaveToFile(targetPath);
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "schema", sourcePath, targetPath], output, error, root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Compatibility: RequiresMigration", text, StringComparison.Ordinal);
+            Assert.Contains("AddColumn", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbSchema_WithSameVersionStructuralChange_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var sourcePath = Path.Combine(root, "source.tablespec.json");
+            var targetPath = Path.Combine(root, "target.tablespec.json");
+            var source = new TableSpec("Settings", Path.Combine(root, "settings.meta"),
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            var target = source with
+            {
+                Columns =
+                [
+                    .. source.Columns,
+                    TableSpec.Helpers.Column("Labels", capacity: 4, keyBytes: 16, valueBytes: 64)
+                ]
+            };
+            source.SaveToFile(sourcePath);
+            target.SaveToFile(targetPath);
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "schema", sourcePath, targetPath], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("same-version-structural-change", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbSnapshotAndRestore_WithSingleFileTable_RoundTripsRuntimeStorage()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "runtime.meta");
+            var spec = new TableSpec("RuntimeSettings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ])
+            {
+                SchemaVersion = 2
+            };
+
+            using (MetadataStorageHarness.CreateMappedStore(spec))
+            {
+            }
+
+            var snapshotDirectory = Path.Combine(root, "snapshot");
+            using (var output = new StringWriter())
+            using (var error = new StringWriter())
+            {
+                var snapshotExitCode = await Extend0Cli.RunAsync(
+                    ["metadb", "snapshot", mapPath, "--out", snapshotDirectory, "--label", "cli-test"],
+                    output,
+                    error,
+                    root);
+
+                Assert.Equal(0, snapshotExitCode);
+                Assert.Contains("Runtime storage captured: True", output.ToString(), StringComparison.Ordinal);
+                Assert.Equal(string.Empty, error.ToString());
+            }
+
+            var restoreMapPath = Path.Combine(root, "restored.meta");
+            using (var output = new StringWriter())
+            using (var error = new StringWriter())
+            {
+                var restoreExitCode = await Extend0Cli.RunAsync(
+                    ["metadb", "restore", snapshotDirectory, "--map-path", restoreMapPath],
+                    output,
+                    error,
+                    root);
+
+                Assert.Equal(0, restoreExitCode);
+                Assert.Contains("Extend0 MetaDB restore", output.ToString(), StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(string.Empty, error.ToString());
+            }
+
+            Assert.True(File.Exists(restoreMapPath));
+            Assert.True(File.Exists(restoreMapPath + ".tablespec.json"));
+            Assert.True(MetadataStorageHarness.TryLoadMappedColumns(restoreMapPath, out var columns));
+            Assert.Single(columns);
         }
         finally
         {

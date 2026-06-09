@@ -88,6 +88,40 @@ Runtime checks include:
 - single-file header magic, version, column count, descriptors, capacity, and required bytes
 - chunked manifest version, chunk size, column count, column shapes, required chunks, chunk sizes, missing chunks, and orphan chunks
 
+### `extend0 metadb schema`
+
+Compares two `TableSpec` inputs and prints:
+
+- source and target schema versions
+- compatibility level
+- compatibility findings
+- migration plan steps
+- whether the plan can be applied automatically
+- whether a manual data transform is required
+
+The command exits with `1` only when the schema comparison is incompatible. A plan that requires migration but is structurally valid exits with `0`.
+
+### `extend0 metadb snapshot`
+
+Creates a table-level snapshot from a `TableSpec` input.
+
+The snapshot captures:
+
+- normalized `tablespec.json`
+- `snapshot.json`
+- single-file map storage when materialized
+- chunked `manifest.json` and `chunks/` files when materialized
+
+Use `--out <snapshot-dir>` to choose the destination. Use `--overwrite` only when replacing known snapshot files in an existing snapshot directory.
+
+### `extend0 metadb restore`
+
+Restores a table-level snapshot to an explicit target path.
+
+For single-file snapshots, `--map-path <path>` is the restored map file. For chunked snapshots, `--map-path <path>` is the restored table directory.
+
+Restore relocates the captured `TableSpec.MapPath` to the requested target and writes the correct restored spec/sidecar for the layout.
+
 ### `extend0 ontology inspect`
 
 Reports ontology file presence and structural TBox metadata:
@@ -143,11 +177,13 @@ The CLI is not currently:
 - a destructive repair tool
 - a long-running daemon
 - a replacement for `Lifecycle` or `MetaDB` APIs
+- an executable schema migration runner
 - a complete ontology query runtime
 
 ## Governing ADRs
 
 - [ADR 1-010](../ADR/1-010-ARCHITECTURE-ADR-ADOPT-CLI-AS-PLATFORM-DIAGNOSTIC-SURFACE.md)
+- [ADR 1-011](../ADR/1-011-METADB-ADR-ADOPT-SCHEMA-VERSIONING-MIGRATIONS-AND-SNAPSHOTS.md)
 - [ADR 1-009](../ADR/1-009-ARCHITECTURE-ADR-PRIORITIZE-PLATFORM-CORE-CONSOLIDATION-FOR-MAJOR-1.md)
 - [ADR 1-004](../ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md)
 - [ADR 1-005](../ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)

@@ -67,6 +67,9 @@ dotnet run --project Extend0.Cli -- metadb inspect <path-to-table-or-spec>
 dotnet run --project Extend0.Cli -- metadb inspect <path-to-table-or-spec> --json
 dotnet run --project Extend0.Cli -- metadb validate <path-to-table-or-spec>
 dotnet run --project Extend0.Cli -- metadb validate <path-to-table-or-spec> --json
+dotnet run --project Extend0.Cli -- metadb schema <source-table-or-spec> <target-table-or-spec>
+dotnet run --project Extend0.Cli -- metadb snapshot <path-to-table-or-spec> --out <snapshot-dir>
+dotnet run --project Extend0.Cli -- metadb restore <snapshot-dir> --map-path <restore-map-or-table-dir>
 dotnet run --project Extend0.Cli -- ontology inspect
 dotnet run --project Extend0.Cli -- ontology inspect --json
 dotnet run --project Extend0.Cli -- ontology validate
@@ -85,7 +88,7 @@ extend0 --help
 
 If the tool is already installed, use `dotnet tool update --global Extend0.Cli --add-source Extend0.Cli/bin/Release`.
 
-The CLI is intentionally repo-first in this phase. Future commands should hang from the same entry point, for example richer transport diagnostics, deeper MetaDB storage checks, and SPARQL-backed `ontology query`.
+The CLI is intentionally repo-first in this phase. Future commands should hang from the same entry point, for example richer transport diagnostics, executable MetaDB migration runners, and SPARQL-backed `ontology query`.
 
 ### Target framework
 

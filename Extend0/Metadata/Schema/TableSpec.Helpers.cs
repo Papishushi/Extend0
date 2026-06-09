@@ -189,14 +189,20 @@ namespace Extend0.Metadata.Schema
                 if (!overwrite && File.Exists(path))
                     throw new IOException($"File already exists: {path}");
 
-                // Validate all specs before writing
-                foreach (var s in specs) s.Validate();
+                var normalizedSpecs = specs
+                    .Select(static s =>
+                    {
+                        var normalized = s.NormalizeForPersistence();
+                        normalized.Validate();
+                        return normalized;
+                    })
+                    .ToArray();
 
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir))
                     Directory.CreateDirectory(dir);
 
-                var json = JsonSerializer.Serialize(specs, Json);
+                var json = JsonSerializer.Serialize(normalizedSpecs, Json);
                 File.WriteAllText(path, json, Encoding.UTF8);
             }
 
