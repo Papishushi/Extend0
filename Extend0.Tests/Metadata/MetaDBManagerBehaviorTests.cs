@@ -121,6 +121,86 @@ public sealed class MetaDBManagerBehaviorTests
     }
 
     [Fact]
+    public async Task WithTable_BlocksConcurrentCompactionUntilCallbackCompletes()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            using var manager = MetaDB.CreateManager(factory: spec => MetadataTableHarness.CreateTable(spec!.Value));
+            var mapPath = Path.Combine(tempRoot, "manager-exclusive-compact.map");
+            var id = manager.RegisterTable(new TableSpec("ManagerExclusiveCompact", mapPath,
+            [
+                TableSpec.Helpers.Column("Name", 1, valueBytes: 64),
+                TableSpec.Helpers.Column("City", 1, valueBytes: 64)
+            ]), createNow: true);
+
+            manager.WithTable(id, table => Assert.True(table.TryGrowColumnTo(0, minRows: 4, zeroInit: true)));
+
+            using var entered = new ManualResetEventSlim(false);
+            using var release = new ManualResetEventSlim(false);
+
+            var holder = Task.Run(() =>
+            {
+                manager.WithTable(id, _ =>
+                {
+                    entered.Set();
+                    Assert.True(release.Wait(TimeSpan.FromSeconds(5)));
+                });
+            });
+
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+
+            var compact = Task.Run(() => manager.TryCompactTable(id, strict: true, cancellationToken: default));
+
+            await Task.Delay(150);
+            Assert.False(compact.IsCompleted);
+
+            release.Set();
+            await holder.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(await compact.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Open_LoadsChunkedTableFromDirectory()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            var tableDir = Path.Combine(tempRoot, "chunked-open");
+            var spec = new TableSpec("ChunkedOpen", tableDir, [TableSpec.Helpers.Column("Name", 1, valueBytes: 64)])
+            {
+                Storage = TableStorageOptions.Chunked(chunkSize: 256)
+            };
+
+            using (var table = MetadataTableHarness.CreateTable(spec))
+            {
+                Assert.True(table.TryGrowColumnTo(0, minRows: 5, zeroInit: true));
+                var row4 = table.GetOrCreateCell(0, 4);
+                Assert.True(row4.TrySetKey("omega"));
+                Assert.True(row4.TrySetValue("Olivia"));
+            }
+
+            using var manager = MetaDB.CreateManager(factory: loadedSpec => MetadataTableHarness.CreateTable(loadedSpec!.Value));
+            var opened = manager.Open(tableDir, forceRelocation: false);
+
+            Assert.Equal("ChunkedOpen", opened.Table.Spec.Name);
+            Assert.Equal(TableStorageLayout.Chunked, opened.Table.Spec.Storage.Layout);
+            Assert.True(opened.Table.TryGetCell(0, 4, out var cell));
+            Assert.True(cell.TryGetValueRaw(out var value));
+            Assert.StartsWith("Olivia", System.Text.Encoding.UTF8.GetString(value).TrimEnd('\0'), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EnsureRefVec_LinkRef_AndGetOrCreateAndLinkChild_Work()
     {
         using var manager = CreateInMemoryManager();

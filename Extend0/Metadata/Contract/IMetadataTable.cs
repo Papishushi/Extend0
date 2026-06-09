@@ -29,8 +29,10 @@ namespace Extend0.Metadata.Contract
     /// on configuration and rebuild policy.
     /// </para>
     /// <para>
-    /// <b>Thread-safety:</b> not guaranteed. Unless an implementation explicitly documents otherwise, assume callers must
-    /// synchronize concurrent reads/writes at a higher level.
+    /// <b>Thread-safety:</b> direct pointer-backed views such as <see cref="MetadataCell"/> and <see cref="ColumnBlock"/>
+    /// must not be kept across concurrent growth, compaction, or remapping. Built-in tables serialize their own structural
+    /// operations; callers that need a stable multi-step view should use the callback-style <c>WithExclusiveAccess</c>
+    /// extension methods or manager <c>WithTable</c> scopes.
     /// </para>
     /// </remarks>
     public interface IMetadataTable : IDisposable

@@ -11,8 +11,8 @@ namespace Extend0.Metadata.Storage.Contract
     /// <para>
     /// Implementations of <see cref="ICellStore"/> provide a uniform way for
     /// <see cref="IMetadataTable"/> to access and materialize cells, regardless of whether
-    /// the data is backed by an in-memory buffer (<c>InMemoryStore</c>) or a memory-mapped
-    /// file (<c>MappedStore</c>).
+    /// the data is backed by an in-memory buffer, a single memory-mapped file, a chunked
+    /// memory-mapped directory, or another store implementation.
     /// </para>
     /// <para>
     /// The store is responsible for:
@@ -99,8 +99,8 @@ namespace Extend0.Metadata.Storage.Contract
         /// A <see cref="CellEnumerable"/> that yields tuples of column, row and cell.
         /// </returns>
         /// <remarks>
-        /// The enumeration order is implementation-defined but typically iterates
-        /// column-by-column and row-by-row. Cells may be materialized lazily.
+        /// Built-in stores iterate column-by-column and row-by-row. Custom stores can expose
+        /// their own order through their enumerable implementation. Cells may be materialized lazily.
         /// </remarks>
         CellEnumerable EnumerateCells();
 

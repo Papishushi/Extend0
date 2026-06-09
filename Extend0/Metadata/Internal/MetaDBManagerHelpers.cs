@@ -931,7 +931,7 @@ namespace Extend0.Metadata.Internal
         {
             for (int i = 0; i < attempts - 1; i++)
             {
-                try { File.Delete(path); return true; }
+                try { DeleteFileOrDirectory(path); return true; }
                 catch (FileNotFoundException) { return true; }
                 catch (DirectoryNotFoundException) { return true; }
                 catch (IOException) { await Task.Delay(10 * (i + 1)); }
@@ -939,10 +939,21 @@ namespace Extend0.Metadata.Internal
             }
 
             // Last try
-            try { File.Delete(path); return true; }
+            try { DeleteFileOrDirectory(path); return true; }
             catch (FileNotFoundException) { return true; }
             catch (DirectoryNotFoundException) { return true; }
-            catch { return !File.Exists(path); }
+            catch { return !File.Exists(path) && !Directory.Exists(path); }
+        }
+
+        private static void DeleteFileOrDirectory(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+
+            File.Delete(path);
         }
 
         /// <summary>
@@ -963,9 +974,12 @@ namespace Extend0.Metadata.Internal
         /// </remarks>
         internal static string? TryMoveAside(string path)
         {
-            if (!File.Exists(path)) return null;
+            var isDirectory = Directory.Exists(path);
+            if (!isDirectory && !File.Exists(path)) return null;
+
             var moved = path + ".deleting." + Guid.NewGuid().ToString("N");
-            File.Move(path, moved);
+            if (isDirectory) Directory.Move(path, moved);
+            else File.Move(path, moved);
             return moved;
         }
 

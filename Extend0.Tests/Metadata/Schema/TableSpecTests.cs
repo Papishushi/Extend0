@@ -41,6 +41,34 @@ public sealed class TableSpecTests
     }
 
     [Fact]
+    public void StorageOptions_RoundTrip_AndChunkedSaveToDirectoryUsesTableFolder()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            var spec = new TableSpec(
+                "Chunked Users",
+                Path.Combine(tempRoot, "chunked-users"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Storage = TableStorageOptions.Chunked(chunkSize: 1024)
+            };
+
+            var path = spec.SaveToDirectory(tempRoot);
+            var loaded = TableSpec.Helpers.LoadFromFile(path);
+
+            Assert.EndsWith(Path.Combine("chunked_users", "tablespec.json"), path, StringComparison.Ordinal);
+            Assert.Equal(spec, loaded);
+            Assert.Equal(TableStorageLayout.Chunked, loaded.Storage.Layout);
+            Assert.Equal(1024, loaded.Storage.ChunkSize);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SaveToDirectory_SanitizesName_AndLowercasesFileName()
     {
         var tempRoot = CreateTempDirectory();

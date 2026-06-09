@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.Contract;
+using Extend0.Metadata.Internal;
 using Extend0.Metadata.Storage;
 using System.Runtime.CompilerServices;
 
@@ -25,6 +26,7 @@ namespace Extend0.Metadata.Refs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe void EnsureRefVec(IMetadataTable parent, uint refsCol, uint parentRow, CapacityPolicy policy)
         {
+            using var tableLease = MetadataTableConcurrency.EnterExclusive(parent);
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
 
             if (cell.ValueSize < MetadataTableRefVec.HeaderSize)
@@ -54,6 +56,7 @@ namespace Extend0.Metadata.Refs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe bool TryFindChildByKey(IMetadataTable parent, uint refsCol, uint parentRow, uint childKey, out Guid childTableId)
         {
+            using var tableLease = MetadataTableConcurrency.EnterExclusive(parent);
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
             var buf = new ReadOnlySpan<byte>(cell.GetValuePointer(), cell.ValueSize);
 
@@ -91,6 +94,7 @@ namespace Extend0.Metadata.Refs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe void EnsureLinkRefNoDup(IMetadataTable parent, uint refsCol, uint parentRow, Guid childTableId, uint childCol, uint childRow, uint childKey, CapacityPolicy policy)
         {
+            using var tableLease = MetadataTableConcurrency.EnterExclusive(parent);
             EnsureRefVec(parent, refsCol, parentRow, policy);
 
             var cell = parent.GetOrCreateCell(refsCol, parentRow);
@@ -124,6 +128,7 @@ namespace Extend0.Metadata.Refs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe void EnsureLinkRefNoDupByKey(IMetadataTable parent, uint refsCol, uint parentRow, Guid childTableId, uint childCol, uint childRow, uint childKey, CapacityPolicy policy)
         {
+            using var tableLease = MetadataTableConcurrency.EnterExclusive(parent);
             EnsureRefVec(parent, refsCol, parentRow, policy);
 
             if (TryFindChildByKey(parent, refsCol, parentRow, childKey, out _))

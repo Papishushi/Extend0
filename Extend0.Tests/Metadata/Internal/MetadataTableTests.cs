@@ -1,3 +1,4 @@
+using Extend0.Metadata;
 using Extend0.Metadata.Contract;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Schema;
@@ -297,6 +298,51 @@ public sealed class MetadataTableTests
 
         Assert.True(failureTable.TryGrowColumnTo(0, minRows: 0, zeroInit: true));
         Assert.False(failureTable.TryGrowColumnTo(0, minRows: 3, zeroInit: true));
+    }
+
+    [Fact]
+    public async Task WithExclusiveAccess_BlocksConcurrentCompactionUntilScopeCompletes()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(tempRoot, "exclusive-compact.map");
+            var spec = new TableSpec("ExclusiveCompact", mapPath,
+            [
+                TableSpec.Helpers.Column("Name", 1, valueBytes: 64),
+                TableSpec.Helpers.Column("City", 1, valueBytes: 64)
+            ]);
+
+            using var table = MetadataTableHarness.CreateTable(spec);
+            Assert.True(table.TryGrowColumnTo(0, minRows: 4, zeroInit: true));
+
+            using var entered = new ManualResetEventSlim(false);
+            using var release = new ManualResetEventSlim(false);
+
+            var holder = Task.Run(() =>
+            {
+                table.WithExclusiveAccess(_ =>
+                {
+                    entered.Set();
+                    Assert.True(release.Wait(TimeSpan.FromSeconds(5)));
+                });
+            });
+
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+
+            var compact = Task.Run(() => table.TryCompactStore(strict: true, cancellationToken: default));
+
+            await Task.Delay(150);
+            Assert.False(compact.IsCompleted);
+
+            release.Set();
+            await holder.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(await compact.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
     }
 
     [Fact]

@@ -977,17 +977,28 @@ namespace Extend0.Metadata
             if (string.IsNullOrWhiteSpace(mapPath))
                 throw new ArgumentException("Map path cannot be null or whitespace.", nameof(mapPath));
 
-            // Resolve spec path (accept either '...meta' or direct '...meta.tablespec.json')
-            var specPath = mapPath.EndsWith(".tablespec.json", StringComparison.OrdinalIgnoreCase)
+            // Resolve spec path. Accept:
+            // - single-file map path: ".../users.meta" -> ".../users.meta.tablespec.json"
+            // - direct sidecar path: ".../users.meta.tablespec.json"
+            // - chunked table directory: ".../users" -> ".../users/tablespec.json"
+            var directSpecPath = mapPath.EndsWith(".tablespec.json", StringComparison.OrdinalIgnoreCase);
+            var chunkedDirectorySpecPath = Path.Combine(mapPath, "tablespec.json");
+            var isChunkedDirectory = !directSpecPath && (Directory.Exists(mapPath) || File.Exists(chunkedDirectorySpecPath));
+
+            var specPath = directSpecPath
                 ? mapPath
-                : mapPath + ".tablespec.json";
+                : isChunkedDirectory
+                    ? chunkedDirectorySpecPath
+                    : mapPath + ".tablespec.json";
 
             if (!File.Exists(specPath))
                 throw new FileNotFoundException("TableSpec file not found for the given map path.", specPath);
 
             // If caller passed the spec file path, derive the map file path.
-            var mapFilePath = mapPath.EndsWith(".tablespec.json", StringComparison.OrdinalIgnoreCase)
-                ? mapPath[..^".tablespec.json".Length]
+            var mapFilePath = directSpecPath
+                ? string.Equals(Path.GetFileName(mapPath), "tablespec.json", StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetDirectoryName(mapPath)!
+                    : mapPath[..^".tablespec.json".Length]
                 : mapPath;
 
             var loaded = TableSpec.Helpers.LoadFromFile(specPath);
@@ -1291,6 +1302,20 @@ namespace Extend0.Metadata
             return GetOrCreate(tableId);
         }
 
+        private static (MetadataTableConcurrencyLease First, MetadataTableConcurrencyLease Second) EnterTablesExclusive(
+            Guid firstId,
+            IMetadataTable firstTable,
+            Guid secondId,
+            IMetadataTable secondTable)
+        {
+            if (firstId == secondId || ReferenceEquals(firstTable, secondTable))
+                return (MetadataTableConcurrency.EnterExclusive(firstTable), default);
+
+            return firstId.CompareTo(secondId) <= 0
+                ? (MetadataTableConcurrency.EnterExclusive(firstTable), MetadataTableConcurrency.EnterExclusive(secondTable))
+                : (MetadataTableConcurrency.EnterExclusive(secondTable), MetadataTableConcurrency.EnterExclusive(firstTable));
+        }
+
         /// <summary>
         /// Executes <paramref name="action"/> with the materialized table for <paramref name="tableId"/>.
         /// </summary>
@@ -1310,7 +1335,9 @@ namespace Extend0.Metadata
         public void WithTable(Guid tableId, Action<IMetadataTable> action)
         {
             ArgumentNullException.ThrowIfNull(action);
-            action(ResolveTable(tableId));
+            var table = ResolveTable(tableId);
+            using var _ = MetadataTableConcurrency.EnterExclusive(table);
+            action(table);
         }
 
         /// <summary>
@@ -1334,7 +1361,9 @@ namespace Extend0.Metadata
         public TResult WithTable<TResult>(Guid tableId, Func<IMetadataTable, TResult> func)
         {
             ArgumentNullException.ThrowIfNull(func);
-            return func(ResolveTable(tableId));
+            var table = ResolveTable(tableId);
+            using var _ = MetadataTableConcurrency.EnterExclusive(table);
+            return func(table);
         }
 
         /// <summary>
@@ -1357,7 +1386,9 @@ namespace Extend0.Metadata
         public async Task WithTableAsync(Guid tableId, Func<IMetadataTable, Task> func)
         {
             ArgumentNullException.ThrowIfNull(func);
-            await func(ResolveTable(tableId)).ConfigureAwait(false);
+            var table = ResolveTable(tableId);
+            await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(table);
+            await func(table).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1381,7 +1412,9 @@ namespace Extend0.Metadata
         public async Task<TResult> WithTableAsync<TResult>(Guid tableId, Func<IMetadataTable, Task<TResult>> func)
         {
             ArgumentNullException.ThrowIfNull(func);
-            return await func(ResolveTable(tableId)).ConfigureAwait(false);
+            var table = ResolveTable(tableId);
+            await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(table);
+            return await func(table).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1435,6 +1468,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table) = Open(mapPath, forceRelocation);
+                using var _ = MetadataTableConcurrency.EnterExclusive(table);
                 action(table);
             }
             finally
@@ -1477,6 +1511,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table) = Open(mapPath, forceRelocation);
+                using var _ = MetadataTableConcurrency.EnterExclusive(table);
                 return func(table);
             }
             finally
@@ -1517,6 +1552,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table) = Open(mapPath, forceRelocation);
+                await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(table);
                 await func(table).ConfigureAwait(false);
             }
             finally
@@ -1559,6 +1595,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table) = Open(mapPath, forceRelocation);
+                await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(table);
                 return await func(table).ConfigureAwait(false);
             }
             finally
@@ -1601,7 +1638,9 @@ namespace Extend0.Metadata
             var table = GetOrCreate(id);
 
             var mapPath = table.Spec.MapPath;
-            var specPath = mapPath + ".tablespec.json";
+            var specPath = table.Spec.Storage.Normalize().Layout == TableStorageLayout.Chunked
+                ? Path.Combine(mapPath, "tablespec.json")
+                : mapPath + ".tablespec.json";
 
             return (id, table, mapPath, specPath);
         }
@@ -1726,6 +1765,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table, mapPath, specPath) = OpenEphemeralFromSpec(spec, createNow);
+                using var _ = MetadataTableConcurrency.EnterExclusive(table);
                 action(id, table);
             }
             finally
@@ -1776,6 +1816,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table, mapPath, specPath) = OpenEphemeralFromSpec(spec, createNow);
+                using var _ = MetadataTableConcurrency.EnterExclusive(table);
                 return func(id, table);
             }
             finally
@@ -1825,6 +1866,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table, mapPath, specPath) = OpenEphemeralFromSpec(spec, createNow);
+                await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(table);
                 await func(id, table).ConfigureAwait(false);
             }
             finally
@@ -1875,6 +1917,7 @@ namespace Extend0.Metadata
             try
             {
                 (id, var table, mapPath, specPath) = OpenEphemeralFromSpec(spec, createNow);
+                await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(table);
                 return await func(id, table).ConfigureAwait(false);
             }
             finally
@@ -2274,7 +2317,11 @@ namespace Extend0.Metadata
                 Log.FillColumnStart(_log!, tableName, column, rows, typeName, effectivePolicy);
 
             // Size validation and actual write are delegated to the static helper
-            if (rows != 0) MetaDBManagerHelpers.FillColumn(m.Table, column, rows, factory, effectivePolicy, batchSize);
+            if (rows != 0)
+            {
+                using var _ = MetadataTableConcurrency.EnterExclusive(m.Table);
+                MetaDBManagerHelpers.FillColumn(m.Table, column, rows, factory, effectivePolicy, batchSize);
+            }
 
             if (_isLogActivated)
                 Log.FillColumnEnd(_log!, tableName, typeName, sw?.Elapsed.TotalMilliseconds ?? 0);
@@ -2302,7 +2349,11 @@ namespace Extend0.Metadata
             if (_isLogActivated)
                 Log.FillRawStart(_log!, tableName, column, rows, effectivePolicy);
 
-            if (rows != 0) MetaDBManagerHelpers.FillColumn(m.Table, column, rows, writer, effectivePolicy, batchSize);
+            if (rows != 0)
+            {
+                using var _ = MetadataTableConcurrency.EnterExclusive(m.Table);
+                MetaDBManagerHelpers.FillColumn(m.Table, column, rows, writer, effectivePolicy, batchSize);
+            }
 
             if (_isLogActivated)
                 Log.FillRawEnd(_log!, tableName, sw?.Elapsed.TotalMilliseconds ?? 0);
@@ -2366,16 +2417,25 @@ namespace Extend0.Metadata
 
             Stopwatch? sw = null;
             var effectivePolicy = dstPolicy == CapacityPolicy.None ? _capacityPolicy : dstPolicy;
-            uint valueSize = MetaDBManagerHelpers.GetColumnValueSize(d.Table, dstCol);
-
             if (_isLogActivated)
             {
                 sw = Stopwatch.StartNew();
                 Log.CopyStart(_log!, sName, srcCol, dName, dstCol, rows, effectivePolicy);
             }
 
-            // Will throw if value sizes differ per row; that exception is the signal.
-            MetaDBManagerHelpers.CopyColumn(s.Table, srcCol, d.Table, dstCol, rows, effectivePolicy, MetaDBManagerHelpers.ComputeBatchFromValueSize(valueSize));
+            var leases = EnterTablesExclusive(srcTableId, s.Table, dstTableId, d.Table);
+            try
+            {
+                uint valueSize = MetaDBManagerHelpers.GetColumnValueSize(d.Table, dstCol);
+
+                // Will throw if value sizes differ per row; that exception is the signal.
+                MetaDBManagerHelpers.CopyColumn(s.Table, srcCol, d.Table, dstCol, rows, effectivePolicy, MetaDBManagerHelpers.ComputeBatchFromValueSize(valueSize));
+            }
+            finally
+            {
+                leases.Second.Dispose();
+                leases.First.Dispose();
+            }
 
             if (_isLogActivated) Log.CopyEnd(_log!, sName, dName, sw!.Elapsed.TotalMilliseconds);
         }
@@ -2419,7 +2479,12 @@ namespace Extend0.Metadata
         {
             var p = Require(parentTableId);
             var effective = policy == CapacityPolicy.None ? _capacityPolicy : policy;
-            var didInit = MetaDBManagerHelpers.EnsureRefVec(p.Table, refsCol, parentRow, effective);
+            bool didInit;
+            using (MetadataTableConcurrency.EnterExclusive(p.Table))
+            {
+                didInit = MetaDBManagerHelpers.EnsureRefVec(p.Table, refsCol, parentRow, effective);
+            }
+
             if (_isLogActivated && didInit) Log.EnsureRefVecInit(_log!, p.Name ?? string.Empty, refsCol, parentRow);
         }
 
@@ -2457,7 +2522,6 @@ namespace Extend0.Metadata
             _ = Require(childTableId); // validate child exists (throws if unknown)
 
             var effective = policy == CapacityPolicy.None ? _capacityPolicy : policy;
-            MetaDBManagerHelpers.EnsureRefVec(p.Table, refsCol, parentRow, effective);
 
             // Append the reference
             var tref = new MetadataTableRef
@@ -2468,10 +2532,15 @@ namespace Extend0.Metadata
                 reserved: 0
             );
 
-            if (MetaDBManagerHelpers.TryHasRef(p.Table, refsCol, parentRow, in tref))
-                return;
+            using (MetadataTableConcurrency.EnterExclusive(p.Table))
+            {
+                MetaDBManagerHelpers.EnsureRefVec(p.Table, refsCol, parentRow, effective);
 
-            MetaDBManagerHelpers.LinkRef(p.Table, refsCol, parentRow, in tref);
+                if (MetaDBManagerHelpers.TryHasRef(p.Table, refsCol, parentRow, in tref))
+                    return;
+
+                MetaDBManagerHelpers.LinkRef(p.Table, refsCol, parentRow, in tref);
+            }
 
             if (_isLogActivated)
                 Log.LinkRefAdded(_log!, p.Name ?? string.Empty, parentRow, childTableId, childCol, childRow);
@@ -2502,25 +2571,28 @@ namespace Extend0.Metadata
 
             var p = Require(parentTableId);
 
-            if (MetadataRefLinker.TryFindChildByKey(p.Table, refsCol, parentRow, childKey, out var existing))
+            using (MetadataTableConcurrency.EnterExclusive(p.Table))
             {
-                MetadataRefLinker.EnsureLinkRefNoDupByKey(p.Table, refsCol, parentRow, existing, childCol, childRow, childKey, _capacityPolicy);
+                if (MetadataRefLinker.TryFindChildByKey(p.Table, refsCol, parentRow, childKey, out var existing))
+                {
+                    MetadataRefLinker.EnsureLinkRefNoDupByKey(p.Table, refsCol, parentRow, existing, childCol, childRow, childKey, _capacityPolicy);
+
+                    if (_isLogActivated)
+                        Log.ChildReused(_log!, p.Name ?? string.Empty, parentRow, existing);
+
+                    return existing;
+                }
+
+                var spec = childSpecFactory(parentRow);
+                var childId = RegisterTable(spec, createNow: true);
+
+                MetadataRefLinker.EnsureLinkRefNoDupByKey(p.Table, refsCol, parentRow, childId, childCol, childRow, childKey, _capacityPolicy);
 
                 if (_isLogActivated)
-                    Log.ChildReused(_log!, p.Name ?? string.Empty, parentRow, existing);
+                    Log.ChildCreatedLinked(_log!, p.Name ?? string.Empty, parentRow, spec.Name, childId);
 
-                return existing;
+                return childId;
             }
-
-            var spec = childSpecFactory(parentRow);
-            var childId = RegisterTable(spec, createNow: true);
-
-            MetadataRefLinker.EnsureLinkRefNoDupByKey(p.Table, refsCol, parentRow, childId, childCol, childRow, childKey, _capacityPolicy);
-
-            if (_isLogActivated)
-                Log.ChildCreatedLinked(_log!, p.Name ?? string.Empty, parentRow, spec.Name, childId);
-
-            return childId;
         }
 
         /// <summary>

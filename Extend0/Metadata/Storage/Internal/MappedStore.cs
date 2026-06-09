@@ -7,6 +7,8 @@ using System.Buffers;
 using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Extend0.Metadata.Storage.Internal
@@ -42,13 +44,15 @@ namespace Extend0.Metadata.Storage.Internal
     internal sealed unsafe class MappedStore : ITryGrowableStore, ICompactableStore
     {
         private bool _disposed = false;
-        private MemoryMappedFile _mmf;
-        private MemoryMappedViewAccessor _view;
+        private MemoryMappedFile _mmf = null!;
+        private MemoryMappedViewAccessor _view = null!;
         private byte* _base;               // Base address of the mapping
         private FileHeader* _hdr;
         private ColumnDesc* _cols;
         private readonly string _path;     // Path to the mapped file
         private long _length;              // Current file length
+        private readonly int _chunkSize;
+        private readonly int _slabAlignment;
 
         /// <summary>
         /// Column names pre-encoded as UTF-8, truncated to <c>KeySize - 1</c> bytes.
@@ -73,6 +77,8 @@ namespace Extend0.Metadata.Storage.Internal
         /// 32-bit integer.
         /// </remarks>
         private const int MAGIC_VALUE = 0x4C42544D; // 'LBTM'
+
+        private const int MapMutationLockTimeoutMilliseconds = 30_000;
 
         /// <summary>
         /// Returns the current row capacity for the given column.
@@ -154,6 +160,10 @@ namespace Extend0.Metadata.Storage.Internal
         /// <exception cref="IOException">Rethrown when the I/O error is not recognized as a lock/sharing/access issue.</exception>
         public MappedStore(TableSpec spec)
         {
+            var storage = spec.Storage.Normalize();
+            _chunkSize = storage.Layout == TableStorageLayout.SingleFile ? storage.ChunkSize : 0;
+            _slabAlignment = _chunkSize > 0 ? _chunkSize : 64;
+
             var columns = spec.Columns;
 
             long headerSize = sizeof(FileHeader);
@@ -180,6 +190,8 @@ namespace Extend0.Metadata.Storage.Internal
             var fullPath = Path.GetFullPath(spec.MapPath);
             _path = fullPath;
 
+            using var mutationLock = AcquireMapMutationLock(fullPath);
+
             var dir = Path.GetDirectoryName(fullPath)!;
             Directory.CreateDirectory(dir);
             spec.SaveToDirectory(dir);
@@ -189,15 +201,11 @@ namespace Extend0.Metadata.Storage.Internal
                 using (var fs = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read))
                 {
                     if (fs.Length < fileSize) fs.SetLength(fileSize);
+                    _length = fs.Length;
                 }
             });
 
-            _mmf  = MemoryMappedFile.CreateFromFile(fullPath, FileMode.Open, null, capacity: 0, MemoryMappedFileAccess.ReadWrite);
-            _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-            _view.SafeMemoryMappedViewHandle.AcquirePointer(ref _base);
-
-            _hdr  = (FileHeader*)_base;
-            _cols = (ColumnDesc*)(_base + sizeof(FileHeader));
+            OpenMapping();
 
             // Initialize header and column descriptors if the file is new / uninitialized
             InitializeMappedFile(columns, batch);
@@ -258,15 +266,16 @@ namespace Extend0.Metadata.Storage.Internal
                 int valueSize = c.Size.GetValueSize();
                 int entrySize = checked(keySize + valueSize);
 
-                cursor = AlignUp(cursor);
+                cursor = AlignUp(cursor, _slabAlignment);
+                var rowCapacity = RoundRowsToStorageChunk(c.InitialCapacity, entrySize);
                 temp[i] = new ColumnDesc
                 (
                     keySize: keySize,
                     valueSize: valueSize,
-                    rowCapacity: c.InitialCapacity,
+                    rowCapacity: rowCapacity,
                     baseOffset: cursor
                 );
-                cursor += entrySize * c.InitialCapacity;
+                cursor += entrySize * rowCapacity;
 
                 // Pre-encode column name as UTF-8 (truncated to keySize - 1)
                 int max = Math.Max(0, keySize - 1);
@@ -346,29 +355,21 @@ namespace Extend0.Metadata.Storage.Internal
 
         private void Remap(long newLength)
         {
-            // Flush & drop current view
-            _view.Flush();
-            ReleaseViewPointerIfHeld();
-            _view.Dispose();
-            _mmf.Dispose();
+            // Flush & drop current view.
+            CloseMapping(flush: true);
 
             ThrowParsed(() =>
             {
-                // Ensure file is at least newLength
+                // Resize to the requested length, allowing both growth and shrink after compaction.
                 using (var fs = new FileStream(_path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
                 {
-                    if (fs.Length < newLength) fs.SetLength(newLength);
+                    if (fs.Length != newLength) fs.SetLength(newLength);
                     _length = fs.Length;
                 }
             });
 
-            // Re-map whole file
-            _mmf  = MemoryMappedFile.CreateFromFile(_path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
-            _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-            _view.SafeMemoryMappedViewHandle.AcquirePointer(ref _base);
-
-            _hdr  = (FileHeader*)_base;
-            _cols = (ColumnDesc*)(_base + _hdr->ColumnsTableOffset);
+            // Re-map whole file.
+            OpenMapping();
         }
 
         /// <summary>
@@ -426,6 +427,89 @@ namespace Extend0.Metadata.Storage.Internal
             }
         }
 
+        private MapMutationLock AcquireMapMutationLock(CancellationToken cancellationToken = default) =>
+            AcquireMapMutationLock(_path, cancellationToken);
+
+        private static MapMutationLock AcquireMapMutationLock(string path, CancellationToken cancellationToken = default)
+        {
+            var mutexName = CreateMapMutationMutexName(path);
+            var mutex = new Mutex(initiallyOwned: false, name: mutexName);
+            var sw = Stopwatch.StartNew();
+
+            try
+            {
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        if (mutex.WaitOne(millisecondsTimeout: 100))
+                            return new MapMutationLock(mutex);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        return new MapMutationLock(mutex);
+                    }
+
+                    if (sw.ElapsedMilliseconds >= MapMutationLockTimeoutMilliseconds)
+                    {
+                        throw new MetadataTableLockedException(
+                            $"Timed out waiting for mapped table mutation lock after {MapMutationLockTimeoutMilliseconds}ms. Path='{Path.GetFullPath(path)}'.",
+                            null);
+                    }
+                }
+            }
+            catch
+            {
+                mutex.Dispose();
+                throw;
+            }
+        }
+
+        private static string CreateMapMutationMutexName(string path)
+        {
+            var normalized = Path.GetFullPath(path);
+            if (OperatingSystem.IsWindows())
+                normalized = normalized.ToUpperInvariant();
+
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+            var name = $"Extend0.Metadata.MappedStore.{hash}";
+            return OperatingSystem.IsWindows() ? $@"Local\{name}" : name;
+        }
+
+        private StructuralFingerprint CaptureStructuralFingerprint()
+        {
+            var header = *_hdr;
+            var checksum = 14695981039346656037UL;
+            int columnCount = checked((int)header.ColumnCount);
+
+            for (int i = 0; i < columnCount; i++)
+            {
+                ref readonly var desc = ref _cols[i];
+                checksum = MixChecksum(checksum, unchecked((ulong)desc.KeySize));
+                checksum = MixChecksum(checksum, unchecked((ulong)desc.ValueSize));
+                checksum = MixChecksum(checksum, desc.RowCapacity);
+                checksum = MixChecksum(checksum, unchecked((ulong)desc.BaseOffset));
+            }
+
+            return new StructuralFingerprint(header, new FileInfo(_path).Length, checksum);
+        }
+
+        private void EnsureStructuralFingerprintUnchanged(StructuralFingerprint expected)
+        {
+            var current = CaptureStructuralFingerprint();
+            if (current != expected)
+            {
+                throw new MetadataTableLockedException(
+                    "Mapped table layout changed while compaction was copying. Compaction aborted before replacing the original file.",
+                    null);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static ulong MixChecksum(ulong hash, ulong value) => (hash ^ value) * 1099511628211UL;
+
         /// <summary>
         /// Aligns a value up to the next multiple of <paramref name="a"/>.
         /// </summary>
@@ -456,6 +540,16 @@ namespace Extend0.Metadata.Storage.Internal
         [DebuggerStepThrough]
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private static long AlignUp(long v, int a = 64) => unchecked(v + (a - 1)) / a * a;
+
+        private uint RoundRowsToStorageChunk(uint minRows, int entrySize)
+        {
+            if (minRows == 0 || _chunkSize <= 0)
+                return minRows;
+
+            var rowsPerChunk = checked((uint)Math.Max(1, _chunkSize / entrySize));
+            var chunks = (minRows + rowsPerChunk - 1) / rowsPerChunk;
+            return checked(chunks * rowsPerChunk);
+        }
 
         /// <summary>
         /// Computes a raw pointer to the beginning of the (key,value) entry
@@ -586,6 +680,7 @@ namespace Extend0.Metadata.Storage.Internal
             columns = [];
             if (!File.Exists(path)) return false;
 
+            using var mutationLock = AcquireMapMutationLock(Path.GetFullPath(path));
             using var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
             using var view = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
             byte* basePtr = null;
@@ -617,13 +712,7 @@ namespace Extend0.Metadata.Storage.Internal
         public void Dispose()
         {
             if (_disposed) return;
-            if (_base != null)
-            {
-                _view.Flush();
-                ReleaseViewPointerIfHeld();
-                _view?.Dispose();
-            }
-            _mmf?.Dispose();
+            CloseMapping(flush: true);
             _disposed = true;
         }
 
@@ -658,6 +747,7 @@ namespace Extend0.Metadata.Storage.Internal
         public bool TryGrowColumnTo(uint column, uint minRows, in ColumnConfiguration meta, bool zeroInit)
         {
             if (minRows == 0) return true;
+            using var mutationLock = AcquireMapMutationLock();
             if (column >= _hdr->ColumnCount) return false;
 
             ref readonly var cd = ref _cols[column];
@@ -671,7 +761,7 @@ namespace Extend0.Metadata.Storage.Internal
             if (minRows <= cd.RowCapacity) return true; // nothing to do
 
             uint oldCap = cd.RowCapacity;
-            uint newCap = minRows;
+            uint newCap = RoundRowsToStorageChunk(minRows, checked((int)((long)cd.KeySize + cd.ValueSize)));
             long oldOffset = cd.BaseOffset;
 
             long entrySize = (long)cd.KeySize + cd.ValueSize;
@@ -679,7 +769,7 @@ namespace Extend0.Metadata.Storage.Internal
             long newBytes = entrySize * newCap;
 
             // Append at end of file (keep 64B alignment)
-            long newOffset = AlignUp(_length);
+            long newOffset = AlignUp(_length, _slabAlignment);
             long newFileLen = newOffset + newBytes;
 
             // Ensure mapping covers the new length
@@ -730,10 +820,214 @@ namespace Extend0.Metadata.Storage.Internal
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 
         /// <inheritdoc/>
-        /// <exception cref="NotImplementedException">Always thrown; compaction is not yet implemented.</exception>"
         Task ICompactableStore.Compact(bool strict, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var mutationLock = AcquireMapMutationLock(cancellationToken);
+            var sourceFingerprint = CaptureStructuralFingerprint();
+            var plan = BuildCompactionPlan();
+            if (!plan.RequiresRewrite)
+                return Task.CompletedTask;
+
+            var tempPath = Path.Combine(
+                Path.GetDirectoryName(_path)!,
+                $"{Path.GetFileName(_path)}.compact.{Guid.NewGuid():N}.tmp");
+
+            var movedIntoPlace = false;
+            try
+            {
+                WriteCompactedFile(tempPath, plan.Descriptors, plan.NewLength, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                EnsureStructuralFingerprintUnchanged(sourceFingerprint);
+
+                CloseMapping(flush: true);
+
+                try
+                {
+                    ThrowParsed(() => File.Move(tempPath, _path, overwrite: true));
+                    movedIntoPlace = true;
+                }
+                catch
+                {
+                    // The original mapping has already been dropped to allow replacement. If replacement fails,
+                    // restore the live view over the original file before rethrowing.
+                    OpenMapping();
+                    throw;
+                }
+
+                OpenMapping();
+            }
+            finally
+            {
+                if (!movedIntoPlace && File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); }
+                    catch { /* best-effort temp cleanup */ }
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Computes the compacted descriptor table and target file length.
+        /// </summary>
+        private CompactPlan BuildCompactionPlan()
+        {
+            int columnCount = checked((int)_hdr->ColumnCount);
+            var compacted = new ColumnDesc[columnCount];
+            long cursor = checked(_hdr->ColumnsTableOffset + (long)columnCount * sizeof(ColumnDesc));
+            bool requiresRewrite = false;
+
+            for (int i = 0; i < columnCount; i++)
+            {
+                ref readonly var current = ref _cols[i];
+                cursor = AlignUp(cursor, _slabAlignment);
+                compacted[i] = new ColumnDesc(
+                    current.KeySize,
+                    current.ValueSize,
+                    current.RowCapacity,
+                    cursor);
+
+                if (current.BaseOffset != cursor)
+                    requiresRewrite = true;
+
+                cursor = checked(cursor + current.EntrySizeBytes * current.RowCapacity);
+            }
+
+            if (_length != cursor)
+                requiresRewrite = true;
+
+            return new CompactPlan(compacted, cursor, requiresRewrite);
+        }
+
+        /// <summary>
+        /// Writes a fully compacted table file to <paramref name="tempPath"/> while the current mapping is still readable.
+        /// </summary>
+        private void WriteCompactedFile(
+            string tempPath,
+            ColumnDesc[] compactedDescriptors,
+            long compactedLength,
+            CancellationToken cancellationToken)
+        {
+            const int CopyBufferSize = 1024 * 1024;
+
+            var options = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                BufferSize = CopyBufferSize,
+                Options = FileOptions.None
+            };
+
+            using var fs = new FileStream(tempPath, options);
+            fs.SetLength(compactedLength);
+
+            var header = *_hdr;
+            var headerBytes = new byte[sizeof(FileHeader)];
+            MemoryMarshal.Write(headerBytes, in header);
+            fs.Write(headerBytes);
+
+            var descriptorBytes = new byte[checked(compactedDescriptors.Length * sizeof(ColumnDesc))];
+            MemoryMarshal.AsBytes(compactedDescriptors.AsSpan()).CopyTo(descriptorBytes);
+            fs.Position = header.ColumnsTableOffset;
+            fs.Write(descriptorBytes);
+
+            var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+            try
+            {
+                for (int i = 0; i < compactedDescriptors.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    ref readonly var source = ref _cols[i];
+                    ref readonly var destination = ref compactedDescriptors[i];
+
+                    long bytesRemaining = checked(source.EntrySizeBytes * source.RowCapacity);
+                    long copied = 0;
+                    fs.Position = destination.BaseOffset;
+
+                    while (bytesRemaining > 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        int take = (int)Math.Min(buffer.Length, bytesRemaining);
+                        new ReadOnlySpan<byte>(_base + source.BaseOffset + copied, take).CopyTo(buffer);
+                        fs.Write(buffer.AsSpan(0, take));
+
+                        copied += take;
+                        bytesRemaining -= take;
+                    }
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+
+            fs.Flush(flushToDisk: true);
+        }
+
+        /// <summary>
+        /// Opens a whole-file mapping and refreshes all raw pointers into the mapped file.
+        /// </summary>
+        private void OpenMapping()
+        {
+            _mmf = MemoryMappedFile.CreateFromFile(_path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
+            _view = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+            _base = null;
+            _view.SafeMemoryMappedViewHandle.AcquirePointer(ref _base);
+
+            _hdr = (FileHeader*)_base;
+            var columnsTableOffset = _hdr->Magic == MAGIC_VALUE
+                ? _hdr->ColumnsTableOffset
+                : sizeof(FileHeader);
+            _cols = (ColumnDesc*)(_base + columnsTableOffset);
+            _length = new FileInfo(_path).Length;
+        }
+
+        /// <summary>
+        /// Flushes and closes the current mapping.
+        /// </summary>
+        private void CloseMapping(bool flush)
+        {
+            var view = _view;
+            if (view is not null)
+            {
+                if (flush)
+                    view.Flush();
+
+                ReleaseViewPointerIfHeld();
+                view.Dispose();
+                _view = null!;
+            }
+
+            _mmf?.Dispose();
+            _mmf = null!;
+        }
+
+        private readonly record struct CompactPlan(ColumnDesc[] Descriptors, long NewLength, bool RequiresRewrite);
+
+        private readonly record struct StructuralFingerprint(FileHeader Header, long FileLength, ulong DescriptorChecksum);
+
+        private sealed class MapMutationLock : IDisposable
+        {
+            private readonly Mutex _mutex;
+            private bool _disposed;
+
+            public MapMutationLock(Mutex mutex) => _mutex = mutex;
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+
+                try { _mutex.ReleaseMutex(); }
+                finally { _mutex.Dispose(); }
+            }
         }
 
         /// <summary>

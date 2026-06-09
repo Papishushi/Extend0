@@ -115,6 +115,22 @@ public sealed class CellEnumerableTests
     }
 
     [Fact]
+    public void Enumerable_DelegatesToAnyCellStoreEnumerator()
+    {
+        var expected = new CellRowColumnValueEntry(
+            new MetadataCellPointer(row: 7, column: 3),
+            default);
+        using ICellStore store = MetadataStorageHarness.CreateEnumerableOnlyStore(expected);
+
+        var entries = new CellEnumerable(store).ToArray();
+
+        var actual = Assert.Single(entries);
+        Assert.Equal(expected, actual);
+        Assert.Equal((uint)3, actual.Col);
+        Assert.Equal((uint)7, actual.Row);
+    }
+
+    [Fact]
     public void MappedEnumerable_UsesMappedIdentityHash_AndNonGenericEnumerator()
     {
         var tempRoot = CreateTempDirectory();

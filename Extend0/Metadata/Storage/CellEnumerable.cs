@@ -10,8 +10,8 @@ namespace Extend0.Metadata.Storage
     /// Lightweight enumerable over all cells in an <see cref="ICellStore"/>.
     /// </summary>
     /// <remarks>
-    /// This struct abstracts over the concrete store implementation and can iterate
-    /// both <see cref="InMemoryStore"/> and <see cref="MappedStore"/> instances.
+    /// This struct abstracts over the concrete store implementation. Built-in stores use optimized
+    /// coordinate scans; unknown stores are enumerated through their own <see cref="IEnumerable{T}"/> implementation.
     /// Instances are value-type views over a specific backing store.
     /// </remarks>
     public readonly partial struct CellEnumerable : IEquatable<CellEnumerable>, IEnumerable<CellRowColumnValueEntry>
@@ -22,15 +22,10 @@ namespace Extend0.Metadata.Storage
         /// Creates an enumerable for a <see cref="ICellStore"/> store.
         /// </summary>
         /// <param name="store">The <see cref="ICellStore"/> to enumerate.</param>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="store"/> is not a supported implementation
-        /// (<see cref="InMemoryStore"/> or <see cref="MappedStore"/>).
-        /// </exception>
         public CellEnumerable(ICellStore store)
         {
-            if (store is InMemoryStore memStore) _store = memStore;
-            else if (store is MappedStore mappedStore) _store = mappedStore;
-            else throw new ArgumentException("Unsupported ICellStore implementation.", nameof(store));
+            ArgumentNullException.ThrowIfNull(store);
+            _store = store;
         }
 
         /// <summary>
@@ -58,9 +53,10 @@ namespace Extend0.Metadata.Storage
         public Enumerator GetEnumerator() => _store switch
         {
             MappedStore mapped => Enumerator.ForMapped(mapped),
+            SegmentedMappedStore segmented => Enumerator.ForSegmented(segmented),
             InMemoryStore mem => Enumerator.ForMemory(mem),
+            ICellStore store => Enumerator.ForStore(store),
             null => default, // Move next will return false
-            _ => throw new InvalidOperationException("Unsupported ICellStore implementation.")
         };
 
         /// <summary>
@@ -122,8 +118,7 @@ namespace Extend0.Metadata.Storage
         /// Returns a hash code for this <see cref="CellEnumerable"/>.
         /// </summary>
         /// <returns>
-        /// A hash code derived from the identity and kind of the underlying store
-        /// (in-memory, mapped or none).
+        /// A hash code derived from the identity and kind of the underlying store.
         /// </returns>
         /// <remarks>
         /// Two <see cref="CellEnumerable"/> instances that are considered equal by
@@ -143,8 +138,10 @@ namespace Extend0.Metadata.Storage
                     hash = (hash * 31) + 1; // mode: memory
                 else if (_store is MappedStore)
                     hash = (hash * 31) + 2; // mode: mapped
+                else if (_store is SegmentedMappedStore)
+                    hash = (hash * 31) + 3; // mode: segmented mapped
                 else
-                    hash = (hash * 31) + 3; // some future ICellStore
+                    hash = (hash * 31) + 4; // some future ICellStore
 
                 hash = (hash * 31) + RuntimeHelpers.GetHashCode(_store);
                 return hash;

@@ -44,11 +44,12 @@ namespace Extend0.Metadata.Internal
     /// <see cref="Dispose"/> when no longer needed.
     /// </para>
     /// </remarks>
-    internal sealed class MetadataTable : IMetadataTable
+    internal sealed class MetadataTable : IMetadataTable, IMetadataTableConcurrency
     {
         private readonly List<ColumnConfiguration> _columns = [];
         // Schema-level lookup (not a rebuildable table index). Built once from TableSpec.Columns.
         private readonly FrozenDictionary<string, uint> _colIndexByName;
+        private readonly MetadataTableConcurrencyGate _concurrencyGate = new();
 
         private ICellStore _store;
         private readonly TableSpec _spec;
@@ -79,6 +80,8 @@ namespace Extend0.Metadata.Internal
         /// If you replace the store, you typically should call <see cref="RebuildIndexes(bool)"/> afterwards.
         /// </remarks>
         public ICellStore CellStore { get => _store; set => _store = value; }
+
+        MetadataTableConcurrencyGate IMetadataTableConcurrency.ConcurrencyGate => _concurrencyGate;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MetadataTable"/> class using the
@@ -121,7 +124,9 @@ namespace Extend0.Metadata.Internal
 
             _store = spec.MapPath is null
                 ? new InMemoryStore(_columns)
-                : new MappedStore(spec);
+                : spec.Storage.Normalize().Layout == TableStorageLayout.Chunked
+                    ? new SegmentedMappedStore(spec)
+                    : new MappedStore(spec);
 
             // Prematerialize initial cells (only relevant for InMemoryStore and similars for example on MappedStore already exists the space)
             if (_store is InMemoryStore)
@@ -153,9 +158,15 @@ namespace Extend0.Metadata.Internal
         /// </exception>
         public static IMetadataTable Open(TableSpec spec)
         {
-            if (!MappedStore.TryLoadColumns(spec.MapPath, out var columns))
+            var storage = spec.Storage.Normalize();
+            var loaded = storage.Layout == TableStorageLayout.Chunked
+                ? SegmentedMappedStore.TryLoadColumns(spec.MapPath, out var columns)
+                : MappedStore.TryLoadColumns(spec.MapPath, out columns);
+
+            if (!loaded)
                 throw new InvalidOperationException("File is not a valid metadata table.");
-            return new MetadataTable(new(spec.Name, spec.MapPath, columns));
+
+            return new MetadataTable(new(spec.Name, spec.MapPath, columns) { Storage = spec.Storage });
         }
 
         /// <summary>
@@ -176,10 +187,15 @@ namespace Extend0.Metadata.Internal
         /// </exception>
         public IMetadataTable Open()
         {
-            if (!MappedStore.TryLoadColumns(_spec.MapPath, out var columns))
+            var storage = _spec.Storage.Normalize();
+            var loaded = storage.Layout == TableStorageLayout.Chunked
+                ? SegmentedMappedStore.TryLoadColumns(_spec.MapPath, out var columns)
+                : MappedStore.TryLoadColumns(_spec.MapPath, out columns);
+
+            if (!loaded)
                 throw new InvalidOperationException("File is not a valid metadata table.");
 
-            return new MetadataTable(new(_spec.Name, _spec.MapPath, columns));
+            return new MetadataTable(new(_spec.Name, _spec.MapPath, columns) { Storage = _spec.Storage });
         }
 
         /// <summary>
@@ -234,6 +250,13 @@ namespace Extend0.Metadata.Internal
         /// Thrown when <paramref name="strict"/> is <see langword="true"/> and one or more validation or rebuild errors are accumulated.
         /// </exception>
         public async Task RebuildIndexes(bool strict = false, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(this, cancellationToken);
+            await RebuildIndexesUnlocked(strict, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task RebuildIndexesUnlocked(bool strict = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -576,7 +599,10 @@ namespace Extend0.Metadata.Internal
         /// otherwise, <see langword="false"/>.
         /// </returns>
         public bool TryGetCell(uint column, uint row, out MetadataCell cell)
-            => _store.TryGetCell(column, row, out cell!);
+        {
+            using var _ = MetadataTableConcurrency.EnterExclusive(this);
+            return _store.TryGetCell(column, row, out cell!);
+        }
 
         /// <summary>
         /// Attempts to retrieve a cell by column name and row index.
@@ -599,6 +625,7 @@ namespace Extend0.Metadata.Internal
                 return false;
             }
 
+            using var _ = MetadataTableConcurrency.EnterExclusive(this);
             return _store.TryGetCell(col, row, out cell!);
         }
 
@@ -614,7 +641,11 @@ namespace Extend0.Metadata.Internal
         /// <see langword="true"/> if the underlying store can provide a block descriptor;
         /// otherwise, <see langword="false"/>.
         /// </returns>
-        internal bool TryGetColumnBlock(uint column, out ColumnBlock block) => _store.TryGetColumnBlock(column, out block);
+        internal bool TryGetColumnBlock(uint column, out ColumnBlock block)
+        {
+            using var _ = MetadataTableConcurrency.EnterExclusive(this);
+            return _store.TryGetColumnBlock(column, out block);
+        }
 
         /// <summary>
         /// Gets an existing cell or creates a new one at the specified column and row indices.
@@ -629,7 +660,10 @@ namespace Extend0.Metadata.Internal
         /// some stores may automatically grow capacity when accessing high row indices.
         /// </remarks>
         public MetadataCell GetOrCreateCell(uint column, uint row)
-            => _store.GetOrCreateCell(column, row, _columns[(int)column]);
+        {
+            using var _ = MetadataTableConcurrency.EnterExclusive(this);
+            return _store.GetOrCreateCell(column, row, _columns[(int)column]);
+        }
 
         /// <summary>
         /// Gets an existing cell or creates a new one in the column identified by the
@@ -684,6 +718,8 @@ namespace Extend0.Metadata.Internal
         /// </returns>
         public unsafe uint GetLogicalRowCount()
         {
+            using var _ = MetadataTableConcurrency.EnterExclusive(this);
+
             if (_columns.Count == 0)
                 return 0;
 
@@ -867,6 +903,8 @@ namespace Extend0.Metadata.Internal
         /// </remarks>
         public string ToString(uint maxRows)
         {
+            using var _ = MetadataTableConcurrency.EnterExclusive(this);
+
             var sb = new StringBuilder();
 
             int colCount = _columns.Count;
@@ -1024,6 +1062,8 @@ namespace Extend0.Metadata.Internal
         /// </remarks>
         public bool TryGrowColumnTo(uint column, uint minRows, bool zeroInit = true)
         {
+            using var tableLease = MetadataTableConcurrency.EnterExclusive(this);
+
             if (minRows == 0) return true;
             if (column >= _columns.Count) throw new ArgumentOutOfRangeException(nameof(column));
 
@@ -1080,10 +1120,11 @@ namespace Extend0.Metadata.Internal
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_store is not ICompactableStore compactableStore) return false;
+            await using var _ = await MetadataTableConcurrency.EnterExclusiveAsync(this, cancellationToken);
             try
             {
                 await compactableStore.Compact(strict, cancellationToken);
-                await RebuildIndexes(strict, cancellationToken);
+                await RebuildIndexesUnlocked(strict, cancellationToken);
                 return true;
             }
             catch

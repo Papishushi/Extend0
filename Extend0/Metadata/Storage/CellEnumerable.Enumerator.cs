@@ -1,4 +1,5 @@
 ﻿using Extend0.Metadata.Storage.Internal;
+using Extend0.Metadata.Storage.Contract;
 using System.Collections;
 
 namespace Extend0.Metadata.Storage
@@ -32,6 +33,8 @@ namespace Extend0.Metadata.Storage
             // mode
             private InMemoryStore? _mem;
             private MappedStore? _mapped;
+            private SegmentedMappedStore? _segmented;
+            private IEnumerator<CellRowColumnValueEntry>? _fallback;
 
             /// <summary>
             /// Gets the current cell triple: column index, row index and cell instance.
@@ -56,6 +59,8 @@ namespace Extend0.Metadata.Storage
             {
                 _mem = s,
                 _mapped = null,
+                _segmented = null,
+                _fallback = null,
                 _c = 0,
                 _r = uint.MaxValue, // start before first
                 _colCount = s.ColumnCount,
@@ -70,9 +75,39 @@ namespace Extend0.Metadata.Storage
             {
                 _mem = null,
                 _mapped = s,
+                _segmented = null,
+                _fallback = null,
                 _c = 0,
                 _r = uint.MaxValue, // start before first
                 _colCount = s.ColumnCount
+            };
+
+            /// <summary>
+            /// Creates an enumerator bound to a segmented memory-mapped store.
+            /// </summary>
+            internal static Enumerator ForSegmented(SegmentedMappedStore s) => new()
+            {
+                _mem = null,
+                _mapped = null,
+                _segmented = s,
+                _fallback = null,
+                _c = 0,
+                _r = uint.MaxValue,
+                _colCount = s.ColumnCount
+            };
+
+            /// <summary>
+            /// Creates an enumerator by delegating to a custom store's own enumerable implementation.
+            /// </summary>
+            internal static Enumerator ForStore(ICellStore s) => new()
+            {
+                _mem = null,
+                _mapped = null,
+                _segmented = null,
+                _fallback = s.GetEnumerator(),
+                _c = 0,
+                _r = uint.MaxValue,
+                _colCount = 0
             };
 
             /// <summary>
@@ -85,7 +120,9 @@ namespace Extend0.Metadata.Storage
             public bool MoveNext()
             {
                 if (_mapped is not null) return MoveNextMapped();
+                if (_segmented is not null) return MoveNextSegmented();
                 if (_mem is not null) return MoveNextMem();
+                if (_fallback is not null) return MoveNextFallback();
                 return false; // default enumerator with no store
             }
 
@@ -168,6 +205,47 @@ namespace Extend0.Metadata.Storage
                 }
             }
 
+            private bool MoveNextSegmented()
+            {
+                var s = _segmented!;
+                if (_r == uint.MaxValue)
+                {
+                    if (_colCount == 0) return false;
+                    _r = 0;
+                }
+                else _r++;
+
+                while (true)
+                {
+                    while (_c < _colCount && _r >= s.GetRowCapacity(_c))
+                    {
+                        _c++;
+                        if (_c >= _colCount) return false;
+                        _r = 0;
+                    }
+                    if (_c >= _colCount) return false;
+
+                    if (!s.TryGetCell(_c, _r, out var cell))
+                    {
+                        _r++;
+                        continue;
+                    }
+
+                    Current = (_c, _r, cell);
+                    return true;
+                }
+            }
+
+            private bool MoveNextFallback()
+            {
+                var e = _fallback!;
+                if (!e.MoveNext())
+                    return false;
+
+                Current = e.Current;
+                return true;
+            }
+
             /// <summary>
             /// Resets the enumerator to its initial position (before the first element).
             /// </summary>
@@ -193,6 +271,9 @@ namespace Extend0.Metadata.Storage
                 // Do not dispose the underlying store: we don't own it.
                 _mem = null;
                 _mapped = null;
+                _segmented = null;
+                _fallback?.Dispose();
+                _fallback = null;
             }
         }
     }

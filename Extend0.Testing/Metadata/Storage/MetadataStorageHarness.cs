@@ -1,7 +1,9 @@
+using Extend0.Metadata.CodeGen;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using Extend0.Metadata.Storage.Contract;
 using Extend0.Metadata.Storage.Internal;
+using System.Collections;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
@@ -17,6 +19,9 @@ public static class MetadataStorageHarness
 
     public static ICellStore CreateInMemoryStore(params ColumnConfiguration[] columns) =>
         new InMemoryStore(columns);
+
+    public static ICellStore CreateEnumerableOnlyStore(params CellRowColumnValueEntry[] entries) =>
+        new EnumerableOnlyStore(entries);
 
     public static uint GetColumnCount(ICellStore store) =>
         ((InMemoryStore)store).ColumnCount;
@@ -66,6 +71,27 @@ public static class MetadataStorageHarness
     public static Task CompactMappedStore(ICellStore store, bool strict, CancellationToken cancellationToken = default) =>
         ((ICompactableStore)((MappedStore)store)).Compact(strict, cancellationToken);
 
+    public static ICellStore CreateSegmentedMappedStore(TableSpec spec) =>
+        new SegmentedMappedStore(spec);
+
+    public static bool TryLoadSegmentedColumns(string path, out ColumnConfiguration[] columns) =>
+        SegmentedMappedStore.TryLoadColumns(path, out columns);
+
+    public static uint GetSegmentedColumnCount(ICellStore store) =>
+        ((SegmentedMappedStore)store).ColumnCount;
+
+    public static ColumnConfiguration GetSegmentedColumnMeta(ICellStore store, uint column) =>
+        ((SegmentedMappedStore)store).GetColumnConfiguration(column);
+
+    public static bool TryGrowSegmentedColumnTo(ICellStore store, uint column, uint minRows, in ColumnConfiguration meta, bool zeroInit) =>
+        ((SegmentedMappedStore)store).TryGrowColumnTo(column, minRows, meta, zeroInit);
+
+    public static bool TryGetSegmentedColumnCapacity(ICellStore store, uint column, out uint capacity) =>
+        ((ITryGrowableStore)((SegmentedMappedStore)store)).TryGetColumnCapacity(column, out capacity);
+
+    public static Task CompactSegmentedStore(ICellStore store, bool strict, CancellationToken cancellationToken = default) =>
+        ((ICompactableStore)((SegmentedMappedStore)store)).Compact(strict, cancellationToken);
+
     public static void InvokeMappedStoreThrowParsed(Action? action)
     {
         try
@@ -76,6 +102,50 @@ public static class MetadataStorageHarness
         {
             ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
             throw;
+        }
+    }
+
+    private sealed class EnumerableOnlyStore(IEnumerable<CellRowColumnValueEntry> entries) : ICellStore
+    {
+        private readonly CellRowColumnValueEntry[] _entries = entries.ToArray();
+
+        public int Count => _entries.Length;
+
+        public bool TryGetColumnBlock(uint column, out ColumnBlock block)
+        {
+            block = default;
+            return false;
+        }
+
+        public bool TryGetCell(uint col, uint row, out MetadataCell cell)
+        {
+            foreach (var entry in _entries)
+            {
+                if (entry.Col == col && entry.Row == row)
+                {
+                    cell = entry.Cell;
+                    return true;
+                }
+            }
+
+            cell = default;
+            return false;
+        }
+
+        public MetadataCell GetOrCreateCell(uint col, uint row, in ColumnConfiguration meta) =>
+            TryGetCell(col, row, out var cell)
+                ? cell
+                : throw new InvalidOperationException("This test store only exposes its own enumerable.");
+
+        public CellEnumerable EnumerateCells() => new(this);
+
+        public IEnumerator<CellRowColumnValueEntry> GetEnumerator() =>
+            ((IEnumerable<CellRowColumnValueEntry>)_entries).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public void Dispose()
+        {
         }
     }
 }

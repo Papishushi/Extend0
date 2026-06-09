@@ -13,6 +13,11 @@ namespace Extend0.Metadata.Schema
     public readonly partial record struct TableSpec(string Name, string MapPath, ColumnConfiguration[] Columns)
     {
         /// <summary>
+        /// Gets storage-level options for mapped tables. The default layout is <see cref="TableStorageLayout.SingleFile"/>.
+        /// </summary>
+        public TableStorageOptions Storage { get; init; }
+
+        /// <summary>
         /// Performs basic validation of the <see cref="TableSpec"/> fields.
         /// </summary>
         /// <exception cref="ArgumentException">
@@ -27,6 +32,8 @@ namespace Extend0.Metadata.Schema
                 throw new ArgumentException("TableSpec.MapPath cannot be empty.");
             if (Columns is null || Columns.Length == 0)
                 throw new ArgumentException("TableSpec.Columns must contain at least one column.");
+
+            Storage.Validate();
         }
 
         /// <summary>
@@ -71,6 +78,15 @@ namespace Extend0.Metadata.Schema
         /// <returns>The full path of the created (or overwritten) file.</returns>
         public string SaveToDirectory(string directory, string extension = ".meta.tablespec.json", bool overwrite = true)
         {
+            if (Storage.Normalize().Layout == TableStorageLayout.Chunked)
+            {
+                var tableDirectory = Path.Combine(directory, Helpers.SanitizeFileName(Name).ToLowerInvariant());
+                Directory.CreateDirectory(tableDirectory);
+                var specPath = Path.Combine(tableDirectory, "tablespec.json");
+                SaveToFile(specPath, overwrite);
+                return specPath;
+            }
+
             var fileName = Helpers.SanitizeFileName(Name) + extension;
             var full = Path.Combine(directory, fileName.ToLowerInvariant());
             SaveToFile(full, overwrite);
@@ -86,6 +102,9 @@ namespace Extend0.Metadata.Schema
                 return false;
 
             if (!string.Equals(MapPath, other.MapPath, StringComparison.Ordinal))
+                return false;
+
+            if (Storage.Normalize() != other.Storage.Normalize())
                 return false;
 
             if (ReferenceEquals(Columns, other.Columns))
@@ -105,6 +124,7 @@ namespace Extend0.Metadata.Schema
             var hash = new HashCode();
             hash.Add(Name, StringComparer.Ordinal);
             hash.Add(MapPath, StringComparer.Ordinal);
+            hash.Add(Storage.Normalize());
 
             if (Columns is not null)
             {
