@@ -31,7 +31,9 @@ It does not replace the library API. It provides a command-line way to inspect a
 Checks repository-level expectations:
 
 - solution and core project presence
+- CLI project presence and dotnet tool packaging contract
 - README and docs/ADR presence
+- ADR 1-010 and CLI runtime documentation presence
 - major `1` ADR baseline
 - ontology baseline files
 - test harness presence

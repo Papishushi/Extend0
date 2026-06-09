@@ -65,9 +65,12 @@ public static class DoctorCommand
 
         CheckFile(checks, root, "solution", "Extend0.sln", required: true);
         CheckFile(checks, root, "core-project", Path.Combine("Extend0", "Extend0.csproj"), required: true);
+        CheckFile(checks, root, "cli-project", Path.Combine("Extend0.Cli", "Extend0.Cli.csproj"), required: true);
         CheckFile(checks, root, "readme", "README.md", required: true);
         CheckFile(checks, root, "adr-index", Path.Combine("docs", "ADR.md"), required: true);
         CheckAnyFile(checks, root, "adr-major-1-baseline", Path.Combine("docs", "ADR"), "1-000-*-ADR-*.md", required: true);
+        CheckFile(checks, root, "adr-cli-diagnostic-surface", Path.Combine("docs", "ADR", "1-010-ARCHITECTURE-ADR-ADOPT-CLI-AS-PLATFORM-DIAGNOSTIC-SURFACE.md"), required: true);
+        CheckFile(checks, root, "runtime-cli-doc", Path.Combine("docs", "Runtime", "CLI.md"), required: true);
         CheckFile(checks, root, "ontology-tbox", Path.Combine("ontology", "tbox", "extend0.owl"), required: true);
         CheckFile(checks, root, "ontology-abox-schema", Path.Combine("ontology", "abox", "abox-schema.ttl"), required: false);
         CheckFile(checks, root, "ontology-example-abox", Path.Combine("ontology", "abox", "example-abox.ttl"), required: false);
@@ -76,6 +79,7 @@ public static class DoctorCommand
         CheckFile(checks, root, "testing-harness-project", Path.Combine("Extend0.Testing", "Extend0.Testing.csproj"), required: false);
 
         CheckTargetFramework(checks, root);
+        CheckCliToolConfiguration(checks, root);
         CheckReadmeTargetFramework(checks, root);
         CheckOntologyAccessSurfaceRange(checks, root);
 
@@ -132,6 +136,40 @@ public static class DoctorCommand
         }
     }
 
+    private static void CheckCliToolConfiguration(List<DoctorCheck> checks, string root)
+    {
+        var projectPath = Path.Combine(root, "Extend0.Cli", "Extend0.Cli.csproj");
+        if (!File.Exists(projectPath))
+            return;
+
+        try
+        {
+            var doc = XDocument.Load(projectPath);
+            var isPackable = GetProjectProperty(doc, "IsPackable");
+            var packAsTool = GetProjectProperty(doc, "PackAsTool");
+            var packageId = GetProjectProperty(doc, "PackageId");
+            var toolCommandName = GetProjectProperty(doc, "ToolCommandName");
+
+            if (string.Equals(isPackable, "true", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(packAsTool, "true", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(packageId, "Extend0.Cli", StringComparison.Ordinal)
+                && string.Equals(toolCommandName, "extend0", StringComparison.Ordinal))
+            {
+                checks.Add(DoctorCheck.Pass("cli-tool-packaging", "Extend0.Cli is configured as dotnet tool 'extend0'."));
+                return;
+            }
+
+            checks.Add(new DoctorCheck(
+                "cli-tool-packaging",
+                DoctorStatus.Error,
+                $"Extend0.Cli tool packaging mismatch. IsPackable='{isPackable}', PackAsTool='{packAsTool}', PackageId='{packageId}', ToolCommandName='{toolCommandName}'."));
+        }
+        catch (Exception ex)
+        {
+            checks.Add(new DoctorCheck("cli-tool-packaging", DoctorStatus.Error, $"Could not read Extend0.Cli.csproj: {ex.Message}"));
+        }
+    }
+
     private static void CheckReadmeTargetFramework(List<DoctorCheck> checks, string root)
     {
         var readmePath = Path.Combine(root, "README.md");
@@ -147,6 +185,9 @@ public static class DoctorCommand
 
         checks.Add(new DoctorCheck("readme-target-framework", DoctorStatus.Warning, "README does not mention net10.0."));
     }
+
+    private static string? GetProjectProperty(XDocument doc, string name) =>
+        doc.Descendants(name).FirstOrDefault()?.Value.Trim();
 
     private static void CheckOntologyAccessSurfaceRange(List<DoctorCheck> checks, string root)
     {

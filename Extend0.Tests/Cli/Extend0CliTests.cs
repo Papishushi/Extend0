@@ -209,6 +209,39 @@ public sealed class Extend0CliTests
     }
 
     [Fact]
+    public async Task Doctor_WhenCliToolPackagingIsBroken_ReturnsFailure()
+    {
+        var root = CreateHealthyRepository();
+        try
+        {
+            Write(root, Path.Combine("Extend0.Cli", "Extend0.Cli.csproj"), """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <IsPackable>true</IsPackable>
+                    <PackAsTool>false</PackAsTool>
+                    <PackageId>Extend0.Cli</PackageId>
+                    <ToolCommandName>extend0</ToolCommandName>
+                  </PropertyGroup>
+                </Project>
+                """);
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["doctor", "--repo", root], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("cli-tool-packaging", output.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MetaDbInspect_WithSidecarSpec_PrintsColumnReport()
     {
         var root = CreateTempDirectory();
@@ -652,8 +685,21 @@ public sealed class Extend0CliTests
               </PropertyGroup>
             </Project>
             """);
+        Write(root, Path.Combine("Extend0.Cli", "Extend0.Cli.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <IsPackable>true</IsPackable>
+                <PackAsTool>true</PackAsTool>
+                <PackageId>Extend0.Cli</PackageId>
+                <ToolCommandName>extend0</ToolCommandName>
+              </PropertyGroup>
+            </Project>
+            """);
         Write(root, Path.Combine("docs", "ADR.md"), "# ADR");
         Write(root, Path.Combine("docs", "ADR", "1-000-EXTEND0-ADR-DEFINE-EXTEND0-MAJOR-VERSION-1.md"), "# ADR 000");
+        Write(root, Path.Combine("docs", "ADR", "1-010-ARCHITECTURE-ADR-ADOPT-CLI-AS-PLATFORM-DIAGNOSTIC-SURFACE.md"), "# ADR 010");
+        Write(root, Path.Combine("docs", "Runtime", "CLI.md"), "# CLI");
         Write(root, Path.Combine("ontology", "tbox", "extend0.owl"), """
             <rdf:RDF
                 xmlns="https://extend0.se777en.fyi/ns#"
