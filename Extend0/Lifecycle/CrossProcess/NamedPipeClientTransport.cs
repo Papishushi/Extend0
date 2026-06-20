@@ -89,8 +89,13 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <para><b>Linux/macOS:</b> Remote server names are not supported; named pipes are local only and
         /// <paramref name="serverName"/> is ignored.</para>
         /// </remarks>
-        public NamedPipeClientTransport(string serverName, string pipeName, int timeoutMs)
+        public NamedPipeClientTransport(
+            string serverName,
+            string pipeName,
+            int timeoutMs,
+            CrossProcessProtocolDescriptor? protocol = null)
         {
+            var expectedProtocol = protocol ?? NamedPipeTransportProtocol.Descriptor;
             _pipe = new NamedPipeClientStream(serverName, pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             _pipe.Connect(timeoutMs);
 
@@ -105,7 +110,7 @@ namespace Extend0.Lifecycle.CrossProcess
             if (serverHello is null)
                 throw new IOException("Invalid server handshake: missing greeting.");
 
-            if (!CrossProcessHandshake.TryValidateHelloLine(serverHello, NamedPipeTransportProtocol.Descriptor, out var handshakeError))
+            if (!CrossProcessHandshake.TryValidateHelloLine(serverHello, expectedProtocol, out var handshakeError))
                 throw new IOException($"Invalid server handshake: {handshakeError}");
         }
 

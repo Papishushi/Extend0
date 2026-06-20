@@ -24,7 +24,7 @@ This page is for contributors deciding where a concept, fix, or new capability b
 
 ## Current Known Gaps
 
-- the architecture treats transport as abstract, while the runtime still centers on named pipes
+- the architecture treats transport as abstract, while endpoint discovery and coordination are still explicit for non-default transports
 - the README and public examples must stay aligned with the actual public MetaDB access surface
 - the ontology should remain stricter than demos when deciding what is core domain
 
@@ -33,3 +33,4 @@ This page is for contributors deciding where a concept, fix, or new capability b
 - [ADR 1-003](../ADR/1-003-ARCHITECTURE-ADR-MODEL-EXTEND0-AS-A-PLATFORM-OF-COOPERATING-SYSTEMS.md)
 - [ADR 1-004](../ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md)
 - [ADR 1-005](../ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)
+- [ADR 1-012](../ADR/1-012-LIFECYCLE-ADR-ADOPT-BUILT-IN-TRANSPORT-PLUGIN-MODEL-AND-TCP-SOCKET.md)

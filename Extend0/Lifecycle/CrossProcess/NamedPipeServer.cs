@@ -55,6 +55,7 @@ namespace Extend0.Lifecycle.CrossProcess
         private readonly Task _loopTask;
         private bool _disposed;
         private readonly ILogger<NamedPipeServer> _logger;
+        private readonly CrossProcessProtocolDescriptor _protocol;
 
         /// <summary>
         /// Creates and starts a named-pipe JSON-RPC server bound to <paramref name="pipeName"/>.
@@ -65,11 +66,17 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <param name="logger">Logger used by the server.</param>
         /// <param name="ct">External cancellation token. When signaled, the server stops.</param>
         /// <exception cref="ArgumentNullException"><paramref name="pipeName"/> or <paramref name="impl"/> is <c>null</c>.</exception>
-        public NamedPipeServer(string pipeName, object impl, ILogger<NamedPipeServer> logger, CancellationToken ct)
+        public NamedPipeServer(
+            string pipeName,
+            object impl,
+            ILogger<NamedPipeServer> logger,
+            CancellationToken ct,
+            CrossProcessProtocolDescriptor? protocol = null)
         {
             _logger   = logger  ?? throw new ArgumentNullException(nameof(logger));
             _pipeName = pipeName ?? throw new ArgumentNullException(nameof(pipeName));
             _impl     = impl     ?? throw new ArgumentNullException(nameof(impl));
+            _protocol = protocol ?? NamedPipeTransportProtocol.Descriptor;
 
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _loopTask = AcceptLoopAsync();
@@ -205,8 +212,8 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A task that completes when the handshake line has been written.
         /// </returns>
-        private static Task SendHandshakeAsync(StreamWriter writer) =>
-            writer.WriteLineAsync(CrossProcessHandshake.BuildHelloLine(NamedPipeTransportProtocol.Descriptor));
+        private Task SendHandshakeAsync(StreamWriter writer) =>
+            writer.WriteLineAsync(CrossProcessHandshake.BuildHelloLine(_protocol));
 
         /// <summary>
         /// Main NDJSON processing loop for a single client connection.

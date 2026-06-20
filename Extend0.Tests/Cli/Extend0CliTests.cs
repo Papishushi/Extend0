@@ -108,13 +108,35 @@ public sealed class Extend0CliTests
         using var error = new StringWriter();
 
         var exitCode = await Extend0Cli.RunAsync(
-            ["lifecycle", "probe", "--transport", "TcpSocket"],
+            ["lifecycle", "probe", "--transport", "WebSocket"],
             output,
             error,
             Directory.GetCurrentDirectory());
 
         Assert.Equal(1, exitCode);
         Assert.Contains("does not have a built-in protocol descriptor", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleProbe_WithTcpSocketEndpoint_ResolvesBuiltInTransport()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "probe", "--transport", "TcpSocket", "--endpoint", "127.0.0.1:43001", "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.Equal("TcpSocket", document.RootElement.GetProperty("TransportKind").GetString());
+        Assert.Equal("127.0.0.1:43001", document.RootElement.GetProperty("EndpointName").GetString());
+        Assert.Equal("extend0-jsonrpc-ndjson", document.RootElement.GetProperty("ProtocolId").GetString());
+        Assert.True(document.RootElement.GetProperty("BuiltInClientAvailable").GetBoolean());
+        Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
         Assert.Equal(string.Empty, error.ToString());
     }
 

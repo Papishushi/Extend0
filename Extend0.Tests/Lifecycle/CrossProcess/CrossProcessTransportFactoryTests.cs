@@ -15,6 +15,14 @@ public sealed class CrossProcessTransportFactoryTests
     }
 
     [Fact]
+    public void ResolveProtocolDescriptor_ReturnsBuiltInTcpSocketDescriptor()
+    {
+        var descriptor = CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.TcpSocket);
+
+        Assert.Equal(LifecycleCrossProcessHarness.TcpSocketProtocolDescriptor, descriptor);
+    }
+
+    [Fact]
     public void ResolveProtocolDescriptor_ReturnsExplicitDescriptor_WhenTransportMatches()
     {
         var descriptor = new CrossProcessProtocolDescriptor(TransportKind.Custom, "custom-rpc", 7);
@@ -60,6 +68,7 @@ public sealed class CrossProcessTransportFactoryTests
 
         Assert.Equal("explicit-endpoint", explicitEndpoint);
         Assert.Equal(LifecycleCrossProcessHarness.BuildNamedPipeEndpointName("Extend0.Test.Service"), namedPipeEndpoint);
+        Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("tcp", TransportKind.TcpSocket));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("none", TransportKind.None));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("custom", TransportKind.Custom));
     }
@@ -69,6 +78,7 @@ public sealed class CrossProcessTransportFactoryTests
     {
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.None));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.Custom));
+        Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.WebSocket));
         Assert.Throws<InvalidOperationException>(() =>
             CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.Custom, explicitProtocol: null, allowCustom: true));
     }
@@ -160,6 +170,34 @@ public sealed class CrossProcessTransportFactoryTests
                 2000));
 
         Assert.Equal(TransportKind.NamedPipe, transport.Kind);
+    }
+
+    [Fact]
+    public async Task CreateClientTransport_CanConnect_ToBuiltInTcpSocketTransport()
+    {
+        var service = new LifecycleCrossProcessHarness.TestCrossProcessService();
+        using var cts = new CancellationTokenSource();
+        var endpointName = AllocateLoopbackEndpoint();
+        await using var server = LifecycleCrossProcessHarness.CreateTcpSocketServer(endpointName, service, cts.Token);
+
+        using var transport = LifecycleCrossProcessHarness.CreateBuiltInClientTransport(
+            new ClientTransportFactoryContext(
+                TransportKind.TcpSocket,
+                LifecycleCrossProcessHarness.TcpSocketProtocolDescriptor,
+                endpointName,
+                ".",
+                2000));
+
+        Assert.Equal(TransportKind.TcpSocket, transport.Kind);
+    }
+
+    private static string AllocateLoopbackEndpoint()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return $"127.0.0.1:{port}";
     }
 
     private sealed class FakeClientTransport(TransportKind kind) : IClientTransport

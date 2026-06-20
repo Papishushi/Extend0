@@ -13,6 +13,8 @@ public static class LifecycleCrossProcessHarness
 
     public static CrossProcessProtocolDescriptor NamedPipeProtocolDescriptor => NamedPipeTransportProtocol.Descriptor;
 
+    public static CrossProcessProtocolDescriptor TcpSocketProtocolDescriptor => TcpSocketTransportProtocol.Descriptor;
+
     public static string BuildHelloLine(CrossProcessProtocolDescriptor descriptor) =>
         CrossProcessHandshake.BuildHelloLine(descriptor);
 
@@ -24,6 +26,9 @@ public static class LifecycleCrossProcessHarness
 
     public static ICrossProcessServerHost CreateNamedPipeServer(string endpointName, object implementation, CancellationToken ct) =>
         new NamedPipeServer(endpointName, implementation, NullLogger<NamedPipeServer>.Instance, ct);
+
+    public static ICrossProcessServerHost CreateTcpSocketServer(string endpointName, object implementation, CancellationToken ct) =>
+        new TcpSocketServer(endpointName, implementation, NullLogger<TcpSocketServer>.Instance, ct);
 
     public static Task StopNamedPipeServerAsync(ICrossProcessServerHost host) =>
         host is NamedPipeServer server

@@ -57,6 +57,11 @@ By default, the probe is non-mutating: it does not acquire ownership and does no
 
 Use `--connect` only when an owner is expected to be reachable and a real client connection plus handshake should be tested.
 
+Built-in lifecycle probe transports currently include:
+
+- `NamedPipe`, with endpoint derived from service identity when omitted
+- `TcpSocket`, with explicit `--endpoint <host:port>` required
+
 ### `extend0 metadb inspect`
 
 Reads a `TableSpec` and prints schema/storage shape.

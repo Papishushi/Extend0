@@ -13,7 +13,7 @@ Accepted
 ADR 1-000 and ADR 1-003 establish the major `1` reading of Extend0 as a platform of cooperating systems. The repository, however, still contains visible mismatches between that architectural story and the public-facing implementation story:
 
 - `README.md` has historically described Extend0 too narrowly
-- `Lifecycle` is architecturally transport-oriented, but the current runtime remains strongly shaped by named pipes
+- `Lifecycle` is architecturally transport-oriented, but endpoint discovery and coordination policy still need hardening beyond the default transport
 - `MetaDB` is conceptually first-class, but past examples have documented the wrong public entry surface
 - ontology is intended to mirror the platform truth, but it must stay stricter than demos when deciding what belongs in the core model
 
@@ -44,7 +44,7 @@ This means the immediate goal is to make Extend0 legible, internally consistent,
 
 - normalize the language of service identity, access surface, ownership, roles, and resolution modes
 - preserve transport abstraction as a real architectural axis
-- track and plan cleanup of named-pipe-centered wording and implementation bias without pretending the work is already done
+- track and plan cleanup of transport-specific wording and endpoint-discovery gaps without pretending the work is already done
 
 ### 3. MetaDB Hardening
 
@@ -65,7 +65,7 @@ The following directions remain valid for major `1`, but they are not the immedi
 - deeper `UByteC` integration
 - a native ontology subsystem inside Extend0
 - MetaDB-backed semantic or coordination workflows
-- alternative transports beyond named pipes
+- additional transports beyond the current `NamedPipe` and `TcpSocket` built-ins
 - cross-service ontology-backed interoperability
 
 ## Tracked Inconsistencies
@@ -73,7 +73,7 @@ The following directions remain valid for major `1`, but they are not the immedi
 The current phase explicitly tracks these mismatches as architecture work:
 
 - `README` versus the platform story accepted in ADRs
-- transport abstraction versus named-pipe-centered implementation language
+- transport abstraction versus remaining transport-specific implementation language and endpoint-discovery gaps
 - MetaDB public API truth versus older documentation examples
 - demo-driven concepts versus ontology core concepts
 
@@ -89,4 +89,5 @@ The current phase explicitly tracks these mismatches as architecture work:
 - ADR 1-000 defines the major `1` governance and platform baseline
 - ADR 1-003 defines the system-of-systems reading
 - ADR 1-004 and ADR 1-005 define the current first-class runtime systems
+- ADR 1-012 defines the built-in Lifecycle transport plugin model and TCP socket transport
 - this ADR defines the current execution direction for how those decisions should be implemented and documented
