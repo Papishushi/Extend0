@@ -24,7 +24,7 @@ This direction is aligned with the wider `UByteC` ecosystem, but Extend0 is not 
 
 The architecture is ahead of the implementation in a few visible places, and this repository now treats those gaps explicitly instead of hiding them:
 
-- `Lifecycle` is architected around transport abstraction. The current built-in cross-process transports are named pipes and TCP sockets.
+- `Lifecycle` is architected around transport abstraction. The current built-in cross-process transports are named pipes, Unix domain sockets, and TCP sockets.
 - `MetaDB` is a first-class system, but the public access story is centered on `MetaDBManagerSingleton` and RPC-safe contracts rather than direct public construction of the internal `MetaDBManager`.
 - ontology is already part of the architecture contract, but the operational ontology subsystem is still in its foundation phase.
 - `UByteC` is a strategic ecosystem direction, not yet the implementation center of the next milestone.
@@ -62,6 +62,7 @@ dotnet run --project Extend0.Cli -- doctor --json
 dotnet run --project Extend0.Cli -- doctor --repo <path-to-extend0>
 dotnet run --project Extend0.Cli -- lifecycle probe
 dotnet run --project Extend0.Cli -- lifecycle probe --name Extend0.Metadata.MetaDB --transport NamedPipe
+dotnet run --project Extend0.Cli -- lifecycle probe --transport UnixDomainSocket
 dotnet run --project Extend0.Cli -- lifecycle probe --transport TcpSocket --endpoint 127.0.0.1:43001
 dotnet run --project Extend0.Cli -- lifecycle probe --name Extend0.Metadata.MetaDB --json
 dotnet run --project Extend0.Cli -- metadb inspect <path-to-table-or-spec>
@@ -121,7 +122,7 @@ The important semantic rule is that consumers use a stable access surface while 
 - `SingletonMode.CrossProcess` resolves directly for the owner process and through a proxy for client processes.
 - the same access surface is preserved across those cases even though the resolution mode changes
 
-Named pipes remain the default built-in transport, and TCP sockets are also available as a built-in transport when callers provide an explicit `host:port` endpoint. The architecture treats transport as an abstraction rather than as the permanent center of the system.
+Named pipes remain the default built-in transport. Unix domain sockets are available as a local socket-path transport, and TCP sockets are available when callers provide an explicit `host:port` endpoint. The architecture treats transport as an abstraction rather than as the permanent center of the system.
 
 ### Lifecycle quickstart
 

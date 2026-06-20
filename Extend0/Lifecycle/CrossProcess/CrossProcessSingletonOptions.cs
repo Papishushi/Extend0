@@ -37,9 +37,11 @@
 
         /// <summary>
         /// Selects the transport kind used when <see cref="Mode"/> is <see cref="SingletonMode.CrossProcess"/>.
-        /// The current built-in implementation supports <see cref="CrossProcess.TransportKind.NamedPipe"/> and
+        /// The current built-in implementation supports <see cref="CrossProcess.TransportKind.NamedPipe"/>,
+        /// <see cref="CrossProcess.TransportKind.UnixDomainSocket"/>, and
         /// <see cref="CrossProcess.TransportKind.TcpSocket"/>. TCP requires an explicit
-        /// <see cref="CrossProcessEndpointName"/> in host:port form. Other values require compatible custom
+        /// <see cref="CrossProcessEndpointName"/> in host:port form; Unix domain sockets derive a local socket path
+        /// from the service identity unless an explicit path is supplied. Other values require compatible custom
         /// client/server factories and an explicit protocol descriptor; unsupported built-in selection fails explicitly.
         /// </summary>
         public TransportKind TransportKind { get; init; } = TransportKind.NamedPipe;

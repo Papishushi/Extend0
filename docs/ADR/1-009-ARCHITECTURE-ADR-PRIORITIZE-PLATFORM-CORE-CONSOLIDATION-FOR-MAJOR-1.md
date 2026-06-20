@@ -65,7 +65,7 @@ The following directions remain valid for major `1`, but they are not the immedi
 - deeper `UByteC` integration
 - a native ontology subsystem inside Extend0
 - MetaDB-backed semantic or coordination workflows
-- additional transports beyond the current `NamedPipe` and `TcpSocket` built-ins
+- additional transports beyond the current `NamedPipe`, `UnixDomainSocket`, and `TcpSocket` built-ins
 - cross-service ontology-backed interoperability
 
 ## Tracked Inconsistencies
@@ -90,4 +90,5 @@ The current phase explicitly tracks these mismatches as architecture work:
 - ADR 1-003 defines the system-of-systems reading
 - ADR 1-004 and ADR 1-005 define the current first-class runtime systems
 - ADR 1-012 defines the built-in Lifecycle transport plugin model and TCP socket transport
+- ADR 1-013 adds Unix domain sockets as a local built-in transport under the same protocol descriptor model
 - this ADR defines the current execution direction for how those decisions should be implemented and documented

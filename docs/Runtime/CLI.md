@@ -60,6 +60,7 @@ Use `--connect` only when an owner is expected to be reachable and a real client
 Built-in lifecycle probe transports currently include:
 
 - `NamedPipe`, with endpoint derived from service identity when omitted
+- `UnixDomainSocket`, with local socket path derived from service identity when omitted
 - `TcpSocket`, with explicit `--endpoint <host:port>` required
 
 ### `extend0 metadb inspect`
@@ -191,5 +192,6 @@ The CLI is not currently:
 - [ADR 1-011](../ADR/1-011-METADB-ADR-ADOPT-SCHEMA-VERSIONING-MIGRATIONS-AND-SNAPSHOTS.md)
 - [ADR 1-009](../ADR/1-009-ARCHITECTURE-ADR-PRIORITIZE-PLATFORM-CORE-CONSOLIDATION-FOR-MAJOR-1.md)
 - [ADR 1-004](../ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md)
+- [ADR 1-013](../ADR/1-013-LIFECYCLE-ADR-ADOPT-UNIX-DOMAIN-SOCKET-BUILT-IN-TRANSPORT.md)
 - [ADR 1-005](../ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)
 - [ADR 1-002](../ADR/1-002-EXTEND0-ADR-ADOPT-ONTOLOGY-AS-DOMAIN-SOURCE-OF-TRUTH.md)

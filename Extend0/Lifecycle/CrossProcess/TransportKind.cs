@@ -18,7 +18,7 @@ namespace Extend0.Lifecycle.CrossProcess
         AnonymousPipe = 2,
 
         /// <summary>
-        /// Unix domain sockets for local machine IPC on Unix-like systems.
+        /// Unix domain sockets for local machine IPC on platforms that support them.
         /// </summary>
         UnixDomainSocket = 3,
 

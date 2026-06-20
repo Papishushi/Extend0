@@ -141,6 +141,28 @@ public sealed class Extend0CliTests
     }
 
     [Fact]
+    public async Task LifecycleProbe_WithUnixDomainSocket_ResolvesBuiltInTransport()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "probe", "--transport", "UnixDomainSocket", "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.Equal("UnixDomainSocket", document.RootElement.GetProperty("TransportKind").GetString());
+        Assert.EndsWith(".sock", document.RootElement.GetProperty("EndpointName").GetString(), StringComparison.Ordinal);
+        Assert.Equal("extend0-jsonrpc-ndjson", document.RootElement.GetProperty("ProtocolId").GetString());
+        Assert.True(document.RootElement.GetProperty("BuiltInClientAvailable").GetBoolean());
+        Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
     public async Task LifecycleProbe_WithLiveNamedPipeOwner_ConnectsAndValidatesHandshake()
     {
         var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-probe-{Guid.NewGuid():N}");

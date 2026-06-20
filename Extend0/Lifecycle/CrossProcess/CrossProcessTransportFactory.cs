@@ -37,6 +37,7 @@ namespace Extend0.Lifecycle.CrossProcess
             return transportKind switch
             {
                 TransportKind.NamedPipe => NamedPipeTransportProtocol.Descriptor,
+                TransportKind.UnixDomainSocket => UnixDomainSocketTransportProtocol.Descriptor,
                 TransportKind.TcpSocket => TcpSocketTransportProtocol.Descriptor,
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot be used for cross-process singleton orchestration."),
                 _ when allowCustom => throw new InvalidOperationException(
@@ -69,6 +70,7 @@ namespace Extend0.Lifecycle.CrossProcess
             return transportKind switch
             {
                 TransportKind.NamedPipe => CrossProcessUtils.BuildPipeName(baseName),
+                TransportKind.UnixDomainSocket => UnixDomainSocketEndpointName.BuildPath(baseName),
                 TransportKind.TcpSocket => throw new NotSupportedException("Transport kind 'TcpSocket' requires an explicit endpoint name in host:port form."),
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot be used for cross-process singleton orchestration."),
                 _ when allowLogicalFallback => baseName,
@@ -96,6 +98,7 @@ namespace Extend0.Lifecycle.CrossProcess
             return context.TransportKind switch
             {
                 TransportKind.NamedPipe => new NamedPipeClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol),
+                TransportKind.UnixDomainSocket => new UnixDomainSocketClientTransport(context.EndpointName, context.ConnectTimeoutMs, context.Protocol),
                 TransportKind.TcpSocket => new TcpSocketClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol),
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot create a client transport."),
                 _ => throw new NotSupportedException($"Transport kind '{context.TransportKind}' is not yet implemented for cross-process client transport creation.")
@@ -124,6 +127,12 @@ namespace Extend0.Lifecycle.CrossProcess
                     context.EndpointName,
                     context.Implementation,
                     context.LoggerFactory?.CreateLogger<NamedPipeServer>() ?? NullLogger<NamedPipeServer>.Instance,
+                    context.CancellationToken,
+                    context.Protocol),
+                TransportKind.UnixDomainSocket => new UnixDomainSocketServer(
+                    context.EndpointName,
+                    context.Implementation,
+                    context.LoggerFactory?.CreateLogger<UnixDomainSocketServer>() ?? NullLogger<UnixDomainSocketServer>.Instance,
                     context.CancellationToken,
                     context.Protocol),
                 TransportKind.TcpSocket => new TcpSocketServer(

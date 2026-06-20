@@ -23,6 +23,14 @@ public sealed class CrossProcessTransportFactoryTests
     }
 
     [Fact]
+    public void ResolveProtocolDescriptor_ReturnsBuiltInUnixDomainSocketDescriptor()
+    {
+        var descriptor = CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.UnixDomainSocket);
+
+        Assert.Equal(LifecycleCrossProcessHarness.UnixDomainSocketProtocolDescriptor, descriptor);
+    }
+
+    [Fact]
     public void ResolveProtocolDescriptor_ReturnsExplicitDescriptor_WhenTransportMatches()
     {
         var descriptor = new CrossProcessProtocolDescriptor(TransportKind.Custom, "custom-rpc", 7);
@@ -65,9 +73,14 @@ public sealed class CrossProcessTransportFactoryTests
         var namedPipeEndpoint = CrossProcessTransportFactory.ResolveEndpointName(
             "Extend0.Test.Service",
             TransportKind.NamedPipe);
+        var unixDomainSocketEndpoint = CrossProcessTransportFactory.ResolveEndpointName(
+            "Extend0.Test.Service",
+            TransportKind.UnixDomainSocket);
 
         Assert.Equal("explicit-endpoint", explicitEndpoint);
         Assert.Equal(LifecycleCrossProcessHarness.BuildNamedPipeEndpointName("Extend0.Test.Service"), namedPipeEndpoint);
+        Assert.Equal(LifecycleCrossProcessHarness.BuildUnixDomainSocketEndpointName("Extend0.Test.Service"), unixDomainSocketEndpoint);
+        Assert.EndsWith(".sock", unixDomainSocketEndpoint, StringComparison.Ordinal);
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("tcp", TransportKind.TcpSocket));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("none", TransportKind.None));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("custom", TransportKind.Custom));
@@ -191,6 +204,28 @@ public sealed class CrossProcessTransportFactoryTests
         Assert.Equal(TransportKind.TcpSocket, transport.Kind);
     }
 
+    [Fact]
+    public async Task CreateClientTransport_CanConnect_ToBuiltInUnixDomainSocketTransport()
+    {
+        if (!IsUnixDomainSocketSupported())
+            return;
+
+        var service = new LifecycleCrossProcessHarness.TestCrossProcessService();
+        using var cts = new CancellationTokenSource();
+        var endpointName = AllocateUnixDomainSocketEndpoint();
+        await using var server = LifecycleCrossProcessHarness.CreateUnixDomainSocketServer(endpointName, service, cts.Token);
+
+        using var transport = LifecycleCrossProcessHarness.CreateBuiltInClientTransport(
+            new ClientTransportFactoryContext(
+                TransportKind.UnixDomainSocket,
+                LifecycleCrossProcessHarness.UnixDomainSocketProtocolDescriptor,
+                endpointName,
+                ".",
+                2000));
+
+        Assert.Equal(TransportKind.UnixDomainSocket, transport.Kind);
+    }
+
     private static string AllocateLoopbackEndpoint()
     {
         var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -198,6 +233,35 @@ public sealed class CrossProcessTransportFactoryTests
         var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return $"127.0.0.1:{port}";
+    }
+
+    private static string AllocateUnixDomainSocketEndpoint()
+    {
+        var endpoint = Path.Combine(Path.GetTempPath(), $"extend0-uds-test-{Guid.NewGuid():N}.sock");
+        if (File.Exists(endpoint))
+            File.Delete(endpoint);
+
+        return endpoint;
+    }
+
+    private static bool IsUnixDomainSocketSupported()
+    {
+        try
+        {
+            using var socket = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.Unix,
+                System.Net.Sockets.SocketType.Stream,
+                System.Net.Sockets.ProtocolType.Unspecified);
+            return true;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            return false;
+        }
     }
 
     private sealed class FakeClientTransport(TransportKind kind) : IClientTransport

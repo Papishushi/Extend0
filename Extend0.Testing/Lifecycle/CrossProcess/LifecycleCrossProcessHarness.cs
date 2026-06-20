@@ -13,6 +13,8 @@ public static class LifecycleCrossProcessHarness
 
     public static CrossProcessProtocolDescriptor NamedPipeProtocolDescriptor => NamedPipeTransportProtocol.Descriptor;
 
+    public static CrossProcessProtocolDescriptor UnixDomainSocketProtocolDescriptor => UnixDomainSocketTransportProtocol.Descriptor;
+
     public static CrossProcessProtocolDescriptor TcpSocketProtocolDescriptor => TcpSocketTransportProtocol.Descriptor;
 
     public static string BuildHelloLine(CrossProcessProtocolDescriptor descriptor) =>
@@ -27,6 +29,9 @@ public static class LifecycleCrossProcessHarness
     public static ICrossProcessServerHost CreateNamedPipeServer(string endpointName, object implementation, CancellationToken ct) =>
         new NamedPipeServer(endpointName, implementation, NullLogger<NamedPipeServer>.Instance, ct);
 
+    public static ICrossProcessServerHost CreateUnixDomainSocketServer(string endpointName, object implementation, CancellationToken ct) =>
+        new UnixDomainSocketServer(endpointName, implementation, NullLogger<UnixDomainSocketServer>.Instance, ct);
+
     public static ICrossProcessServerHost CreateTcpSocketServer(string endpointName, object implementation, CancellationToken ct) =>
         new TcpSocketServer(endpointName, implementation, NullLogger<TcpSocketServer>.Instance, ct);
 
@@ -37,6 +42,9 @@ public static class LifecycleCrossProcessHarness
 
     public static string BuildNamedPipeEndpointName(string logicalName) =>
         CrossProcessUtils.BuildPipeName(logicalName);
+
+    public static string BuildUnixDomainSocketEndpointName(string logicalName) =>
+        UnixDomainSocketEndpointName.BuildPath(logicalName);
 
     public static IClientTransport CreateBuiltInClientTransport(ClientTransportFactoryContext context) =>
         CrossProcessTransportFactory.CreateClientTransport(context);

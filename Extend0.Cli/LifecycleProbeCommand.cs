@@ -63,7 +63,10 @@ public static class LifecycleProbeCommand
 
         CrossProcessProtocolDescriptor? protocol = null;
         string? endpointName = null;
-        var builtInClientAvailable = options.TransportKind is TransportKind.NamedPipe or TransportKind.TcpSocket;
+        var builtInClientAvailable = options.TransportKind is
+            TransportKind.NamedPipe or
+            TransportKind.UnixDomainSocket or
+            TransportKind.TcpSocket;
         bool? connected = null;
         string? connectError = null;
 
@@ -187,8 +190,8 @@ public static class LifecycleProbeCommand
         writer.WriteLine();
         writer.WriteLine("Options:");
         writer.WriteLine("  --name <identity>          Logical lifecycle service identity. Defaults to Extend0.Lifecycle.Probe.");
-        writer.WriteLine("  --transport <kind>         TransportKind value. Built-ins: NamedPipe, TcpSocket. Defaults to NamedPipe.");
-        writer.WriteLine("  --endpoint <name>          Explicit endpoint override. TcpSocket requires host:port.");
+        writer.WriteLine("  --transport <kind>         TransportKind value. Built-ins: NamedPipe, UnixDomainSocket, TcpSocket. Defaults to NamedPipe.");
+        writer.WriteLine("  --endpoint <name>          Explicit endpoint override. TcpSocket requires host:port; UnixDomainSocket accepts a socket path.");
         writer.WriteLine("  --server <name>            Server or machine name for client probes. Defaults to '.'.");
         writer.WriteLine("  --timeout <ms>             Connection timeout in milliseconds. Defaults to 3000.");
         writer.WriteLine("  --protocol-id <id>         Explicit protocol id for custom transports.");
