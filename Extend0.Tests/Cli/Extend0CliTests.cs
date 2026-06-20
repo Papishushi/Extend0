@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Xml.Linq;
+using System.IO.Pipes;
+using System.Text;
 using Extend0.Cli;
 using Extend0.Lifecycle.CrossProcess;
 using Extend0.Metadata.Schema;
@@ -21,6 +23,7 @@ public sealed class Extend0CliTests
         Assert.Equal(0, exitCode);
         Assert.Contains("extend0 doctor", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 lifecycle probe", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 lifecycle diagnose", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb validate", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb schema", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb snapshot", output.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -186,6 +189,91 @@ public sealed class Extend0CliTests
         Assert.True(document.RootElement.GetProperty("Connected").GetBoolean());
         Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
         Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleDiagnose_WithLiveNamedPipeOwner_ReportsOwnerHandshakeAndHeartbeat()
+    {
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-diagnose-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new CliProbeService(endpointName),
+            CancellationToken.None);
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "diagnose", "--endpoint", endpointName, "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var root = document.RootElement;
+        Assert.Equal(0, exitCode);
+        Assert.Equal("OwnerObserved", root.GetProperty("OwnerStatus").GetString());
+        Assert.Equal("Passed", root.GetProperty("HandshakeStatus").GetString());
+        Assert.Equal("Alive", root.GetProperty("HeartbeatStatus").GetString());
+        Assert.Equal("ImpliedByOwnerObservation", root.GetProperty("LeaseStatus").GetString());
+        Assert.True(root.GetProperty("OwnerReachable").GetBoolean());
+        Assert.True(root.GetProperty("OwnerReportedCanConnect").GetBoolean());
+        Assert.Equal(endpointName, root.GetProperty("Owner").GetProperty("EndpointName").GetString());
+        Assert.Equal(0, root.GetProperty("ErrorCount").GetInt32());
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleDiagnose_WhenNoOwnerIsReachable_ReturnsFailureReport()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-diagnose-missing-{Guid.NewGuid():N}");
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "diagnose", "--endpoint", endpointName, "--timeout", "100", "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var root = document.RootElement;
+        Assert.Equal(1, exitCode);
+        Assert.Equal("NoReachableOwner", root.GetProperty("OwnerStatus").GetString());
+        Assert.False(root.GetProperty("OwnerReachable").GetBoolean());
+        Assert.True(root.GetProperty("ErrorCount").GetInt32() > 0);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleDiagnose_WhenHandshakeFails_ReturnsHandshakeFailure()
+    {
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-diagnose-bad-handshake-{Guid.NewGuid():N}");
+        var serverTask = RunRawNamedPipeHandshakeServerAsync(
+            endpointName,
+            static async server =>
+            {
+                using var writer = new StreamWriter(server, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+                await writer.WriteLineAsync("HELLO fp=bad tk=TcpSocket proto=extend0-jsonrpc-ndjson ver=1");
+            });
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "diagnose", "--endpoint", endpointName, "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var root = document.RootElement;
+        Assert.Equal(1, exitCode);
+        Assert.Equal("Failed", root.GetProperty("HandshakeStatus").GetString());
+        Assert.Contains("handshake", root.GetProperty("HandshakeError").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.True(root.GetProperty("ErrorCount").GetInt32() > 0);
+        Assert.Equal(string.Empty, error.ToString());
+        await serverTask;
     }
 
     [Fact]
@@ -933,6 +1021,20 @@ public sealed class Extend0CliTests
 
         return root;
     }
+
+    private static Task RunRawNamedPipeHandshakeServerAsync(string pipeName, Func<NamedPipeServerStream, Task> handler) =>
+        Task.Run(async () =>
+        {
+            await using var server = new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous);
+
+            await server.WaitForConnectionAsync();
+            await handler(server);
+        });
 
     private static string CreateTempDirectory()
     {

@@ -52,7 +52,7 @@ The main package is available through NuGet and repository releases remain usefu
 
 ## CLI
 
-`Extend0.Cli` is the command-line entry point for repository and platform diagnostics. It currently provides repo diagnostics, lifecycle probing, MetaDB inspection/validation, and ontology inspection/validation commands that are useful for humans and automation.
+`Extend0.Cli` is the command-line entry point for repository and platform diagnostics. It currently provides repo diagnostics, lifecycle probing/diagnosis, MetaDB inspection/validation, and ontology inspection/validation commands that are useful for humans and automation.
 
 Run from source during development:
 
@@ -65,6 +65,7 @@ dotnet run --project Extend0.Cli -- lifecycle probe --name Extend0.Metadata.Meta
 dotnet run --project Extend0.Cli -- lifecycle probe --transport UnixDomainSocket
 dotnet run --project Extend0.Cli -- lifecycle probe --transport TcpSocket --endpoint 127.0.0.1:43001
 dotnet run --project Extend0.Cli -- lifecycle probe --name Extend0.Metadata.MetaDB --json
+dotnet run --project Extend0.Cli -- lifecycle diagnose --name Extend0.Metadata.MetaDB --transport NamedPipe --json
 dotnet run --project Extend0.Cli -- metadb inspect <path-to-table-or-spec>
 dotnet run --project Extend0.Cli -- metadb inspect <path-to-table-or-spec> --json
 dotnet run --project Extend0.Cli -- metadb validate <path-to-table-or-spec>
@@ -78,7 +79,7 @@ dotnet run --project Extend0.Cli -- ontology validate
 dotnet run --project Extend0.Cli -- ontology validate --json
 ```
 
-Use `lifecycle probe --connect` when an owner process is expected to be reachable and you want the probe to test the client transport and handshake.
+Use `lifecycle probe --connect` when an owner process is expected to be reachable and you want the probe to test only the client transport and handshake. Use `lifecycle diagnose` when you need the operational picture: owner process identity, resolved endpoint, transport, handshake status, owner-reported connectivity, lease exposure status, and heartbeat liveness.
 
 Pack and install as a dotnet tool when testing the distributable command:
 
@@ -90,7 +91,7 @@ extend0 --help
 
 If the tool is already installed, use `dotnet tool update --global Extend0.Cli --add-source Extend0.Cli/bin/Release`.
 
-The CLI is intentionally repo-first in this phase. Future commands should hang from the same entry point, for example richer transport diagnostics, executable MetaDB migration runners, and SPARQL-backed `ontology query`.
+The CLI is intentionally repo-first in this phase. Future commands should hang from the same entry point, for example executable MetaDB migration runners and SPARQL-backed `ontology query`.
 
 ### Target framework
 

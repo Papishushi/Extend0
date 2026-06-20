@@ -20,7 +20,7 @@ This page is for:
 It does not replace the library API. It provides a command-line way to inspect and validate the contracts that make the platform legible:
 
 - repository shape and docs/ADR/ontology presence
-- lifecycle transport, endpoint, protocol, and connectivity behavior
+- lifecycle transport, endpoint, protocol, owner, connectivity, and heartbeat behavior
 - MetaDB `TableSpec`, sidecar, storage, and runtime materialization health
 - ontology structure, namespaces, scaffolds, and core semantic relationships
 
@@ -62,6 +62,24 @@ Built-in lifecycle probe transports currently include:
 - `NamedPipe`, with endpoint derived from service identity when omitted
 - `UnixDomainSocket`, with local socket path derived from service identity when omitted
 - `TcpSocket`, with explicit `--endpoint <host:port>` required
+
+### `extend0 lifecycle diagnose`
+
+Connects to a Lifecycle owner and reports operational state:
+
+- logical service identity
+- transport kind and endpoint
+- protocol id and version
+- whether a compatible owner is reachable
+- handshake status and handshake failure details
+- owner service info, including machine, process, implementation, fingerprint, and reported endpoint
+- heartbeat status, timestamp, uptime, fingerprint, and observed age
+- owner-reported endpoint connectivity probe result
+- lease status
+
+`diagnose` attempts a real connection by default. It does not start an owner process and does not acquire ownership.
+
+Current lease reporting is intentionally conservative: Lifecycle ownership is observable through the reachable owner and underlying coordination, but no standalone lease record is exposed by the runtime yet. The command reports that as `NotExposed` or `ImpliedByOwnerObservation` instead of inventing lease state.
 
 ### `extend0 metadb inspect`
 
@@ -193,5 +211,6 @@ The CLI is not currently:
 - [ADR 1-009](../ADR/1-009-ARCHITECTURE-ADR-PRIORITIZE-PLATFORM-CORE-CONSOLIDATION-FOR-MAJOR-1.md)
 - [ADR 1-004](../ADR/1-004-LIFECYCLE-ADR-ADOPT-LIFECYCLE-AS-SERVICE-IDENTITY-AND-UNIQUE-ACCESS-SYSTEM.md)
 - [ADR 1-013](../ADR/1-013-LIFECYCLE-ADR-ADOPT-UNIX-DOMAIN-SOCKET-BUILT-IN-TRANSPORT.md)
+- [ADR 1-014](../ADR/1-014-LIFECYCLE-ADR-ADOPT-LIFECYCLE-DIAGNOSTICS-COMMAND.md)
 - [ADR 1-005](../ADR/1-005-METADB-ADR-ADOPT-METADB-AS-STRUCTURED-METADATA-SYSTEM.md)
 - [ADR 1-002](../ADR/1-002-EXTEND0-ADR-ADOPT-ONTOLOGY-AS-DOMAIN-SOURCE-OF-TRUTH.md)

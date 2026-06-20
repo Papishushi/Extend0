@@ -34,6 +34,7 @@ This page is for contributors working on singleton behavior, ownership, transpor
 - `UnixDomainSocket` is local-only and derives a deterministic socket path from service identity unless an explicit path is supplied
 - `TcpSocket` requires an explicit `host:port` endpoint; Lifecycle does not infer TCP ports from service identity
 - all built-ins use the `extend0-jsonrpc-ndjson` protocol descriptor and shared handshake validation
+- `extend0 lifecycle diagnose` is the current CLI surface for observing owner process details, handshake status, heartbeat liveness, and lease exposure status
 - the runtime now supports custom client and owner-side server transport factories for callers that provide compatible endpoint semantics and protocol descriptors
 - the current public contract still contains pipe-centric naming in places, and that is a known cleanup target rather than accepted conceptual truth
 
@@ -51,3 +52,4 @@ This page is for contributors working on singleton behavior, ownership, transpor
 - [ADR 1-009](../ADR/1-009-ARCHITECTURE-ADR-PRIORITIZE-PLATFORM-CORE-CONSOLIDATION-FOR-MAJOR-1.md)
 - [ADR 1-012](../ADR/1-012-LIFECYCLE-ADR-ADOPT-BUILT-IN-TRANSPORT-PLUGIN-MODEL-AND-TCP-SOCKET.md)
 - [ADR 1-013](../ADR/1-013-LIFECYCLE-ADR-ADOPT-UNIX-DOMAIN-SOCKET-BUILT-IN-TRANSPORT.md)
+- [ADR 1-014](../ADR/1-014-LIFECYCLE-ADR-ADOPT-LIFECYCLE-DIAGNOSTICS-COMMAND.md)

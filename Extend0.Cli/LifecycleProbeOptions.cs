@@ -23,7 +23,8 @@ internal sealed record LifecycleProbeOptions(
         string[] args,
         string workingDirectory,
         out LifecycleProbeOptions options,
-        out string error)
+        out string error,
+        string commandName = "probe")
     {
         _ = workingDirectory;
 
@@ -150,8 +151,8 @@ internal sealed record LifecycleProbeOptions(
                 default:
                     options = Create(name, transportKind, endpointName, serverName, timeoutMs, protocolId, protocolVersion, allowCustom, connect, json, showHelp);
                     error = arg.StartsWith("-", StringComparison.Ordinal)
-                        ? $"Unknown lifecycle probe option '{arg}'."
-                        : $"Unexpected lifecycle probe argument '{arg}'.";
+                        ? $"Unknown lifecycle {commandName} option '{arg}'."
+                        : $"Unexpected lifecycle {commandName} argument '{arg}'.";
                     return false;
             }
         }

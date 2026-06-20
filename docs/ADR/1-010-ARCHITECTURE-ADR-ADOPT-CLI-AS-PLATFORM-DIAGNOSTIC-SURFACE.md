@@ -16,6 +16,7 @@ The repository now has an `Extend0.Cli` project with commands that inspect and v
 
 - `extend0 doctor`
 - `extend0 lifecycle probe`
+- `extend0 lifecycle diagnose`
 - `extend0 metadb inspect`
 - `extend0 metadb validate`
 - `extend0 ontology inspect`
@@ -32,7 +33,7 @@ Extend0 adopts `Extend0.Cli` as the platform diagnostic surface for major `1`.
 The CLI is a first-class architectural surface for:
 
 - repository contract checks
-- lifecycle transport, endpoint, protocol, and connectivity probes
+- lifecycle transport, endpoint, protocol, owner, connectivity, and heartbeat diagnostics
 - MetaDB schema, sidecar, storage, and runtime-storage validation
 - ontology structure and semantic guardrail validation
 - human and automation-friendly diagnostics
@@ -64,6 +65,12 @@ The CLI contract follows these rules under major `1`:
 `lifecycle probe` resolves lifecycle identity, transport kind, endpoint name, protocol descriptor, and optional client connectivity.
 
 By default, it is non-mutating and does not acquire ownership or start an owner host.
+
+### `lifecycle diagnose`
+
+`lifecycle diagnose` connects to a resolved Lifecycle endpoint and reports owner observation, handshake status, service info, heartbeat liveness, owner-reported connectivity, and lease exposure status.
+
+It is diagnostic-only: it does not start an owner and does not acquire ownership.
 
 ### `metadb inspect`
 
@@ -116,7 +123,8 @@ This ADR does not require:
 
 - ADR 1-000 defines the major `1` governance baseline.
 - ADR 1-003 defines Extend0 as a platform of cooperating systems.
-- ADR 1-004 and ADR 1-006 govern lifecycle concepts surfaced by `lifecycle probe`.
+- ADR 1-004 and ADR 1-006 govern lifecycle concepts surfaced by `lifecycle probe` and `lifecycle diagnose`.
+- ADR 1-014 defines the owner/heartbeat-focused Lifecycle diagnostics command.
 - ADR 1-005 and ADR 1-007 govern MetaDB concepts surfaced by `metadb inspect` and `metadb validate`.
 - ADR 1-002 governs ontology artifacts checked by `ontology inspect` and `ontology validate`.
 - ADR 1-009 establishes platform-core consolidation as the current execution direction.
