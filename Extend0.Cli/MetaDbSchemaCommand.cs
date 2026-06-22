@@ -106,8 +106,8 @@ public static class MetaDbSchemaCommand
         writer.WriteLine("  extend0 metadb schema <source> <target> [--json]");
         writer.WriteLine();
         writer.WriteLine("Arguments:");
-        writer.WriteLine("  <source>  Source TableSpec, map path sidecar, or chunked table directory.");
-        writer.WriteLine("  <target>  Target TableSpec, map path sidecar, or chunked table directory.");
+        writer.WriteLine("  <source>  Source TableSpec, map path resolved via TableSpec save conventions, or chunked table directory.");
+        writer.WriteLine("  <target>  Target TableSpec, map path resolved via TableSpec save conventions, or chunked table directory.");
         writer.WriteLine();
         writer.WriteLine("Options:");
         writer.WriteLine("  --json    Emit a machine-readable JSON report.");

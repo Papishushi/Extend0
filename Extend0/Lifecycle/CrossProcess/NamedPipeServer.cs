@@ -56,6 +56,7 @@ namespace Extend0.Lifecycle.CrossProcess
         private bool _disposed;
         private readonly ILogger<NamedPipeServer> _logger;
         private readonly CrossProcessProtocolDescriptor _protocol;
+        private readonly CrossProcessAuthenticationOptions _authentication;
 
         /// <summary>
         /// Creates and starts a named-pipe JSON-RPC server bound to <paramref name="pipeName"/>.
@@ -71,12 +72,14 @@ namespace Extend0.Lifecycle.CrossProcess
             object impl,
             ILogger<NamedPipeServer> logger,
             CancellationToken ct,
-            CrossProcessProtocolDescriptor? protocol = null)
+            CrossProcessProtocolDescriptor? protocol = null,
+            CrossProcessAuthenticationOptions? authentication = null)
         {
             _logger   = logger  ?? throw new ArgumentNullException(nameof(logger));
             _pipeName = pipeName ?? throw new ArgumentNullException(nameof(pipeName));
             _impl     = impl     ?? throw new ArgumentNullException(nameof(impl));
             _protocol = protocol ?? NamedPipeTransportProtocol.Descriptor;
+            _authentication = authentication ?? CrossProcessAuthenticationOptions.None;
 
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _loopTask = AcceptLoopAsync();
@@ -179,7 +182,10 @@ namespace Extend0.Lifecycle.CrossProcess
                     AutoFlush = true
                 };
 
-                await SendHandshakeAsync(writer).ConfigureAwait(false);
+                var helloLine = await SendHandshakeAsync(writer).ConfigureAwait(false);
+                if (!await AuthenticateClientAsync(reader, writer, helloLine, token).ConfigureAwait(false))
+                    return;
+
                 await ProcessClientLoopAsync(server, reader, writer, methodsByName, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -212,8 +218,40 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <returns>
         /// A task that completes when the handshake line has been written.
         /// </returns>
-        private Task SendHandshakeAsync(StreamWriter writer) =>
-            writer.WriteLineAsync(CrossProcessHandshake.BuildHelloLine(_protocol));
+        private async Task<string> SendHandshakeAsync(StreamWriter writer)
+        {
+            var helloLine = CrossProcessHandshake.BuildHelloLine(_protocol, _authentication);
+            await writer.WriteLineAsync(helloLine).ConfigureAwait(false);
+            return helloLine;
+        }
+
+        private async Task<bool> AuthenticateClientAsync(
+            StreamReader reader,
+            StreamWriter writer,
+            string helloLine,
+            CancellationToken token)
+        {
+            if (!_authentication.RequiresHandshakeAuthentication)
+                return true;
+
+            if (!_authentication.RequiresClientProof)
+            {
+                _logger.LogWarning("Rejected cross-process client authentication for pipe {PipeName}: authentication mode {AuthenticationMode} is not supported by this transport.", _pipeName, _authentication.Mode);
+                await writer.WriteLineAsync(CrossProcessHandshake.BuildAuthenticationErrorLine()).ConfigureAwait(false);
+                return false;
+            }
+
+            var authenticationLine = await ReadRequestLineAsync(reader, token).ConfigureAwait(false);
+            if (!CrossProcessHandshake.TryValidateClientAuthenticationLine(authenticationLine, helloLine, _authentication, out var error))
+            {
+                _logger.LogWarning("Rejected cross-process client authentication for pipe {PipeName}: {Reason}", _pipeName, error);
+                await writer.WriteLineAsync(CrossProcessHandshake.BuildAuthenticationErrorLine()).ConfigureAwait(false);
+                return false;
+            }
+
+            await writer.WriteLineAsync(CrossProcessHandshake.BuildAuthenticationOkLine()).ConfigureAwait(false);
+            return true;
+        }
 
         /// <summary>
         /// Main NDJSON processing loop for a single client connection.

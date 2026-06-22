@@ -6,8 +6,8 @@ namespace Extend0.Metadata.Schema
     /// Describes the shape and basic behavior of a metadata column.
     /// </summary>
     /// <param name="Size">
-    /// Packed entry size for the column (key bits and value bytes), as produced by
-    /// <see cref="MetadataEntrySizeExtensions.PackUnchecked(int, int)"/>.
+    /// Packed entry size for the column (key bytes and value bytes), as produced by
+    /// <see cref="TableSpec.Helpers.PackColumnSize(int, int)"/>.
     /// </param>
     /// <param name="Name">
     /// Logical column name, used for lookups and diagnostics. Must be unique within a table.

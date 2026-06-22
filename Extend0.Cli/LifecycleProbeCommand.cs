@@ -66,7 +66,8 @@ public static class LifecycleProbeCommand
         var builtInClientAvailable = options.TransportKind is
             TransportKind.NamedPipe or
             TransportKind.UnixDomainSocket or
-            TransportKind.TcpSocket;
+            TransportKind.TcpSocket or
+            TransportKind.TlsTcpSocket;
         bool? connected = null;
         string? connectError = null;
 
@@ -85,11 +86,7 @@ public static class LifecycleProbeCommand
 
         try
         {
-            endpointName = CrossProcessTransportFactory.ResolveEndpointName(
-                options.Name,
-                options.TransportKind,
-                options.EndpointName,
-                allowLogicalFallback: options.AllowCustom);
+            endpointName = LifecycleEndpointResolver.ResolveEndpointName(options);
             findings.Add(ValidationFinding.Info("endpoint-resolved", $"Resolved endpoint '{endpointName}'."));
         }
         catch (Exception ex)
@@ -113,7 +110,7 @@ public static class LifecycleProbeCommand
                 try
                 {
                     using var transport = CrossProcessTransportFactory.CreateClientTransport(
-                        new ClientTransportFactoryContext(options.TransportKind, protocol, endpointName, options.ServerName, options.TimeoutMs));
+                        new ClientTransportFactoryContext(options.TransportKind, protocol, endpointName, options.ServerName, options.TimeoutMs, options.ToAuthenticationOptions(), options.ToTlsOptions()));
                     connected = true;
                     findings.Add(ValidationFinding.Info("connectivity", $"Connected through {transport.Kind}."));
                 }
@@ -122,18 +119,21 @@ public static class LifecycleProbeCommand
                     connected = false;
                     connectError = ex.Message;
                     findings.Add(ValidationFinding.Error("connectivity", $"Connection or handshake failed: {ex.Message}"));
+                    LifecycleNamedPipeDiscovery.AddContractScopedCandidateFindings(options, endpointName, findings);
                 }
             }
         }
 
         return LifecycleProbeReport.Create(
             options.Name,
+            options.ContractKind,
             options.TransportKind,
             endpointName,
             options.ServerName,
             options.TimeoutMs,
             protocol?.ProtocolId,
             protocol?.ProtocolVersion,
+            options.AuthenticationMode,
             builtInClientAvailable,
             options.Connect,
             connected,
@@ -145,11 +145,13 @@ public static class LifecycleProbeCommand
     {
         output.WriteLine("Extend0 lifecycle probe");
         output.WriteLine($"Name: {report.Name}");
+        output.WriteLine($"Contract: {report.ContractKind}");
         output.WriteLine($"Transport: {report.TransportKind}");
         output.WriteLine($"Endpoint: {report.EndpointName ?? "<unresolved>"}");
         output.WriteLine($"Server: {report.ServerName}");
         output.WriteLine($"Timeout: {report.TimeoutMs} ms");
         output.WriteLine($"Protocol: {FormatProtocol(report)}");
+        output.WriteLine($"Authentication: {report.AuthenticationMode}");
         output.WriteLine($"Built-in client transport: {(report.BuiltInClientAvailable ? "yes" : "no")}");
         output.WriteLine($"Ownership: not acquired (probe is non-mutating)");
         output.WriteLine($"Connect attempted: {(report.ConnectAttempted ? "yes" : "no")}");
@@ -186,16 +188,20 @@ public static class LifecycleProbeCommand
     private static void WriteHelp(TextWriter writer)
     {
         writer.WriteLine("Usage:");
-        writer.WriteLine("  extend0 lifecycle probe [--name <identity>] [--transport <kind>] [--endpoint <name>] [--server <name>] [--timeout <ms>] [--connect] [--json]");
+        writer.WriteLine("  extend0 lifecycle probe [--contract <kind>] [--name <identity>] [--transport <kind>] [--endpoint <name>] [--server <name>] [--timeout <ms>] [--connect] [--json]");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  --name <identity>          Logical lifecycle service identity. Defaults to Extend0.Lifecycle.Probe.");
-        writer.WriteLine("  --transport <kind>         TransportKind value. Built-ins: NamedPipe, UnixDomainSocket, TcpSocket. Defaults to NamedPipe.");
-        writer.WriteLine("  --endpoint <name>          Explicit endpoint override. TcpSocket requires host:port; UnixDomainSocket accepts a socket path.");
+        writer.WriteLine("  --contract <kind>          Contract scope. Built-ins: Probe, MetaDB. Defaults to Probe.");
+        writer.WriteLine("  --name <identity>          Logical lifecycle service identity. Defaults to Extend0.Lifecycle.Probe, or Extend0.MetaDB for --contract MetaDB.");
+        writer.WriteLine("  --transport <kind>         TransportKind value. Built-ins: NamedPipe, UnixDomainSocket, TcpSocket, TlsTcpSocket. Defaults to NamedPipe.");
+        writer.WriteLine("  --endpoint <name>          Explicit endpoint override. TcpSocket/TlsTcpSocket require host:port; UnixDomainSocket accepts a socket path.");
+        writer.WriteLine("  --tls-target-host <name>   Target host for TLS certificate validation when using TlsTcpSocket.");
         writer.WriteLine("  --server <name>            Server or machine name for client probes. Defaults to '.'.");
         writer.WriteLine("  --timeout <ms>             Connection timeout in milliseconds. Defaults to 3000.");
         writer.WriteLine("  --protocol-id <id>         Explicit protocol id for custom transports.");
         writer.WriteLine("  --protocol-version <n>     Explicit protocol version for custom transports.");
+        writer.WriteLine("  --auth <mode>              Authentication mode. Supported: none, shared-secret-hmac.");
+        writer.WriteLine("  --secret <value>           Shared secret for --auth shared-secret-hmac. The value is never printed.");
         writer.WriteLine("  --allow-custom             Allow logical endpoint fallback for non-built-in transports.");
         writer.WriteLine("  --connect                  Attempt a real client connection and handshake.");
         writer.WriteLine("  --json                     Emit a machine-readable JSON report.");
@@ -205,12 +211,14 @@ public static class LifecycleProbeCommand
 
 public sealed record LifecycleProbeReport(
     string Name,
+    LifecycleContractKind ContractKind,
     TransportKind TransportKind,
     string? EndpointName,
     string ServerName,
     int TimeoutMs,
     string? ProtocolId,
     int? ProtocolVersion,
+    AuthenticationMode AuthenticationMode,
     bool BuiltInClientAvailable,
     bool ConnectAttempted,
     bool? Connected,
@@ -222,12 +230,14 @@ public sealed record LifecycleProbeReport(
 {
     public static LifecycleProbeReport Create(
         string name,
+        LifecycleContractKind contractKind,
         TransportKind transportKind,
         string? endpointName,
         string serverName,
         int timeoutMs,
         string? protocolId,
         int? protocolVersion,
+        AuthenticationMode authenticationMode,
         bool builtInClientAvailable,
         bool connectAttempted,
         bool? connected,
@@ -235,12 +245,14 @@ public sealed record LifecycleProbeReport(
         IReadOnlyList<ValidationFinding> findings) =>
         new(
             name,
+            contractKind,
             transportKind,
             endpointName,
             serverName,
             timeoutMs,
             protocolId,
             protocolVersion,
+            authenticationMode,
             builtInClientAvailable,
             connectAttempted,
             connected,

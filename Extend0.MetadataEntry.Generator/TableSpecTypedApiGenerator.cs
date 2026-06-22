@@ -84,7 +84,7 @@ internal static class TypedTableSpecEmitter
             constructorAssignments.AppendLine(
                 $"        {column.PropertyName} = new {GetColumnType(column)}(Inner, {column.ConstantName}, {Literal(column.Name)}, {column.KeyBytes}, {column.ValueBytes});");
             specColumns.AppendLine(
-                $"            new(global::Extend0.Metadata.CodeGen.MetadataEntrySizeExtensions.PackUnchecked({column.KeyBytes}, {column.ValueBytes}), {Literal(column.Name)}, {BoolLiteral(column.ReadOnly)}, {column.InitialCapacity.ToString(CultureInfo.InvariantCulture)}u),");
+                $"            new(global::Extend0.Metadata.Schema.TableSpec.Helpers.PackColumnSize({column.KeyBytes}, {column.ValueBytes}), {Literal(column.Name)}, {BoolLiteral(column.ReadOnly)}, {column.InitialCapacity.ToString(CultureInfo.InvariantCulture)}u),");
             validationCalls.AppendLine(
                 $"        ValidateColumn(spec, {column.ConstantName}, {Literal(column.Name)}, {column.KeyBytes}, {column.ValueBytes});");
         }

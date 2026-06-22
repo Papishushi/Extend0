@@ -15,7 +15,7 @@
       Lifecycle, MetaDB, transport-mediated access, and structured metadata state. Code symbols are
       linked only as traceability hints and do not define the semantics.
     </rdfs:comment>
-    <owl:versionInfo>1.2.1</owl:versionInfo>
+    <owl:versionInfo>1.2.4</owl:versionInfo>
   </owl:Ontology>
 
   <owl:AnnotationProperty rdf:about="#mapsToCodeSymbol">
@@ -119,6 +119,20 @@
     <rdfs:subClassOf rdf:resource="#Capability"/>
     <rdfs:label xml:lang="en">Unique access capability</rdfs:label>
     <rdfs:comment xml:lang="en">A capability that enforces a single active owner or access path for a protected resource or service.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#AssuranceCapability">
+    <rdfs:subClassOf rdf:resource="#Capability"/>
+    <rdfs:label xml:lang="en">Assurance capability</rdfs:label>
+    <rdfs:comment xml:lang="en">A Lifecycle capability that evaluates evidence for cross-service guarantees such as storage protection, state continuity, and hardware attestation.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#AssuranceConcept">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Assurance concept</rdfs:label>
+    <rdfs:comment xml:lang="en">A policy, evidence artifact, level, or provider handle used by Lifecycle assurance.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#DistributedCoordinationCapability">
@@ -236,7 +250,8 @@
   <owl:Class rdf:about="#Lease">
     <rdfs:subClassOf rdf:resource="#CoordinationRecord"/>
     <rdfs:label xml:lang="en">Lease</rdfs:label>
-    <rdfs:comment xml:lang="en">A time-bounded ownership or liveness grant that can expire and be renewed.</rdfs:comment>
+    <rdfs:comment xml:lang="en">An ownership or liveness grant that may be bounded by an optional expiration and renewal model.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.Lease</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#HeartbeatSignal">
@@ -258,10 +273,57 @@
     <rdfs:comment xml:lang="en">A stable identity used to distinguish one logical service or protected access surface from another.</rdfs:comment>
   </owl:Class>
 
+  <owl:Class rdf:about="#PeerIdentity">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Peer identity</rdfs:label>
+    <rdfs:comment xml:lang="en">An identity asserted or proven by a process, service, client, or transport peer.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#AuthenticationPolicy">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Authentication policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A policy that defines how a peer proves trust before using an access surface.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.CrossProcessAuthenticationOptions</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#AuthenticationMode">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Authentication mode</rdfs:label>
+    <rdfs:comment xml:lang="en">A named mechanism by which an access surface authenticates a peer.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.AuthenticationMode</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SharedSecretHmacAuthentication">
+    <rdfs:subClassOf rdf:resource="#AuthenticationMode"/>
+    <rdfs:label xml:lang="en">Shared secret HMAC authentication</rdfs:label>
+    <rdfs:comment xml:lang="en">A challenge-response authentication mode in which a peer proves knowledge of a shared secret without sending the secret itself.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.AuthenticationMode.SharedSecretHmac</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#SignedChallengeAuthentication">
+    <rdfs:subClassOf rdf:resource="#AuthenticationMode"/>
+    <rdfs:label xml:lang="en">Signed challenge authentication</rdfs:label>
+    <rdfs:comment xml:lang="en">A challenge-response authentication mode in which a peer proves possession of a private key by signing a server challenge.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.AuthenticationMode.SignedChallenge</mapsToCodeSymbol>
+  </owl:Class>
+
   <owl:Class rdf:about="#Endpoint">
     <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
     <rdfs:label xml:lang="en">Endpoint</rdfs:label>
     <rdfs:comment xml:lang="en">A reachable endpoint through which a transport can connect to an access surface.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#TransportSecurityPolicy">
+    <rdfs:subClassOf rdf:resource="#Extend0Concept"/>
+    <rdfs:label xml:lang="en">Transport security policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A policy that defines confidentiality, integrity, and certificate expectations for a transport channel.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#TlsTransportSecurity">
+    <rdfs:subClassOf rdf:resource="#TransportSecurityPolicy"/>
+    <rdfs:label xml:lang="en">TLS transport security</rdfs:label>
+    <rdfs:comment xml:lang="en">A transport security policy based on TLS server authentication, encrypted traffic, and optional client certificates.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.CrossProcessTlsOptions</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#Transport">
@@ -304,6 +366,14 @@
     <rdfs:subClassOf rdf:resource="#RemoteCapableTransport"/>
     <rdfs:label xml:lang="en">TCP transport</rdfs:label>
     <rdfs:comment xml:lang="en">A transport based on direct TCP connectivity.</rdfs:comment>
+  </owl:Class>
+
+  <owl:Class rdf:about="#TlsTcpTransport">
+    <rdfs:subClassOf rdf:resource="#TcpTransport"/>
+    <rdfs:label xml:lang="en">TLS TCP transport</rdfs:label>
+    <rdfs:comment xml:lang="en">A TCP transport protected by TLS before the Extend0 RPC protocol handshake begins.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.TlsTcpSocketClientTransport</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Lifecycle.CrossProcess.TlsTcpSocketServer</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#SingletonAccessSurface">
@@ -541,6 +611,7 @@
     <rdfs:label xml:lang="en">Durable storage model</rdfs:label>
     <rdfs:comment xml:lang="en">A storage model intended for persisted or mapped metadata tables.</rdfs:comment>
     <mapsToCodeSymbol>Extend0.Metadata.Storage.Internal.MappedStore</mapsToCodeSymbol>
+    <mapsToCodeSymbol>Extend0.Metadata.Storage.Internal.SegmentedMappedStore</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#VolatileStorageModel">
@@ -555,6 +626,104 @@
     <rdfs:label xml:lang="en">Capacity policy</rdfs:label>
     <rdfs:comment xml:lang="en">A policy that governs how column capacity is handled when a write requires more space.</rdfs:comment>
     <mapsToCodeSymbol>Extend0.Metadata.Storage.CapacityPolicy</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageProtectionPolicy">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage protection policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A fail-closed Lifecycle assurance policy declaring the minimum evidence required before a protected path may be used by a service or table.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageProtectionPolicy</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageProtectionEvidence">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage protection evidence</rdfs:label>
+    <rdfs:comment xml:lang="en">Observed evidence about whether a path belongs to protected storage and whether it satisfies policy.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageProtectionEvidence</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageProtectionLevel">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage protection level</rdfs:label>
+    <rdfs:comment xml:lang="en">A named level of storage protection evidence such as declared, provider-attested, platform-verified, or Extend0-managed.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageProtectionLevel</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ProtectedStorageManifest">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Protected storage manifest</rdfs:label>
+    <rdfs:comment xml:lang="en">A provider or operator-owned artifact that records protected storage evidence without storing secrets or key material.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageProtectionManifest</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#ProtectedStorageHandle">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Protected storage handle</rdfs:label>
+    <rdfs:comment xml:lang="en">A verified protected storage root supplied by a provider lifecycle and used to constrain table paths.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.IProtectedStorageHandle</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageContinuityPolicy">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage continuity policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A fail-closed Lifecycle assurance policy declaring the minimum evidence required for durable service state to survive ownership movement.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageContinuityPolicy</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageContinuityEvidence">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage continuity evidence</rdfs:label>
+    <rdfs:comment xml:lang="en">Observed evidence about whether a path belongs to local-only, restorable, shared, or replicated storage suitable for owner movement.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageContinuityEvidence</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageContinuityLevel">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage continuity level</rdfs:label>
+    <rdfs:comment xml:lang="en">A named level of storage continuity evidence such as local-only, restorable snapshot, shared backing store, or symmetric replication.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageContinuityLevel</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#StorageContinuityManifest">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Storage continuity manifest</rdfs:label>
+    <rdfs:comment xml:lang="en">A provider or operator-owned artifact that records storage continuity evidence without storing secrets or replication credentials.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.StorageContinuityManifest</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#HardwareAttestationPolicy">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Hardware attestation policy</rdfs:label>
+    <rdfs:comment xml:lang="en">A fail-closed Lifecycle assurance policy declaring the minimum trusted-execution evidence required before a service opens protected state.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.HardwareAttestationPolicy</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#HardwareAttestationEvidence">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Hardware attestation evidence</rdfs:label>
+    <rdfs:comment xml:lang="en">Observed evidence about whether storage access is performed by an attested execution environment.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.HardwareAttestationEvidence</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#HardwareAttestationLevel">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Hardware attestation level</rdfs:label>
+    <rdfs:comment xml:lang="en">A named level of trusted-execution evidence such as declared, provider-attested, platform-verified, or remote-attested.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.HardwareAttestationLevel</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#HardwareAttestationTechnology">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Hardware attestation technology</rdfs:label>
+    <rdfs:comment xml:lang="en">A hardware-backed or provider-defined trusted-execution technology, such as SGX, TDX, SEV-SNP, TrustZone, CCA, or TPM-backed attestation.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.HardwareAttestationTechnology</mapsToCodeSymbol>
+  </owl:Class>
+
+  <owl:Class rdf:about="#HardwareAttestationManifest">
+    <rdfs:subClassOf rdf:resource="#AssuranceConcept"/>
+    <rdfs:label xml:lang="en">Hardware attestation manifest</rdfs:label>
+    <rdfs:comment xml:lang="en">A provider or operator-owned artifact that records trusted-execution evidence without storing raw quotes, credentials, keys, or secrets.</rdfs:comment>
+    <mapsToCodeSymbol>Extend0.Lifecycle.Assurance.HardwareAttestationManifest</mapsToCodeSymbol>
   </owl:Class>
 
   <owl:Class rdf:about="#SourceGenerator">
@@ -738,6 +907,24 @@
     <rdfs:label xml:lang="en">uses transport</rdfs:label>
   </owl:ObjectProperty>
 
+  <owl:ObjectProperty rdf:about="#usesTransportSecurity">
+    <rdfs:domain rdf:resource="#Transport"/>
+    <rdfs:range rdf:resource="#TransportSecurityPolicy"/>
+    <rdfs:label xml:lang="en">uses transport security</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#requiresAuthentication">
+    <rdfs:domain rdf:resource="#AccessSurface"/>
+    <rdfs:range rdf:resource="#AuthenticationPolicy"/>
+    <rdfs:label xml:lang="en">requires authentication</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#usesAuthenticationMode">
+    <rdfs:domain rdf:resource="#AuthenticationPolicy"/>
+    <rdfs:range rdf:resource="#AuthenticationMode"/>
+    <rdfs:label xml:lang="en">uses authentication mode</rdfs:label>
+  </owl:ObjectProperty>
+
   <owl:ObjectProperty rdf:about="#reachesEndpoint">
     <rdfs:domain rdf:resource="#Transport"/>
     <rdfs:range rdf:resource="#Endpoint"/>
@@ -887,6 +1074,66 @@
     <rdfs:domain rdf:resource="#MetaDBManager"/>
     <rdfs:range rdf:resource="#CapacityPolicy"/>
     <rdfs:label xml:lang="en">uses capacity policy</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#requiresStorageProtection">
+    <rdfs:domain rdf:resource="#TableSchema"/>
+    <rdfs:range rdf:resource="#StorageProtectionPolicy"/>
+    <rdfs:label xml:lang="en">requires storage protection</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasStorageProtectionEvidence">
+    <rdfs:domain rdf:resource="#StorageProtectionPolicy"/>
+    <rdfs:range rdf:resource="#StorageProtectionEvidence"/>
+    <rdfs:label xml:lang="en">has storage protection evidence</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasStorageProtectionLevel">
+    <rdfs:domain rdf:resource="#StorageProtectionPolicy"/>
+    <rdfs:range rdf:resource="#StorageProtectionLevel"/>
+    <rdfs:label xml:lang="en">has storage protection level</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#requiresStorageContinuity">
+    <rdfs:domain rdf:resource="#TableSchema"/>
+    <rdfs:range rdf:resource="#StorageContinuityPolicy"/>
+    <rdfs:label xml:lang="en">requires storage continuity</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasStorageContinuityEvidence">
+    <rdfs:domain rdf:resource="#StorageContinuityPolicy"/>
+    <rdfs:range rdf:resource="#StorageContinuityEvidence"/>
+    <rdfs:label xml:lang="en">has storage continuity evidence</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasStorageContinuityLevel">
+    <rdfs:domain rdf:resource="#StorageContinuityPolicy"/>
+    <rdfs:range rdf:resource="#StorageContinuityLevel"/>
+    <rdfs:label xml:lang="en">has storage continuity level</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#requiresHardwareAttestation">
+    <rdfs:domain rdf:resource="#TableSchema"/>
+    <rdfs:range rdf:resource="#HardwareAttestationPolicy"/>
+    <rdfs:label xml:lang="en">requires hardware attestation</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasHardwareAttestationEvidence">
+    <rdfs:domain rdf:resource="#HardwareAttestationPolicy"/>
+    <rdfs:range rdf:resource="#HardwareAttestationEvidence"/>
+    <rdfs:label xml:lang="en">has hardware attestation evidence</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasHardwareAttestationLevel">
+    <rdfs:domain rdf:resource="#HardwareAttestationPolicy"/>
+    <rdfs:range rdf:resource="#HardwareAttestationLevel"/>
+    <rdfs:label xml:lang="en">has hardware attestation level</rdfs:label>
+  </owl:ObjectProperty>
+
+  <owl:ObjectProperty rdf:about="#hasHardwareAttestationTechnology">
+    <rdfs:domain rdf:resource="#HardwareAttestationPolicy"/>
+    <rdfs:range rdf:resource="#HardwareAttestationTechnology"/>
+    <rdfs:label xml:lang="en">has hardware attestation technology</rdfs:label>
   </owl:ObjectProperty>
 
   <owl:ObjectProperty rdf:about="#consumesDefinition">

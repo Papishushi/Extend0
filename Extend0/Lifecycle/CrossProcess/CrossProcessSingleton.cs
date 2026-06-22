@@ -249,6 +249,8 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
                 serverName: options.CrossProcessServer,
                 name: options.CrossProcessName,
                 connectTimeoutMs: options.CrossProcessConnectTimeoutMs,
+                authentication: options.Authentication,
+                tls: options.Tls,
                 clientTransportFactory: options.ClientTransportFactory,
                 serverTransportFactory: options.ServerTransportFactory);
 

@@ -39,6 +39,7 @@ namespace Extend0.Lifecycle.CrossProcess
                 TransportKind.NamedPipe => NamedPipeTransportProtocol.Descriptor,
                 TransportKind.UnixDomainSocket => UnixDomainSocketTransportProtocol.Descriptor,
                 TransportKind.TcpSocket => TcpSocketTransportProtocol.Descriptor,
+                TransportKind.TlsTcpSocket => TlsTcpSocketTransportProtocol.Descriptor,
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot be used for cross-process singleton orchestration."),
                 _ when allowCustom => throw new InvalidOperationException(
                     $"Transport kind '{transportKind}' requires an explicit protocol descriptor when using custom client/server transport factories."),
@@ -72,10 +73,31 @@ namespace Extend0.Lifecycle.CrossProcess
                 TransportKind.NamedPipe => CrossProcessUtils.BuildPipeName(baseName),
                 TransportKind.UnixDomainSocket => UnixDomainSocketEndpointName.BuildPath(baseName),
                 TransportKind.TcpSocket => throw new NotSupportedException("Transport kind 'TcpSocket' requires an explicit endpoint name in host:port form."),
+                TransportKind.TlsTcpSocket => throw new NotSupportedException("Transport kind 'TlsTcpSocket' requires an explicit endpoint name in host:port form."),
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot be used for cross-process singleton orchestration."),
                 _ when allowLogicalFallback => baseName,
                 _ => throw new NotSupportedException($"Transport kind '{transportKind}' does not have a built-in endpoint naming strategy.")
             };
+        }
+
+        /// <summary>
+        /// Resolves the endpoint name for the same contract-scoped identity used by
+        /// <see cref="CrossProcessOrchestrator{TService}"/>.
+        /// </summary>
+        /// <typeparam name="TService">Cross-process service contract used to scope ownership.</typeparam>
+        /// <param name="name">Optional logical service name suffix.</param>
+        /// <param name="transportKind">Transport kind that backs the endpoint.</param>
+        /// <param name="explicitEndpointName">Optional concrete endpoint override.</param>
+        /// <param name="allowLogicalFallback">Whether unsupported custom transports may use the logical base name.</param>
+        public static string ResolveEndpointNameFor<TService>(
+            string? name,
+            TransportKind transportKind,
+            string? explicitEndpointName = null,
+            bool allowLogicalFallback = false)
+            where TService : ICrossProcessService
+        {
+            var baseName = CrossProcessUtils.BuildNameFor<TService>(name);
+            return ResolveEndpointName(baseName, transportKind, explicitEndpointName, allowLogicalFallback);
         }
 
         /// <summary>
@@ -97,9 +119,10 @@ namespace Extend0.Lifecycle.CrossProcess
 
             return context.TransportKind switch
             {
-                TransportKind.NamedPipe => new NamedPipeClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol),
-                TransportKind.UnixDomainSocket => new UnixDomainSocketClientTransport(context.EndpointName, context.ConnectTimeoutMs, context.Protocol),
-                TransportKind.TcpSocket => new TcpSocketClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol),
+                TransportKind.NamedPipe => new NamedPipeClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol, context.Authentication),
+                TransportKind.UnixDomainSocket => new UnixDomainSocketClientTransport(context.EndpointName, context.ConnectTimeoutMs, context.Protocol, context.Authentication),
+                TransportKind.TcpSocket => new TcpSocketClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol, context.Authentication),
+                TransportKind.TlsTcpSocket => new TlsTcpSocketClientTransport(context.ServerName, context.EndpointName, context.ConnectTimeoutMs, context.Protocol, context.Authentication, context.Tls),
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot create a client transport."),
                 _ => throw new NotSupportedException($"Transport kind '{context.TransportKind}' is not yet implemented for cross-process client transport creation.")
             };
@@ -128,19 +151,30 @@ namespace Extend0.Lifecycle.CrossProcess
                     context.Implementation,
                     context.LoggerFactory?.CreateLogger<NamedPipeServer>() ?? NullLogger<NamedPipeServer>.Instance,
                     context.CancellationToken,
-                    context.Protocol),
+                    context.Protocol,
+                    context.Authentication),
                 TransportKind.UnixDomainSocket => new UnixDomainSocketServer(
                     context.EndpointName,
                     context.Implementation,
                     context.LoggerFactory?.CreateLogger<UnixDomainSocketServer>() ?? NullLogger<UnixDomainSocketServer>.Instance,
                     context.CancellationToken,
-                    context.Protocol),
+                    context.Protocol,
+                    context.Authentication),
                 TransportKind.TcpSocket => new TcpSocketServer(
                     context.EndpointName,
                     context.Implementation,
                     context.LoggerFactory?.CreateLogger<TcpSocketServer>() ?? NullLogger<TcpSocketServer>.Instance,
                     context.CancellationToken,
-                    context.Protocol),
+                    context.Protocol,
+                    context.Authentication),
+                TransportKind.TlsTcpSocket => new TlsTcpSocketServer(
+                    context.EndpointName,
+                    context.Implementation,
+                    context.LoggerFactory?.CreateLogger<TlsTcpSocketServer>() ?? NullLogger<TlsTcpSocketServer>.Instance,
+                    context.CancellationToken,
+                    context.Protocol,
+                    context.Authentication,
+                    context.Tls),
                 TransportKind.None => throw new NotSupportedException("Transport kind 'None' cannot host a cross-process service."),
                 _ => throw new NotSupportedException($"Transport kind '{context.TransportKind}' is not yet implemented for cross-process server hosting.")
             };

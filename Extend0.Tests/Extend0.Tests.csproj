@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyVersion>1.0.9668.34319</AssemblyVersion>
+    <FileVersion>1.0.9668.34319</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

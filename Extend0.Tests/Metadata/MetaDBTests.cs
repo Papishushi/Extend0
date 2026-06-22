@@ -1,3 +1,4 @@
+using Extend0.Lifecycle.Assurance;
 using Extend0.Metadata;
 using Extend0.Metadata.Contract;
 using Extend0.Metadata.CrossProcess;
@@ -16,6 +17,196 @@ public sealed class MetaDBTests
 
         Assert.NotNull(manager);
         Assert.IsAssignableFrom<IMetaDBManager>(manager);
+    }
+
+    [Fact]
+    public void RegisterTable_WithProtectedStoragePolicy_FailsClosedWithoutEvidence()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            using var manager = MetaDB.CreateManager();
+            var spec = new TableSpec(
+                "Protected",
+                Path.Combine(tempRoot, "protected.meta"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Protection = StorageProtectionPolicy.Require(StorageProtectionLevel.ProviderAttestedEncrypted)
+            };
+
+            var error = Assert.Throws<InvalidOperationException>(() => manager.RegisterTable(spec, createNow: true));
+
+            Assert.Contains("Protected storage policy is not satisfied", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RegisterTable_WithProtectedStoragePolicy_AllowsVerifiedManifest()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            StorageProtectionVerifier.SaveManifest(
+                Path.Combine(tempRoot, StorageProtectionVerifier.ManifestFileName),
+                StorageProtectionManifest.Create(
+                    "test-provider",
+                    "volume-1",
+                    StorageProtectionLevel.ProviderAttestedEncrypted,
+                    tempRoot));
+
+            using var manager = MetaDB.CreateManager();
+            var spec = new TableSpec(
+                "Protected",
+                Path.Combine(tempRoot, "protected.meta"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Protection = StorageProtectionPolicy.Require(
+                    StorageProtectionLevel.ProviderAttestedEncrypted,
+                    "test-provider",
+                    "volume-1")
+            };
+
+            var id = manager.RegisterTable(spec, createNow: true);
+
+            Assert.True(manager.TryGetManaged(id, out var table));
+            Assert.NotNull(table);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RegisterTable_WithStorageContinuityPolicy_FailsClosedWithoutEvidence()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            using var manager = MetaDB.CreateManager();
+            var spec = new TableSpec(
+                "Transferable",
+                Path.Combine(tempRoot, "transferable.meta"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Continuity = StorageContinuityPolicy.Require(StorageContinuityLevel.SharedBackingStore)
+            };
+
+            var error = Assert.Throws<InvalidOperationException>(() => manager.RegisterTable(spec, createNow: true));
+
+            Assert.Contains("Storage continuity policy is not satisfied", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RegisterTable_WithStorageContinuityPolicy_AllowsSharedBackingEvidence()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            StorageContinuityVerifier.SaveManifest(
+                Path.Combine(tempRoot, StorageContinuityVerifier.ManifestFileName),
+                StorageContinuityManifest.Create(
+                    "test-continuity-provider",
+                    "shared-volume-1",
+                    StorageContinuityLevel.SharedBackingStore,
+                    tempRoot));
+
+            using var manager = MetaDB.CreateManager();
+            var spec = new TableSpec(
+                "Transferable",
+                Path.Combine(tempRoot, "transferable.meta"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Continuity = StorageContinuityPolicy.Require(
+                    StorageContinuityLevel.SharedBackingStore,
+                    "test-continuity-provider",
+                    "shared-volume-1")
+            };
+
+            var id = manager.RegisterTable(spec, createNow: true);
+
+            Assert.True(manager.TryGetManaged(id, out var table));
+            Assert.NotNull(table);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RegisterTable_WithHardwareAttestationPolicy_FailsClosedWithoutEvidence()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            using var manager = MetaDB.CreateManager();
+            var spec = new TableSpec(
+                "Attested",
+                Path.Combine(tempRoot, "attested.meta"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Attestation = HardwareAttestationPolicy.Require(HardwareAttestationLevel.ProviderAttested)
+            };
+
+            var error = Assert.Throws<InvalidOperationException>(() => manager.RegisterTable(spec, createNow: true));
+
+            Assert.Contains("Hardware attestation policy is not satisfied", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RegisterTable_WithHardwareAttestationPolicy_AllowsMatchingEvidence()
+    {
+        var tempRoot = CreateTempDirectory();
+        try
+        {
+            HardwareAttestationVerifier.SaveManifest(
+                Path.Combine(tempRoot, HardwareAttestationVerifier.ManifestFileName),
+                HardwareAttestationManifest.Create(
+                    "sgx-provider",
+                    "quote-1",
+                    HardwareAttestationTechnology.IntelSgx,
+                    HardwareAttestationLevel.RemoteAttested,
+                    tempRoot,
+                    measurement: "mrenclave:abc"));
+
+            using var manager = MetaDB.CreateManager();
+            var spec = new TableSpec(
+                "Attested",
+                Path.Combine(tempRoot, "attested.meta"),
+                [TableSpec.Helpers.Column<int>("Id", 4)])
+            {
+                Attestation = HardwareAttestationPolicy.Require(
+                    HardwareAttestationLevel.RemoteAttested,
+                    HardwareAttestationTechnology.IntelSgx,
+                    "sgx-provider",
+                    "quote-1",
+                    "mrenclave:abc")
+            };
+
+            var id = manager.RegisterTable(spec, createNow: true);
+
+            Assert.True(manager.TryGetManaged(id, out var table));
+            Assert.NotNull(table);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
     }
 
     [Fact]

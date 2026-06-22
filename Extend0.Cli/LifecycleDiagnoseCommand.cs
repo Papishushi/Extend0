@@ -66,7 +66,8 @@ public static class LifecycleDiagnoseCommand
         var builtInClientAvailable = options.TransportKind is
             TransportKind.NamedPipe or
             TransportKind.UnixDomainSocket or
-            TransportKind.TcpSocket;
+            TransportKind.TcpSocket or
+            TransportKind.TlsTcpSocket;
         var ownerStatus = LifecycleOwnerStatus.Unknown;
         var handshakeStatus = LifecycleHandshakeStatus.NotAttempted;
         var heartbeatStatus = LifecycleHeartbeatStatus.Unknown;
@@ -75,6 +76,7 @@ public static class LifecycleDiagnoseCommand
         string? handshakeError = null;
         ServiceInfo? owner = null;
         Heartbeat? heartbeat = null;
+        Lease? lease = null;
         long? heartbeatAgeMilliseconds = null;
         bool? ownerReportedCanConnect = null;
 
@@ -93,11 +95,7 @@ public static class LifecycleDiagnoseCommand
 
         try
         {
-            endpointName = CrossProcessTransportFactory.ResolveEndpointName(
-                options.Name,
-                options.TransportKind,
-                options.EndpointName,
-                allowLogicalFallback: options.AllowCustom);
+            endpointName = LifecycleEndpointResolver.ResolveEndpointName(options);
             findings.Add(ValidationFinding.Info("endpoint-resolved", $"Resolved endpoint '{endpointName}'."));
         }
         catch (Exception ex)
@@ -129,6 +127,7 @@ public static class LifecycleDiagnoseCommand
                 handshakeError,
                 owner,
                 heartbeat,
+                lease,
                 heartbeatAgeMilliseconds,
                 ownerReportedCanConnect,
                 findings);
@@ -139,18 +138,18 @@ public static class LifecycleDiagnoseCommand
             using var rpcTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             rpcTimeout.CancelAfter(options.TimeoutMs);
             using var transport = CrossProcessTransportFactory.CreateClientTransport(
-                new ClientTransportFactoryContext(options.TransportKind, protocol, endpointName, options.ServerName, options.TimeoutMs));
+                new ClientTransportFactoryContext(options.TransportKind, protocol, endpointName, options.ServerName, options.TimeoutMs, options.ToAuthenticationOptions(), options.ToTlsOptions()));
 
             handshakeStatus = LifecycleHandshakeStatus.Passed;
             ownerStatus = LifecycleOwnerStatus.OwnerObserved;
             leaseStatus = LifecycleLeaseStatus.ImpliedByOwnerObservation;
             findings.Add(ValidationFinding.Info("handshake", $"Handshake passed for {options.TransportKind} using protocol '{protocol.ProtocolId}' v{protocol.ProtocolVersion}."));
             findings.Add(ValidationFinding.Info("owner-observed", "A Lifecycle owner responded on the resolved endpoint."));
-            findings.Add(ValidationFinding.Info("lease-not-exposed", "Lifecycle ownership is currently enforced by owner coordination; no standalone lease record is exposed by the runtime."));
 
             var proxy = RpcDispatchProxy<ICrossProcessService>.Create(transport, rpcTimeout.Token);
 
             owner = await DiagnoseServiceInfoAsync(proxy, options, endpointName, findings).ConfigureAwait(false);
+            (leaseStatus, lease) = await DiagnoseLeaseAsync(proxy, owner, findings).ConfigureAwait(false);
             (heartbeatStatus, heartbeat, heartbeatAgeMilliseconds) = await DiagnoseHeartbeatAsync(proxy, owner, findings).ConfigureAwait(false);
             ownerReportedCanConnect = await DiagnoseOwnerConnectivityAsync(proxy, findings).ConfigureAwait(false);
         }
@@ -168,6 +167,7 @@ public static class LifecycleDiagnoseCommand
             ownerStatus = LifecycleOwnerStatus.NoReachableOwner;
             connectError = ex.Message;
             findings.Add(ValidationFinding.Error("owner-not-reachable", $"No compatible Lifecycle owner could be reached: {ex.Message}"));
+            LifecycleNamedPipeDiscovery.AddContractScopedCandidateFindings(options, endpointName, findings);
         }
 
         return LifecycleDiagnoseReport.Create(
@@ -184,6 +184,7 @@ public static class LifecycleDiagnoseCommand
             handshakeError,
             owner,
             heartbeat,
+            lease,
             heartbeatAgeMilliseconds,
             ownerReportedCanConnect,
             findings);
@@ -223,6 +224,36 @@ public static class LifecycleDiagnoseCommand
         {
             findings.Add(ValidationFinding.Error("owner-info", $"Owner was reachable but service info failed: {ex.Message}"));
             return null;
+        }
+    }
+
+    private static async Task<(LifecycleLeaseStatus Status, Lease? Lease)> DiagnoseLeaseAsync(
+        ICrossProcessService proxy,
+        ServiceInfo? owner,
+        List<ValidationFinding> findings)
+    {
+        try
+        {
+            var lease = await proxy.GetLeaseAsync().ConfigureAwait(false);
+            findings.Add(ValidationFinding.Info(
+                "lease",
+                $"Lease is {(lease.IsActive ? "active" : "inactive")} for ownership '{lease.OwnershipName}' using {lease.CoordinationKind}."));
+
+            if (owner is not null && !string.Equals(owner.Fingerprint, lease.Fingerprint, StringComparison.Ordinal))
+            {
+                findings.Add(ValidationFinding.Warning(
+                    "lease-fingerprint-mismatch",
+                    $"ServiceInfo fingerprint '{owner.Fingerprint}' differs from lease fingerprint '{lease.Fingerprint}'."));
+            }
+
+            return (lease.IsActive ? LifecycleLeaseStatus.Active : LifecycleLeaseStatus.Inactive, lease);
+        }
+        catch (Exception ex)
+        {
+            findings.Add(ValidationFinding.Warning(
+                "lease-not-exposed",
+                $"Owner was reachable but did not expose a lease snapshot: {ex.Message}. Falling back to owner-observation semantics."));
+            return (LifecycleLeaseStatus.ImpliedByOwnerObservation, null);
         }
     }
 
@@ -281,17 +312,21 @@ public static class LifecycleDiagnoseCommand
     }
 
     private static bool IsHandshakeFailure(Exception ex) =>
-        ex is IOException && ex.Message.Contains("handshake", StringComparison.OrdinalIgnoreCase);
+        ex is IOException
+        && (ex.Message.Contains("handshake", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase));
 
     private static void WriteHumanReport(TextWriter output, LifecycleDiagnoseReport report)
     {
         output.WriteLine("Extend0 lifecycle diagnose");
         output.WriteLine($"Name: {report.Name}");
+        output.WriteLine($"Contract: {report.ContractKind}");
         output.WriteLine($"Transport: {report.TransportKind}");
         output.WriteLine($"Endpoint: {report.EndpointName ?? "<unresolved>"}");
         output.WriteLine($"Server: {report.ServerName}");
         output.WriteLine($"Timeout: {report.TimeoutMs} ms");
         output.WriteLine($"Protocol: {FormatProtocol(report)}");
+        output.WriteLine($"Authentication: {report.AuthenticationMode}");
         output.WriteLine($"Built-in client transport: {(report.BuiltInClientAvailable ? "yes" : "no")}");
         output.WriteLine($"Owner status: {report.OwnerStatus}");
         output.WriteLine($"Owner reachable: {report.OwnerReachable}");
@@ -309,6 +344,20 @@ public static class LifecycleDiagnoseCommand
             output.WriteLine($"  Started UTC: {report.Owner.StartTimeUtc:O}");
             output.WriteLine($"  Fingerprint: {report.Owner.Fingerprint}");
             output.WriteLine($"  Endpoint: {report.Owner.EndpointServerName ?? "<none>"}/{report.Owner.EndpointName ?? "<none>"}");
+        }
+
+        if (report.Lease is not null)
+        {
+            output.WriteLine();
+            output.WriteLine("Lease:");
+            output.WriteLine($"  Id: {report.Lease.LeaseId}");
+            output.WriteLine($"  Ownership: {report.Lease.OwnershipName}");
+            output.WriteLine($"  Coordination: {report.Lease.CoordinationKind} {report.Lease.CoordinationScope ?? "<none>"}");
+            output.WriteLine($"  Active: {report.Lease.IsActive}");
+            output.WriteLine($"  Exclusive: {report.Lease.IsExclusive}");
+            output.WriteLine($"  Acquired UTC: {report.Lease.AcquiredUtc:O}");
+            output.WriteLine($"  Observed UTC: {report.Lease.ObservedUtc:O}");
+            output.WriteLine($"  Expires UTC: {(report.Lease.ExpiresUtc is null ? "<none>" : report.Lease.ExpiresUtc.Value.ToString("O"))}");
         }
 
         if (report.Heartbeat is not null)
@@ -350,16 +399,20 @@ public static class LifecycleDiagnoseCommand
     private static void WriteHelp(TextWriter writer)
     {
         writer.WriteLine("Usage:");
-        writer.WriteLine("  extend0 lifecycle diagnose [--name <identity>] [--transport <kind>] [--endpoint <name>] [--server <name>] [--timeout <ms>] [--json]");
+        writer.WriteLine("  extend0 lifecycle diagnose [--contract <kind>] [--name <identity>] [--transport <kind>] [--endpoint <name>] [--server <name>] [--timeout <ms>] [--json]");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  --name <identity>          Logical lifecycle service identity. Defaults to Extend0.Lifecycle.Probe.");
-        writer.WriteLine("  --transport <kind>         TransportKind value. Built-ins: NamedPipe, UnixDomainSocket, TcpSocket. Defaults to NamedPipe.");
-        writer.WriteLine("  --endpoint <name>          Explicit endpoint override. TcpSocket requires host:port; UnixDomainSocket accepts a socket path.");
+        writer.WriteLine("  --contract <kind>          Contract scope. Built-ins: Probe, MetaDB. Defaults to Probe.");
+        writer.WriteLine("  --name <identity>          Logical lifecycle service identity. Defaults to Extend0.Lifecycle.Probe, or Extend0.MetaDB for --contract MetaDB.");
+        writer.WriteLine("  --transport <kind>         TransportKind value. Built-ins: NamedPipe, UnixDomainSocket, TcpSocket, TlsTcpSocket. Defaults to NamedPipe.");
+        writer.WriteLine("  --endpoint <name>          Explicit endpoint override. TcpSocket/TlsTcpSocket require host:port; UnixDomainSocket accepts a socket path.");
+        writer.WriteLine("  --tls-target-host <name>   Target host for TLS certificate validation when using TlsTcpSocket.");
         writer.WriteLine("  --server <name>            Server or machine name for client diagnostics. Defaults to '.'.");
         writer.WriteLine("  --timeout <ms>             Connection and RPC timeout in milliseconds. Defaults to 3000.");
         writer.WriteLine("  --protocol-id <id>         Explicit protocol id for custom transports.");
         writer.WriteLine("  --protocol-version <n>     Explicit protocol version for custom transports.");
+        writer.WriteLine("  --auth <mode>              Authentication mode. Supported: none, shared-secret-hmac.");
+        writer.WriteLine("  --secret <value>           Shared secret for --auth shared-secret-hmac. The value is never printed.");
         writer.WriteLine("  --allow-custom             Allow logical endpoint fallback for non-built-in transports.");
         writer.WriteLine("  --json                     Emit a machine-readable JSON report.");
         writer.WriteLine("  -h, --help                 Show command help.");
@@ -390,17 +443,22 @@ public enum LifecycleHeartbeatStatus
 public enum LifecycleLeaseStatus
 {
     NotExposed,
-    ImpliedByOwnerObservation
+    ImpliedByOwnerObservation,
+    Active,
+    Inactive,
+    Failed
 }
 
 public sealed record LifecycleDiagnoseReport(
     string Name,
+    LifecycleContractKind ContractKind,
     TransportKind TransportKind,
     string? EndpointName,
     string ServerName,
     int TimeoutMs,
     string? ProtocolId,
     int? ProtocolVersion,
+    AuthenticationMode AuthenticationMode,
     bool BuiltInClientAvailable,
     LifecycleOwnerStatus OwnerStatus,
     LifecycleHandshakeStatus HandshakeStatus,
@@ -411,6 +469,7 @@ public sealed record LifecycleDiagnoseReport(
     string? HandshakeError,
     ServiceInfo? Owner,
     Heartbeat? Heartbeat,
+    Lease? Lease,
     long? HeartbeatAgeMilliseconds,
     bool? OwnerReportedCanConnect,
     IReadOnlyList<ValidationFinding> Findings,
@@ -432,17 +491,20 @@ public sealed record LifecycleDiagnoseReport(
         string? handshakeError,
         ServiceInfo? owner,
         Heartbeat? heartbeat,
+        Lease? lease,
         long? heartbeatAgeMilliseconds,
         bool? ownerReportedCanConnect,
         IReadOnlyList<ValidationFinding> findings) =>
         new(
             options.Name,
+            options.ContractKind,
             options.TransportKind,
             endpointName,
             options.ServerName,
             options.TimeoutMs,
             protocol?.ProtocolId,
             protocol?.ProtocolVersion,
+            options.AuthenticationMode,
             builtInClientAvailable,
             ownerStatus,
             handshakeStatus,
@@ -453,6 +515,7 @@ public sealed record LifecycleDiagnoseReport(
             handshakeError,
             owner,
             heartbeat,
+            lease,
             heartbeatAgeMilliseconds,
             ownerReportedCanConnect,
             findings,

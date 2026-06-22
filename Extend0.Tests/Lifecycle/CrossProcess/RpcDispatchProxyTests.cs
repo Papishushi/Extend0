@@ -27,6 +27,7 @@ public sealed class RpcDispatchProxyTests
             Success("5"),
             Success("""{"UtcTime":"2026-05-25T00:00:00Z","UptimeSeconds":12,"Fingerprint":"fp"}"""),
             Success("""{"ContractName":"ITestRpcService","ImplementationName":"Impl","AssemblyVersion":"1.0.0.0","Fingerprint":"fp","MachineName":"box","ProcessId":7,"ProcessName":"proc","StartTimeUtc":"2026-05-25T00:00:00Z","PipeName":null,"EndpointName":"ep","EndpointServerName":"srv","TransportKind":255}"""),
+            Success("""{"LeaseId":"lease-1","ContractName":"ITestRpcService","OwnershipName":"ownership","Fingerprint":"fp","MachineName":"box","ProcessId":7,"ProcessName":"proc","AcquiredUtc":"2026-05-25T00:00:00Z","ObservedUtc":"2026-05-25T00:00:01Z","ExpiresUtc":null,"EndpointName":"ep","EndpointServerName":"srv","TransportKind":255,"CoordinationKind":"OSMutex","CoordinationName":"ownership","CoordinationScope":"LocalOrSession","IsExclusive":true,"IsActive":true}"""),
             Success("true"));
 
         var proxy = RpcDispatchProxy<ITestRpcService>.Create(transport, CancellationToken.None);
@@ -37,12 +38,14 @@ public sealed class RpcDispatchProxyTests
         var asyncSum = await proxy.AddAsync(2, 3);
         var heartbeat = await proxy.PingAsync();
         var info = await proxy.GetServiceInfoAsync();
+        var lease = await proxy.GetLeaseAsync();
         var canConnect = await proxy.CanConnectAsync();
 
         Assert.Equal(3, sync.Sum);
         Assert.Equal(5, asyncSum);
         Assert.Equal("fp", heartbeat.Fingerprint);
         Assert.Equal("ITestRpcService", info.ContractName);
+        Assert.Equal("lease-1", lease.LeaseId);
         Assert.True(canConnect);
 
         Assert.Collection(transport.Calls,
@@ -77,6 +80,11 @@ public sealed class RpcDispatchProxyTests
             {
                 Assert.Equal(nameof(ICrossProcessService.GetServiceInfoAsync), call.Method);
                 Assert.Equal(typeof(ServiceInfo), call.DeclaredReturnType);
+            },
+            call =>
+            {
+                Assert.Equal(nameof(ICrossProcessService.GetLeaseAsync), call.Method);
+                Assert.Equal(typeof(Lease), call.DeclaredReturnType);
             },
             call =>
             {
@@ -241,6 +249,7 @@ public sealed class RpcDispatchProxyTests
         public string ContractName => "Concrete";
         public Task<bool> CanConnectAsync() => Task.FromResult(true);
         public Task<ServiceInfo> GetServiceInfoAsync() => throw new NotSupportedException();
+        public Task<Lease> GetLeaseAsync() => throw new NotSupportedException();
         public Task<Heartbeat> PingAsync() => throw new NotSupportedException();
     }
 

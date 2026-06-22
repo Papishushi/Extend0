@@ -77,6 +77,8 @@ namespace Extend0.Lifecycle.CrossProcess
             string serverName = ".",
             int connectTimeoutMs = 3000,
             bool preferGlobalMutex = true,
+            CrossProcessAuthenticationOptions? authentication = null,
+            CrossProcessTlsOptions? tls = null,
             Func<ClientTransportFactoryContext, IClientTransport>? clientTransportFactory = null,
             Func<ServerTransportFactoryContext, ICrossProcessServerHost>? serverTransportFactory = null)
         {
@@ -93,10 +95,10 @@ namespace Extend0.Lifecycle.CrossProcess
                 endpointName,
                 allowLogicalFallback: clientTransportFactory is not null || serverTransportFactory is not null);
 
-            var m = CrossProcessUtils.CreateOwned(baseName, preferGlobalMutex, out bool createdNew, out bool _);
+            var m = CrossProcessUtils.CreateOwned(baseName, preferGlobalMutex, out bool createdNew, out bool isGlobal);
 
-            if (createdNew) return HostBranch(factory, resolvedEndpointName, resolvedProtocolDescriptor, transportKind, m, serverTransportFactory);
-            else return ClientBranch(serverName, connectTimeoutMs, resolvedEndpointName, resolvedProtocolDescriptor, transportKind, m, clientTransportFactory);
+            if (createdNew) return HostBranch(factory, baseName, resolvedEndpointName, serverName, resolvedProtocolDescriptor, transportKind, m, isGlobal, authentication, tls, serverTransportFactory);
+            else return ClientBranch(serverName, connectTimeoutMs, resolvedEndpointName, resolvedProtocolDescriptor, transportKind, m, authentication, tls, clientTransportFactory);
         }
 
         /// <summary>
@@ -109,12 +111,14 @@ namespace Extend0.Lifecycle.CrossProcess
             CrossProcessProtocolDescriptor protocolDescriptor,
             TransportKind transportKind,
             Mutex m,
+            CrossProcessAuthenticationOptions? authentication,
+            CrossProcessTlsOptions? tls,
             Func<ClientTransportFactoryContext, IClientTransport>? clientTransportFactory)
         {
             try { m.Dispose(); } catch { }
 
             var transport = CrossProcessTransportFactory.CreateClientTransport(
-                new ClientTransportFactoryContext(transportKind, protocolDescriptor, endpointName, serverName, connectTimeoutMs),
+                new ClientTransportFactoryContext(transportKind, protocolDescriptor, endpointName, serverName, connectTimeoutMs, authentication, tls),
                 clientTransportFactory);
             var proxy = RpcDispatchProxy<TService>.Create(transport, CancellationToken.None);
             if (proxy is null)
@@ -137,10 +141,15 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </summary>
         private static CrossProcessHandle<TService> HostBranch(
             Func<TService> factory,
+            string ownershipName,
             string endpointName,
+            string serverName,
             CrossProcessProtocolDescriptor protocolDescriptor,
             TransportKind transportKind,
             Mutex m,
+            bool isGlobal,
+            CrossProcessAuthenticationOptions? authentication,
+            CrossProcessTlsOptions? tls,
             Func<ServerTransportFactoryContext, ICrossProcessServerHost>? serverTransportFactory)
         {
             CancellationTokenSource cts = new CancellationTokenSource();
@@ -149,8 +158,18 @@ namespace Extend0.Lifecycle.CrossProcess
             try
             {
                 impl = factory();
+                if (impl is CrossProcessServiceBase<TService> serviceBase)
+                {
+                    serviceBase.ConfigureRuntimeEndpoint(endpointName, serverName, transportKind);
+                    serviceBase.ConfigureRuntimeLease(
+                        ownershipName,
+                        "OSMutex",
+                        ownershipName,
+                        ResolveCoordinationScope(isGlobal));
+                }
+
                 server = CrossProcessTransportFactory.CreateServerHost(
-                    new ServerTransportFactoryContext(transportKind, protocolDescriptor, endpointName, impl!, s_LoggerFactory, cts.Token),
+                    new ServerTransportFactoryContext(transportKind, protocolDescriptor, endpointName, impl!, s_LoggerFactory, cts.Token, authentication, tls),
                     serverTransportFactory);
 
                 return new CrossProcessHandle<TService>(
@@ -167,6 +186,11 @@ namespace Extend0.Lifecycle.CrossProcess
                 throw;
             }
         }
+
+        private static string ResolveCoordinationScope(bool isGlobal) =>
+            OperatingSystem.IsWindows()
+                ? isGlobal ? "Global" : "LocalOrSession"
+                : "System";
 
         /// <summary>
         /// Best-effort cleanup for partially initialized owner state after a hosting failure.

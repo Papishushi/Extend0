@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Extend0.Lifecycle.Assurance;
 using Extend0.Metadata.Schema;
 
 namespace Extend0.Cli;
@@ -64,7 +65,7 @@ public static class MetaDbValidateCommand
         try
         {
             var spec = TableSpec.Helpers.LoadFromFile(specPath);
-            var report = BuildReport(options.InputPath!, specPath, spec);
+            var report = BuildReport(options.InputPath!, specPath, spec, options);
 
             if (options.Json)
                 output.WriteLine(JsonSerializer.Serialize(report, JsonOptions));
@@ -80,7 +81,7 @@ public static class MetaDbValidateCommand
         }
     }
 
-    private static MetaDbValidateReport BuildReport(string inputPath, string specPath, TableSpec spec)
+    private static MetaDbValidateReport BuildReport(string inputPath, string specPath, TableSpec spec, MetaDbValidateOptions options)
     {
         var inspect = MetaDbInspectReport.FromSpec(inputPath, specPath, spec);
         var findings = new List<ValidationFinding>
@@ -90,8 +91,11 @@ public static class MetaDbValidateCommand
 
         ValidateStorage(inspect, findings);
         ValidateColumns(inspect, findings);
-        ValidateSidecarConventions(inspect, findings);
+        ValidateSidecarConventions(inspect, spec, findings);
         var runtime = ValidateRuntimeStorage(inspect, findings);
+        var security = ValidateStorageProtection(inspect, spec, options, findings);
+        var continuity = ValidateStorageContinuity(inspect, spec, options, findings);
+        var attestation = ValidateHardwareAttestation(inspect, spec, options, findings);
 
         return MetaDbValidateReport.Create(
             inspect.InputPath,
@@ -104,8 +108,117 @@ public static class MetaDbValidateCommand
             EstimateLogicalBytes(inspect),
             EstimateStorageBytes(inspect),
             runtime,
+            security,
+            continuity,
+            attestation,
             findings);
     }
+
+    private static StorageProtectionEvidence? ValidateStorageProtection(
+        MetaDbInspectReport inspect,
+        TableSpec spec,
+        MetaDbValidateOptions options,
+        List<ValidationFinding> findings)
+    {
+        var overridePolicy = options.ToOverridePolicy();
+        var policy = overridePolicy.RequiresProtection ? overridePolicy : spec.Protection;
+        if (!options.Security && !policy.RequiresProtection)
+            return null;
+
+        var evidence = StorageProtectionVerifier.DiagnosePath(
+            inspect.MapPath,
+            policy,
+            options.ProtectionManifestPath);
+
+        findings.AddRange(evidence.Findings.Select(ToValidationFinding));
+        findings.Add(evidence.Decision == StorageProtectionDecision.FailClosed
+            ? ValidationFinding.Error("storage-protection-decision", $"Storage protection decision is {evidence.Decision}.")
+            : ValidationFinding.Info("storage-protection-decision", $"Storage protection decision is {evidence.Decision}."));
+
+        return evidence;
+    }
+
+    private static HardwareAttestationEvidence? ValidateHardwareAttestation(
+        MetaDbInspectReport inspect,
+        TableSpec spec,
+        MetaDbValidateOptions options,
+        List<ValidationFinding> findings)
+    {
+        var overridePolicy = options.ToAttestationPolicy();
+        var policy = overridePolicy.RequiresAttestation ? overridePolicy : spec.Attestation;
+        if (!options.Attestation && !policy.RequiresAttestation)
+            return null;
+
+        var evidence = HardwareAttestationVerifier.DiagnosePath(
+            inspect.MapPath,
+            policy,
+            options.AttestationManifestPath);
+
+        findings.AddRange(evidence.Findings.Select(ToValidationFinding));
+        findings.Add(evidence.Decision == HardwareAttestationDecision.FailClosed
+            ? ValidationFinding.Error("hardware-attestation-decision", $"Hardware attestation decision is {evidence.Decision}.")
+            : ValidationFinding.Info("hardware-attestation-decision", $"Hardware attestation decision is {evidence.Decision}."));
+
+        return evidence;
+    }
+
+    private static StorageContinuityEvidence? ValidateStorageContinuity(
+        MetaDbInspectReport inspect,
+        TableSpec spec,
+        MetaDbValidateOptions options,
+        List<ValidationFinding> findings)
+    {
+        var overridePolicy = options.ToContinuityPolicy();
+        var policy = overridePolicy.RequiresContinuity ? overridePolicy : spec.Continuity;
+        if (!options.OwnershipTransfer && !policy.RequiresContinuity)
+            return null;
+
+        if (options.OwnershipTransfer && !policy.RequiresContinuity)
+        {
+            findings.Add(ValidationFinding.Info(
+                "ownership-transfer-ephemeral",
+                "Ownership transfer diagnostics are running without requiring durable state continuity; this is valid for ephemeral or externally reconstructed services."));
+        }
+
+        var evidence = StorageContinuityVerifier.DiagnosePath(
+            inspect.MapPath,
+            policy,
+            options.ContinuityManifestPath);
+
+        findings.AddRange(evidence.Findings.Select(ToValidationFinding));
+        findings.Add(evidence.Decision == StorageContinuityDecision.FailClosed
+            ? ValidationFinding.Error("storage-continuity-decision", $"Storage continuity decision is {evidence.Decision}.")
+            : ValidationFinding.Info("storage-continuity-decision", $"Storage continuity decision is {evidence.Decision}."));
+
+        return evidence;
+    }
+
+    private static ValidationFinding ToValidationFinding(StorageProtectionFinding finding) =>
+        finding.Severity switch
+        {
+            StorageProtectionFindingSeverity.Info => ValidationFinding.Info(finding.Id, finding.Message),
+            StorageProtectionFindingSeverity.Warning => ValidationFinding.Warning(finding.Id, finding.Message),
+            StorageProtectionFindingSeverity.Error => ValidationFinding.Error(finding.Id, finding.Message),
+            _ => ValidationFinding.Warning(finding.Id, finding.Message)
+        };
+
+    private static ValidationFinding ToValidationFinding(HardwareAttestationFinding finding) =>
+        finding.Severity switch
+        {
+            HardwareAttestationFindingSeverity.Info => ValidationFinding.Info(finding.Id, finding.Message),
+            HardwareAttestationFindingSeverity.Warning => ValidationFinding.Warning(finding.Id, finding.Message),
+            HardwareAttestationFindingSeverity.Error => ValidationFinding.Error(finding.Id, finding.Message),
+            _ => ValidationFinding.Warning(finding.Id, finding.Message)
+        };
+
+    private static ValidationFinding ToValidationFinding(StorageContinuityFinding finding) =>
+        finding.Severity switch
+        {
+            StorageContinuityFindingSeverity.Info => ValidationFinding.Info(finding.Id, finding.Message),
+            StorageContinuityFindingSeverity.Warning => ValidationFinding.Warning(finding.Id, finding.Message),
+            StorageContinuityFindingSeverity.Error => ValidationFinding.Error(finding.Id, finding.Message),
+            _ => ValidationFinding.Warning(finding.Id, finding.Message)
+        };
 
     private static void ValidateStorage(MetaDbInspectReport inspect, List<ValidationFinding> findings)
     {
@@ -186,24 +299,52 @@ public static class MetaDbValidateCommand
         }
     }
 
-    private static void ValidateSidecarConventions(MetaDbInspectReport inspect, List<ValidationFinding> findings)
+    private static void ValidateSidecarConventions(MetaDbInspectReport inspect, TableSpec spec, List<ValidationFinding> findings)
     {
+        var specPath = Path.GetFullPath(inspect.SpecPath);
+        var specDirectory = Path.GetDirectoryName(specPath);
+
         if (inspect.Storage.Layout == TableStorageLayout.Chunked)
         {
-            var expected = Path.Combine(Path.GetFullPath(inspect.MapPath), "tablespec.json");
-            if (string.Equals(Path.GetFullPath(inspect.SpecPath), expected, StringComparison.OrdinalIgnoreCase))
-                findings.Add(ValidationFinding.Info("sidecar-convention", "Chunked TableSpec uses tablespec.json inside the table directory."));
-            else
-                findings.Add(ValidationFinding.Warning("sidecar-convention", $"Chunked TableSpec is usually stored at '{expected}'."));
+            var runtimeExpected = Path.Combine(Path.GetFullPath(inspect.MapPath), TableSpec.Helpers.ChunkedSpecFileName);
+            if (string.Equals(specPath, runtimeExpected, StringComparison.OrdinalIgnoreCase))
+            {
+                findings.Add(ValidationFinding.Info("sidecar-convention", "Chunked TableSpec uses the runtime canonical tablespec.json inside the table directory."));
+                return;
+            }
 
+            var saveDirectory = string.IsNullOrWhiteSpace(specDirectory)
+                ? null
+                : Directory.GetParent(specDirectory)?.FullName;
+            if (saveDirectory is not null
+                && TableSpec.Helpers.TryInferSaveToDirectoryExtension(spec, saveDirectory, specPath, out var chunkedExtension))
+            {
+                var message = string.Equals(chunkedExtension, TableSpec.Helpers.DefaultSpecExtension, StringComparison.OrdinalIgnoreCase)
+                    ? "Chunked TableSpec uses the SaveToDirectory default path."
+                    : $"Chunked TableSpec uses custom SaveToDirectory extension '{chunkedExtension}'.";
+                findings.Add(ValidationFinding.Info("sidecar-convention", message));
+                return;
+            }
+
+            findings.Add(ValidationFinding.Info("sidecar-convention", "Chunked TableSpec path was resolved explicitly or with a custom convention; no fixed extension is enforced."));
             return;
         }
 
-        var expectedSidecar = Path.GetFullPath(inspect.MapPath) + ".tablespec.json";
-        if (string.Equals(Path.GetFullPath(inspect.SpecPath), expectedSidecar, StringComparison.OrdinalIgnoreCase))
-            findings.Add(ValidationFinding.Info("sidecar-convention", "Single-file TableSpec uses the map-path .tablespec.json sidecar."));
+        if (!string.IsNullOrWhiteSpace(specDirectory)
+            && TableSpec.Helpers.TryInferSaveToDirectoryExtension(spec, specDirectory, specPath, out var extension))
+        {
+            var message = string.Equals(extension, TableSpec.Helpers.DefaultSpecExtension, StringComparison.OrdinalIgnoreCase)
+                ? "Single-file TableSpec uses the SaveToDirectory default path."
+                : $"Single-file TableSpec uses custom SaveToDirectory extension '{extension}'.";
+            findings.Add(ValidationFinding.Info("sidecar-convention", message));
+            return;
+        }
+
+        var mapSidecar = Path.GetFullPath(inspect.MapPath) + ".tablespec.json";
+        if (string.Equals(specPath, mapSidecar, StringComparison.OrdinalIgnoreCase))
+            findings.Add(ValidationFinding.Info("sidecar-convention", "Single-file TableSpec uses the map-path sidecar."));
         else
-            findings.Add(ValidationFinding.Warning("sidecar-convention", $"Single-file TableSpec is usually stored at '{expectedSidecar}'."));
+            findings.Add(ValidationFinding.Info("sidecar-convention", "Single-file TableSpec path was resolved explicitly or with a custom convention; no fixed extension is enforced."));
     }
 
     private static long EstimateLogicalBytes(MetaDbInspectReport inspect) =>
@@ -508,6 +649,26 @@ public static class MetaDbValidateCommand
         output.WriteLine($"Runtime storage exists: {report.RuntimeStorage.Exists}");
         if (report.RuntimeStorage.PhysicalBytes is not null)
             output.WriteLine($"Runtime physical bytes: {report.RuntimeStorage.PhysicalBytes}");
+        if (report.StorageProtection is not null)
+        {
+            output.WriteLine($"Required protection: {report.StorageProtection.Policy.RequiredLevel}");
+            output.WriteLine($"Observed protection: {report.StorageProtection.ObservedLevel}");
+            output.WriteLine($"Protection decision: {report.StorageProtection.Decision}");
+        }
+        if (report.StorageContinuity is not null)
+        {
+            output.WriteLine($"Required continuity: {report.StorageContinuity.Policy.RequiredLevel}");
+            output.WriteLine($"Observed continuity: {report.StorageContinuity.ObservedLevel}");
+            output.WriteLine($"Continuity decision: {report.StorageContinuity.Decision}");
+        }
+        if (report.HardwareAttestation is not null)
+        {
+            output.WriteLine($"Required attestation: {report.HardwareAttestation.Policy.RequiredLevel}");
+            output.WriteLine($"Required attestation technology: {report.HardwareAttestation.Policy.RequiredTechnology}");
+            output.WriteLine($"Observed attestation: {report.HardwareAttestation.ObservedLevel}");
+            output.WriteLine($"Observed attestation technology: {report.HardwareAttestation.ObservedTechnology}");
+            output.WriteLine($"Attestation decision: {report.HardwareAttestation.Decision}");
+        }
         output.WriteLine();
 
         foreach (var finding in report.Findings)
@@ -529,13 +690,32 @@ public static class MetaDbValidateCommand
     private static void WriteHelp(TextWriter writer)
     {
         writer.WriteLine("Usage:");
-        writer.WriteLine("  extend0 metadb validate <path> [--json]");
+        writer.WriteLine("  extend0 metadb validate <path> [--security] [--ownership-transfer] [--json]");
         writer.WriteLine();
         writer.WriteLine("Arguments:");
-        writer.WriteLine("  <path>    TableSpec file, map file with .tablespec.json sidecar, or chunked table directory.");
+        writer.WriteLine("  <path>    TableSpec file, map path resolved via TableSpec save conventions, or chunked table directory.");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  --json    Emit a machine-readable JSON report.");
+        writer.WriteLine("  --security                         Run storage protection diagnostics even when the TableSpec does not require protection.");
+        writer.WriteLine("  --require-protection <level>       Override required level: none, declared, provider-attested, platform-verified, managed.");
+        writer.WriteLine("  --provider <id>                    Required provider id. Requires --require-protection.");
+        writer.WriteLine("  --protection-id <id>               Required protected volume/mount id. Requires --require-protection.");
+        writer.WriteLine("  --protection-manifest <path>       Explicit storage protection manifest.");
+        writer.WriteLine("  --ownership-transfer               Run owner-movement diagnostics without requiring durable state continuity.");
+        writer.WriteLine("  --state-continuity                 Require shared or replicated storage suitable for durable state transfer.");
+        writer.WriteLine("  --require-continuity <level>       Override required continuity: none, local-only, restorable-snapshot, shared-backing-store, symmetric-replication.");
+        writer.WriteLine("  --continuity-provider <id>         Required continuity provider id.");
+        writer.WriteLine("  --continuity-id <id>               Required shared-store or replication-group id.");
+        writer.WriteLine("  --continuity-manifest <path>       Explicit storage continuity manifest.");
+        writer.WriteLine("  --attestation                      Run hardware-attestation diagnostics.");
+        writer.WriteLine("  --require-attestation <level>      Override required attestation: none, declared, provider-attested, platform-verified, remote-attested.");
+        writer.WriteLine("  --attestation-technology <kind>    Required technology: intel-sgx, intel-tdx, amd-sev-snp, arm-trustzone, arm-cca, tpm-sealed, custom.");
+        writer.WriteLine("  --attestation-provider <id>        Required attestation provider id.");
+        writer.WriteLine("  --attestation-id <id>              Required attestation identity.");
+        writer.WriteLine("  --measurement <value>              Required code/platform measurement.");
+        writer.WriteLine("  --attestation-policy-id <id>       Required provider-defined attestation policy id.");
+        writer.WriteLine("  --attestation-manifest <path>      Explicit hardware attestation manifest.");
+        writer.WriteLine("  --json                             Emit a machine-readable JSON report.");
         writer.WriteLine("  -h, --help");
     }
 }
@@ -551,6 +731,9 @@ public sealed record MetaDbValidateReport(
     long EstimatedLogicalBytes,
     long EstimatedStorageBytes,
     MetaDbRuntimeStorageReport RuntimeStorage,
+    StorageProtectionEvidence? StorageProtection,
+    StorageContinuityEvidence? StorageContinuity,
+    HardwareAttestationEvidence? HardwareAttestation,
     IReadOnlyList<ValidationFinding> Findings,
     int InfoCount,
     int WarningCount,
@@ -567,6 +750,9 @@ public sealed record MetaDbValidateReport(
         long estimatedLogicalBytes,
         long estimatedStorageBytes,
         MetaDbRuntimeStorageReport runtimeStorage,
+        StorageProtectionEvidence? storageProtection,
+        StorageContinuityEvidence? storageContinuity,
+        HardwareAttestationEvidence? hardwareAttestation,
         IReadOnlyList<ValidationFinding> findings) =>
         new(
             inputPath,
@@ -579,6 +765,9 @@ public sealed record MetaDbValidateReport(
             estimatedLogicalBytes,
             estimatedStorageBytes,
             runtimeStorage,
+            storageProtection,
+            storageContinuity,
+            hardwareAttestation,
             findings,
             findings.Count(static f => f.Severity == ValidationSeverity.Info),
             findings.Count(static f => f.Severity == ValidationSeverity.Warning),

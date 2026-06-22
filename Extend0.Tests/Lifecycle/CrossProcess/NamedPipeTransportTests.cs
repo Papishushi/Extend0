@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Extend0.Lifecycle.CrossProcess;
@@ -43,6 +44,124 @@ public sealed class NamedPipeTransportTests
         var error = await Assert.ThrowsAsync<RemoteInvocationException>(() => proxy.ThrowAsync("boom"));
         Assert.Equal(418, error.HResult);
         Assert.Contains("boom", error.Message);
+    }
+
+    [Fact]
+    public async Task NamedPipeTransport_WithSharedSecretHmac_AllowsAuthenticatedClient()
+    {
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"named-pipe-auth-ok-{Guid.NewGuid():N}");
+        var authentication = CrossProcessAuthenticationOptions.SharedSecretHmac("correct-horse-battery-staple");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new NamedPipeTestService(endpointName),
+            CancellationToken.None,
+            authentication);
+
+        using var transport = CreateBuiltInNamedPipeTransport(endpointName, authentication);
+        var proxy = RpcDispatchProxy<INamedPipeTestService>.Create(transport, CancellationToken.None);
+
+        Assert.Equal("echo:secure", await proxy.EchoAsync("secure"));
+    }
+
+    [Fact]
+    public async Task NamedPipeTransport_WithSharedSecretHmac_RejectsUnauthenticatedClient()
+    {
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"named-pipe-auth-missing-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new NamedPipeTestService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SharedSecretHmac("server-secret"));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => Task.Run(() =>
+        {
+            using var transport = CreateBuiltInNamedPipeTransport(endpointName);
+        }));
+
+        Assert.Contains("authentication", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task NamedPipeTransport_WithSharedSecretHmac_RejectsWrongSecret()
+    {
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"named-pipe-auth-wrong-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new NamedPipeTestService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SharedSecretHmac("server-secret"));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => Task.Run(() =>
+        {
+            using var transport = CreateBuiltInNamedPipeTransport(
+                endpointName,
+                CrossProcessAuthenticationOptions.SharedSecretHmac("client-secret"));
+        }));
+
+        Assert.Contains("Authentication failed", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task NamedPipeTransport_WithSignedChallenge_AllowsAuthenticatedClient()
+    {
+        using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var verifier = ECDsa.Create(signer.ExportParameters(includePrivateParameters: false));
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"named-pipe-signed-ok-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new NamedPipeTestService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SignedChallengeServer("client-1", verifier));
+
+        using var transport = CreateBuiltInNamedPipeTransport(
+            endpointName,
+            CrossProcessAuthenticationOptions.SignedChallengeClient("client-1", signer));
+        var proxy = RpcDispatchProxy<INamedPipeTestService>.Create(transport, CancellationToken.None);
+
+        Assert.Equal("echo:signed", await proxy.EchoAsync("signed"));
+    }
+
+    [Fact]
+    public async Task NamedPipeTransport_WithSignedChallenge_RejectsWrongSignature()
+    {
+        using var trustedSigner = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var verifier = ECDsa.Create(trustedSigner.ExportParameters(includePrivateParameters: false));
+        using var untrustedSigner = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"named-pipe-signed-wrong-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new NamedPipeTestService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SignedChallengeServer("client-1", verifier));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => Task.Run(() =>
+        {
+            using var transport = CreateBuiltInNamedPipeTransport(
+                endpointName,
+                CrossProcessAuthenticationOptions.SignedChallengeClient("client-1", untrustedSigner));
+        }));
+
+        Assert.Contains("Authentication failed", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task NamedPipeTransport_WithSignedChallenge_RejectsUnauthenticatedClient()
+    {
+        using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var verifier = ECDsa.Create(signer.ExportParameters(includePrivateParameters: false));
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"named-pipe-signed-missing-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new NamedPipeTestService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SignedChallengeServer("client-1", verifier));
+
+        var error = await Assert.ThrowsAsync<IOException>(() => Task.Run(() =>
+        {
+            using var transport = CreateBuiltInNamedPipeTransport(endpointName);
+        }));
+
+        Assert.Contains("signed-challenge", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -292,14 +411,17 @@ public sealed class NamedPipeTransportTests
         await serverTask;
     }
 
-    private static IClientTransport CreateBuiltInNamedPipeTransport(string endpointName) =>
+    private static IClientTransport CreateBuiltInNamedPipeTransport(
+        string endpointName,
+        CrossProcessAuthenticationOptions? authentication = null) =>
         LifecycleCrossProcessHarness.CreateBuiltInClientTransport(
             new ClientTransportFactoryContext(
                 TransportKind.NamedPipe,
                 LifecycleCrossProcessHarness.NamedPipeProtocolDescriptor,
                 endpointName,
                 ".",
-                2000));
+                2000,
+                authentication));
 
     private static Task RunRawServerAsync(string pipeName, Func<NamedPipeServerStream, Task> handler) =>
         Task.Run(async () =>

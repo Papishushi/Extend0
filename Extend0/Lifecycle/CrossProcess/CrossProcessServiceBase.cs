@@ -12,6 +12,15 @@ namespace Extend0.Lifecycle.CrossProcess
     public abstract class CrossProcessServiceBase<TService> : ICrossProcessService where TService : class, ICrossProcessService
     {
         private readonly DateTimeOffset _startUtc = DateTimeOffset.UtcNow;
+        private readonly string _leaseId = Guid.NewGuid().ToString("N");
+        private string? _runtimeEndpointName;
+        private string? _runtimeEndpointServerName;
+        private TransportKind? _runtimeEndpointTransportKind;
+        private string? _runtimeOwnershipName;
+        private string? _runtimeCoordinationKind;
+        private string? _runtimeCoordinationName;
+        private string? _runtimeCoordinationScope;
+
         protected ILogger? Logger { get; }
 
         protected CrossProcessServiceBase()
@@ -44,19 +53,48 @@ namespace Extend0.Lifecycle.CrossProcess
         /// Transport-neutral endpoint name surfaced in diagnostics and connectivity probes.
         /// Defaults to <see cref="PipeName"/> for the current built-in transport.
         /// </summary>
-        protected virtual string? EndpointName => PipeName;
+        protected virtual string? EndpointName => _runtimeEndpointName ?? PipeName;
 
         /// <summary>
         /// Transport-neutral endpoint server/machine name surfaced in diagnostics and connectivity probes.
         /// Defaults to <see cref="ServerName"/>.
         /// </summary>
-        protected virtual string? EndpointServerName => ServerName;
+        protected virtual string? EndpointServerName => _runtimeEndpointServerName ?? ServerName;
 
         /// <summary>
         /// Logical transport kind surfaced in diagnostics.
         /// Defaults to <see cref="TransportKind.NamedPipe"/> when an endpoint name is available.
         /// </summary>
-        protected virtual TransportKind EndpointTransportKind => EndpointName is null ? TransportKind.None : TransportKind.NamedPipe;
+        protected virtual TransportKind EndpointTransportKind =>
+            _runtimeEndpointTransportKind ?? (EndpointName is null ? TransportKind.None : TransportKind.NamedPipe);
+
+        /// <summary>
+        /// Applies the concrete owner-side endpoint resolved by the singleton orchestrator.
+        /// </summary>
+        internal void ConfigureRuntimeEndpoint(string endpointName, string? endpointServerName, TransportKind transportKind)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(endpointName);
+            _runtimeEndpointName = endpointName;
+            _runtimeEndpointServerName = endpointServerName;
+            _runtimeEndpointTransportKind = transportKind;
+        }
+
+        /// <summary>
+        /// Applies the concrete owner-side lease metadata resolved by the singleton orchestrator.
+        /// </summary>
+        internal void ConfigureRuntimeLease(
+            string ownershipName,
+            string coordinationKind,
+            string? coordinationName,
+            string? coordinationScope)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownershipName);
+            ArgumentException.ThrowIfNullOrWhiteSpace(coordinationKind);
+            _runtimeOwnershipName = ownershipName;
+            _runtimeCoordinationKind = coordinationKind;
+            _runtimeCoordinationName = coordinationName;
+            _runtimeCoordinationScope = coordinationScope;
+        }
 
         /// <summary>
         /// Returns a lightweight heartbeat snapshot for this service instance.
@@ -110,6 +148,36 @@ namespace Extend0.Lifecycle.CrossProcess
                 EndpointTransportKind);
 
             return Task.FromResult(info);
+        }
+
+        /// <summary>
+        /// Retrieves the current ownership lease snapshot for this service instance.
+        /// </summary>
+        public Task<Lease> GetLeaseAsync()
+        {
+            using var proc = Process.GetCurrentProcess();
+            var ownershipName = _runtimeOwnershipName ?? ContractName;
+            var lease = new Lease(
+                _leaseId,
+                ContractName,
+                ownershipName,
+                CrossProcessUtils.CurrentFingerprint,
+                Environment.MachineName,
+                Environment.ProcessId,
+                proc.ProcessName,
+                _startUtc,
+                DateTimeOffset.UtcNow,
+                null,
+                EndpointName,
+                EndpointServerName,
+                EndpointTransportKind,
+                _runtimeCoordinationKind ?? "InProcess",
+                _runtimeCoordinationName,
+                _runtimeCoordinationScope ?? "Process",
+                IsExclusive: _runtimeCoordinationKind is not null,
+                IsActive: true);
+
+            return Task.FromResult(lease);
         }
 
         /// <summary>

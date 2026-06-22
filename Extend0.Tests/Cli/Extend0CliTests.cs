@@ -3,8 +3,12 @@ using System.Xml.Linq;
 using System.IO.Pipes;
 using System.Text;
 using Extend0.Cli;
+using Extend0.Lifecycle.Certificates;
+using Extend0.Lifecycle.Assurance;
 using Extend0.Lifecycle.CrossProcess;
+using Extend0.Metadata.CrossProcess.Contract;
 using Extend0.Metadata.Schema;
+using Extend0.Metadata.Storage;
 using Extend0.Testing.Lifecycle.CrossProcess;
 using Extend0.Testing.Metadata.Storage;
 
@@ -24,10 +28,13 @@ public sealed class Extend0CliTests
         Assert.Contains("extend0 doctor", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 lifecycle probe", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 lifecycle diagnose", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 lifecycle assurance storage diagnose", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 lifecycle certificate dns-01", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb validate", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb schema", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb snapshot", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 metadb restore", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("extend0 storage diagnose", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 ontology inspect", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("extend0 ontology validate", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(string.Empty, error.ToString());
@@ -46,6 +53,106 @@ public sealed class Extend0CliTests
     }
 
     [Fact]
+    public async Task LifecycleAssuranceStorageDiagnose_WithProviderManifest_PrintsProtectionDecision()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            StorageProtectionVerifier.SaveManifest(
+                Path.Combine(root, StorageProtectionVerifier.ManifestFileName),
+                StorageProtectionManifest.Create(
+                    "test-provider",
+                    "volume-1",
+                    StorageProtectionLevel.ProviderAttestedEncrypted,
+                    root));
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var targetPath = Path.Combine(root, "table.meta");
+
+            var exitCode = await Extend0Cli.RunAsync(
+                ["lifecycle", "assurance", "storage", "diagnose", targetPath, "--require", "provider-attested", "--provider", "test-provider", "--protection-id", "volume-1"],
+                output,
+                error,
+                root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Extend0 lifecycle assurance storage diagnose", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Decision: Pass", text, StringComparison.Ordinal);
+            Assert.Contains("Observed protection: ProviderAttestedEncrypted", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StorageDiagnose_WithProviderManifest_PrintsProtectionDecision()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            StorageProtectionVerifier.SaveManifest(
+                Path.Combine(root, StorageProtectionVerifier.ManifestFileName),
+                StorageProtectionManifest.Create(
+                    "test-provider",
+                    "volume-1",
+                    StorageProtectionLevel.ProviderAttestedEncrypted,
+                    root));
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var targetPath = Path.Combine(root, "table.meta");
+
+            var exitCode = await Extend0Cli.RunAsync(
+                ["storage", "diagnose", targetPath, "--require", "provider-attested", "--provider", "test-provider", "--protection-id", "volume-1"],
+                output,
+                error,
+                root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Extend0 storage diagnose", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Decision: Pass", text, StringComparison.Ordinal);
+            Assert.Contains("Observed protection: ProviderAttestedEncrypted", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StorageDiagnose_WithMissingEvidence_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(
+                ["storage", "diagnose", Path.Combine(root, "table.meta"), "--require", "provider-attested"],
+                output,
+                error,
+                root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Decision: FailClosed", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("storage-protection-evidence-missing", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CliProject_IsConfiguredAsDotnetTool()
     {
         var projectPath = Path.Combine(FindRepositoryRoot(), "Extend0.Cli", "Extend0.Cli.csproj");
@@ -55,6 +162,136 @@ public sealed class Extend0CliTests
         Assert.Equal("true", GetProjectProperty(document, "PackAsTool"), ignoreCase: true);
         Assert.Equal("Extend0.Cli", GetProjectProperty(document, "PackageId"));
         Assert.Equal("extend0", GetProjectProperty(document, "ToolCommandName"));
+    }
+
+    [Fact]
+    public async Task LifecycleCertificateDns01_WithAccountThumbprint_PrintsTxtRecord()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            [
+                "lifecycle", "certificate", "dns-01",
+                "--domain", "*.Example.COM.",
+                "--token", "abc123",
+                "--account-thumbprint", "accountThumbprint",
+                "--ttl", "60"
+            ],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        var text = output.ToString();
+        var expectedValue = Dns01Challenge.ComputeTxtRecordValue("abc123.accountThumbprint");
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Extend0 lifecycle certificate dns-01", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Domain: *.example.com", text, StringComparison.Ordinal);
+        Assert.Contains("Authorization domain: example.com", text, StringComparison.Ordinal);
+        Assert.Contains("Name: _acme-challenge.example.com", text, StringComparison.Ordinal);
+        Assert.Contains("Type: TXT", text, StringComparison.Ordinal);
+        Assert.Contains($"Value: {expectedValue}", text, StringComparison.Ordinal);
+        Assert.Contains("TTL: 60 seconds", text, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleCertificateDns01_WithKeyAuthorization_CanEmitJson()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            [
+                "lifecycle", "certificate", "dns-01",
+                "--domain", "api.example.com",
+                "--token", "tok",
+                "--key-authorization", "tok.thumb",
+                "--json"
+            ],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var expectedValue = Dns01Challenge.ComputeTxtRecordValue("tok.thumb");
+        Assert.Equal(0, exitCode);
+        Assert.Equal("manual", document.RootElement.GetProperty("ProviderName").GetString());
+        Assert.Equal("api.example.com", document.RootElement.GetProperty("Domain").GetString());
+        Assert.Equal("_acme-challenge.api.example.com", document.RootElement.GetProperty("RecordName").GetString());
+        Assert.Equal("TXT", document.RootElement.GetProperty("RecordType").GetString());
+        Assert.Equal(expectedValue, document.RootElement.GetProperty("RecordValue").GetString());
+        Assert.True(document.RootElement.GetProperty("RequiresManualAction").GetBoolean());
+        Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleCertificateDns01_WithMismatchedKeyAuthorization_ReturnsUsageError()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            [
+                "lifecycle", "certificate", "dns-01",
+                "--domain", "example.com",
+                "--token", "expected",
+                "--key-authorization", "other.thumb"
+            ],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        Assert.Equal(2, exitCode);
+        Assert.Equal(string.Empty, output.ToString());
+        Assert.Contains("Key authorization", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LifecycleCertificateDns01Order_WithoutTermsAcceptance_ReturnsUsageError()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            [
+                "lifecycle", "certificate", "dns-01", "order",
+                "--domain", "example.com",
+                "--email", "ops@example.com",
+                "--state", "acme-state.json"
+            ],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        Assert.Equal(2, exitCode);
+        Assert.Equal(string.Empty, output.ToString());
+        Assert.Contains("--accept-terms", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LifecycleCertificateDns01Order_WithPassphraseProtectionButNoPassphrase_ReturnsUsageError()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            [
+                "lifecycle", "certificate", "dns-01", "order",
+                "--domain", "example.com",
+                "--email", "ops@example.com",
+                "--accept-terms",
+                "--state", "acme-state.json",
+                "--protect-state", "passphrase"
+            ],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        Assert.Equal(2, exitCode);
+        Assert.Equal(string.Empty, output.ToString());
+        Assert.Contains("--state-passphrase", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -144,6 +381,28 @@ public sealed class Extend0CliTests
     }
 
     [Fact]
+    public async Task LifecycleProbe_WithTlsTcpSocketEndpoint_ResolvesBuiltInTransport()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "probe", "--transport", "TlsTcpSocket", "--endpoint", "localhost:43001", "--tls-target-host", "localhost", "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.Equal("TlsTcpSocket", document.RootElement.GetProperty("TransportKind").GetString());
+        Assert.Equal("localhost:43001", document.RootElement.GetProperty("EndpointName").GetString());
+        Assert.Equal("extend0-jsonrpc-ndjson", document.RootElement.GetProperty("ProtocolId").GetString());
+        Assert.True(document.RootElement.GetProperty("BuiltInClientAvailable").GetBoolean());
+        Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
     public async Task LifecycleProbe_WithUnixDomainSocket_ResolvesBuiltInTransport()
     {
         using var output = new StringWriter();
@@ -162,6 +421,30 @@ public sealed class Extend0CliTests
         Assert.Equal("extend0-jsonrpc-ndjson", document.RootElement.GetProperty("ProtocolId").GetString());
         Assert.True(document.RootElement.GetProperty("BuiltInClientAvailable").GetBoolean());
         Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleProbe_WithMetaDbContract_UsesContractScopedEndpoint()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "probe", "--contract", "metadb", "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var expectedEndpoint = CrossProcessTransportFactory.ResolveEndpointNameFor<IMetaDBManagerRPCCompatible>(
+            "Extend0.MetaDB",
+            TransportKind.NamedPipe);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("MetaDB", document.RootElement.GetProperty("ContractKind").GetString());
+        Assert.Equal("Extend0.MetaDB", document.RootElement.GetProperty("Name").GetString());
+        Assert.Equal(expectedEndpoint, document.RootElement.GetProperty("EndpointName").GetString());
         Assert.Equal(string.Empty, error.ToString());
     }
 
@@ -192,6 +475,34 @@ public sealed class Extend0CliTests
     }
 
     [Fact]
+    public async Task LifecycleProbe_WithSharedSecretHmac_ConnectsWithoutPrintingSecret()
+    {
+        const string secret = "cli-probe-secret";
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-probe-auth-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new CliProbeService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SharedSecretHmac(secret));
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "probe", "--endpoint", endpointName, "--connect", "--auth", "shared-secret-hmac", "--secret", secret, "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.True(document.RootElement.GetProperty("Connected").GetBoolean());
+        Assert.Equal("SharedSecretHmac", document.RootElement.GetProperty("AuthenticationMode").GetString());
+        Assert.DoesNotContain(secret, output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
     public async Task LifecycleDiagnose_WithLiveNamedPipeOwner_ReportsOwnerHandshakeAndHeartbeat()
     {
         var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-diagnose-{Guid.NewGuid():N}");
@@ -215,10 +526,77 @@ public sealed class Extend0CliTests
         Assert.Equal("OwnerObserved", root.GetProperty("OwnerStatus").GetString());
         Assert.Equal("Passed", root.GetProperty("HandshakeStatus").GetString());
         Assert.Equal("Alive", root.GetProperty("HeartbeatStatus").GetString());
-        Assert.Equal("ImpliedByOwnerObservation", root.GetProperty("LeaseStatus").GetString());
+        Assert.Equal("Active", root.GetProperty("LeaseStatus").GetString());
         Assert.True(root.GetProperty("OwnerReachable").GetBoolean());
         Assert.True(root.GetProperty("OwnerReportedCanConnect").GetBoolean());
         Assert.Equal(endpointName, root.GetProperty("Owner").GetProperty("EndpointName").GetString());
+        Assert.Equal(endpointName, root.GetProperty("Lease").GetProperty("EndpointName").GetString());
+        Assert.True(root.GetProperty("Lease").GetProperty("IsActive").GetBoolean());
+        Assert.Equal(0, root.GetProperty("ErrorCount").GetInt32());
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleDiagnose_WithSharedSecretHmac_ReportsAuthenticatedHandshakeWithoutPrintingSecret()
+    {
+        const string secret = "cli-diagnose-secret";
+        var endpointName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"cli-diagnose-auth-{Guid.NewGuid():N}");
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new CliProbeService(endpointName),
+            CancellationToken.None,
+            CrossProcessAuthenticationOptions.SharedSecretHmac(secret));
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "diagnose", "--endpoint", endpointName, "--auth", "hmac", "--secret", secret, "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var root = document.RootElement;
+        Assert.Equal(0, exitCode);
+        Assert.Equal("SharedSecretHmac", root.GetProperty("AuthenticationMode").GetString());
+        Assert.Equal("Passed", root.GetProperty("HandshakeStatus").GetString());
+        Assert.Equal("Active", root.GetProperty("LeaseStatus").GetString());
+        Assert.DoesNotContain(secret, output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task LifecycleDiagnose_WithMetaDbContract_ConnectsToContractScopedEndpoint()
+    {
+        var serviceName = $"cli-metadb-{Guid.NewGuid():N}";
+        var endpointName = CrossProcessTransportFactory.ResolveEndpointNameFor<IMetaDBManagerRPCCompatible>(
+            serviceName,
+            TransportKind.NamedPipe);
+        await using var server = LifecycleCrossProcessHarness.CreateNamedPipeServer(
+            endpointName,
+            new CliProbeService(endpointName),
+            CancellationToken.None);
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await Extend0Cli.RunAsync(
+            ["lifecycle", "diagnose", "--contract", "metadb", "--name", serviceName, "--json"],
+            output,
+            error,
+            Directory.GetCurrentDirectory());
+
+        using var document = JsonDocument.Parse(output.ToString());
+        var root = document.RootElement;
+        Assert.Equal(0, exitCode);
+        Assert.Equal("MetaDB", root.GetProperty("ContractKind").GetString());
+        Assert.Equal(endpointName, root.GetProperty("EndpointName").GetString());
+        Assert.Equal("OwnerObserved", root.GetProperty("OwnerStatus").GetString());
+        Assert.Equal("Passed", root.GetProperty("HandshakeStatus").GetString());
+        Assert.Equal("Alive", root.GetProperty("HeartbeatStatus").GetString());
+        Assert.Equal("Active", root.GetProperty("LeaseStatus").GetString());
+        Assert.Equal(endpointName, root.GetProperty("Lease").GetProperty("EndpointName").GetString());
         Assert.Equal(0, root.GetProperty("ErrorCount").GetInt32());
         Assert.Equal(string.Empty, error.ToString());
     }
@@ -485,6 +863,319 @@ public sealed class Extend0CliTests
             Assert.Contains("Extend0 MetaDB validate", text, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Estimated logical bytes: 320", text, StringComparison.Ordinal);
             Assert.Contains("0 errors", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithCustomSaveToDirectoryExtension_ResolvesSpecFromMapPath()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            var specPath = spec.SaveToDirectory(root, extension: ".schema");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", mapPath], output, error, root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains($"Spec: {Path.GetFullPath(specPath)}", text, StringComparison.Ordinal);
+            Assert.Contains("custom SaveToDirectory extension '.schema'", text, StringComparison.Ordinal);
+            Assert.Contains("0 warnings", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("0 errors", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithSecurityManifest_PrintsProtectionDecision()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            StorageProtectionVerifier.SaveManifest(
+                Path.Combine(root, StorageProtectionVerifier.ManifestFileName),
+                StorageProtectionManifest.Create(
+                    "test-provider",
+                    "volume-1",
+                    StorageProtectionLevel.ProviderAttestedEncrypted,
+                    root));
+
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ])
+            {
+                Protection = StorageProtectionPolicy.Require(
+                    StorageProtectionLevel.ProviderAttestedEncrypted,
+                    "test-provider",
+                    "volume-1")
+            };
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", mapPath], output, error, root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Protection decision: Pass", text, StringComparison.Ordinal);
+            Assert.Contains("Observed protection: ProviderAttestedEncrypted", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithRequiredSecurityButNoEvidence_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ])
+            {
+                Protection = StorageProtectionPolicy.Require(StorageProtectionLevel.ProviderAttestedEncrypted)
+            };
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", mapPath], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Protection decision: FailClosed", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("storage-protection-evidence-missing", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithOwnershipTransferButNoContinuityEvidence_AllowsEphemeralTakeover()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", mapPath, "--ownership-transfer"], output, error, root);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Continuity decision: Pass", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("ownership-transfer-ephemeral", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("storage-continuity-not-required", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithStateContinuityButNoContinuityEvidence_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(["metadb", "validate", mapPath, "--state-continuity"], output, error, root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Continuity decision: FailClosed", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("storage-continuity-evidence-missing", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithStateContinuityAndSharedContinuityManifest_Passes()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            StorageContinuityVerifier.SaveManifest(
+                Path.Combine(root, StorageContinuityVerifier.ManifestFileName),
+                StorageContinuityManifest.Create(
+                    "test-continuity-provider",
+                    "shared-volume-1",
+                    StorageContinuityLevel.SharedBackingStore,
+                    root));
+
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(
+                [
+                    "metadb",
+                    "validate",
+                    mapPath,
+                    "--state-continuity",
+                    "--continuity-provider",
+                    "test-continuity-provider",
+                    "--continuity-id",
+                    "shared-volume-1"
+                ],
+                output,
+                error,
+                root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Continuity decision: Pass", text, StringComparison.Ordinal);
+            Assert.Contains("Observed continuity: SharedBackingStore", text, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithAttestationButNoEvidence_ReturnsFailure()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(
+                ["metadb", "validate", mapPath, "--attestation"],
+                output,
+                error,
+                root);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Attestation decision: FailClosed", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("hardware-attestation-evidence-missing", output.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MetaDbValidate_WithRemoteIntelSgxAttestationManifest_Passes()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            HardwareAttestationVerifier.SaveManifest(
+                Path.Combine(root, HardwareAttestationVerifier.ManifestFileName),
+                HardwareAttestationManifest.Create(
+                    "sgx-provider",
+                    "quote-1",
+                    HardwareAttestationTechnology.IntelSgx,
+                    HardwareAttestationLevel.RemoteAttested,
+                    root,
+                    measurement: "mrenclave:abc",
+                    policyId: "policy-a"));
+
+            var mapPath = Path.Combine(root, "settings.meta");
+            var spec = new TableSpec("Settings", mapPath,
+            [
+                TableSpec.Helpers.Column("Entries", capacity: 4, keyBytes: 16, valueBytes: 64)
+            ]);
+            spec.SaveToFile(mapPath + ".tablespec.json");
+
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+
+            var exitCode = await Extend0Cli.RunAsync(
+                [
+                    "metadb",
+                    "validate",
+                    mapPath,
+                    "--require-attestation",
+                    "remote-attested",
+                    "--attestation-technology",
+                    "intel-sgx",
+                    "--attestation-provider",
+                    "sgx-provider",
+                    "--attestation-id",
+                    "quote-1",
+                    "--measurement",
+                    "mrenclave:abc",
+                    "--attestation-policy-id",
+                    "policy-a"
+                ],
+                output,
+                error,
+                root);
+
+            var text = output.ToString();
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Attestation decision: Pass", text, StringComparison.Ordinal);
+            Assert.Contains("Observed attestation: RemoteAttested", text, StringComparison.Ordinal);
+            Assert.Contains("Observed attestation technology: IntelSgx", text, StringComparison.Ordinal);
             Assert.Equal(string.Empty, error.ToString());
         }
         finally

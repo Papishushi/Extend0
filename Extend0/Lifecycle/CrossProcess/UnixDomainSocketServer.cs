@@ -13,6 +13,7 @@ namespace Extend0.Lifecycle.CrossProcess
     {
         private readonly UnixDomainSocketEndpointName _endpoint;
         private readonly CrossProcessProtocolDescriptor _protocol;
+        private readonly CrossProcessAuthenticationOptions _authentication;
         private readonly object _impl;
         private readonly ILogger<UnixDomainSocketServer> _logger;
         private readonly CancellationTokenSource _cts;
@@ -25,10 +26,12 @@ namespace Extend0.Lifecycle.CrossProcess
             object impl,
             ILogger<UnixDomainSocketServer> logger,
             CancellationToken ct,
-            CrossProcessProtocolDescriptor? protocol = null)
+            CrossProcessProtocolDescriptor? protocol = null,
+            CrossProcessAuthenticationOptions? authentication = null)
         {
             _endpoint = UnixDomainSocketEndpointName.Parse(endpointName);
             _protocol = protocol ?? UnixDomainSocketTransportProtocol.Descriptor;
+            _authentication = authentication ?? CrossProcessAuthenticationOptions.None;
             _impl = impl ?? throw new ArgumentNullException(nameof(impl));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -106,7 +109,11 @@ namespace Extend0.Lifecycle.CrossProcess
                     AutoFlush = true
                 };
 
-                await writer.WriteLineAsync(CrossProcessHandshake.BuildHelloLine(_protocol)).ConfigureAwait(false);
+                var helloLine = CrossProcessHandshake.BuildHelloLine(_protocol, _authentication);
+                await writer.WriteLineAsync(helloLine).ConfigureAwait(false);
+                if (!await AuthenticateClientAsync(reader, writer, helloLine, token).ConfigureAwait(false))
+                    return;
+
                 await ProcessClientLoopAsync(reader, writer, methodsByName, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -139,6 +146,34 @@ namespace Extend0.Lifecycle.CrossProcess
                 if (line is null) break;
                 await ProcessRequestLineAsync(line, methodsByName, writer).ConfigureAwait(false);
             }
+        }
+
+        private async Task<bool> AuthenticateClientAsync(
+            StreamReader reader,
+            StreamWriter writer,
+            string helloLine,
+            CancellationToken token)
+        {
+            if (!_authentication.RequiresHandshakeAuthentication)
+                return true;
+
+            if (!_authentication.RequiresClientProof)
+            {
+                _logger.LogWarning("Rejected cross-process client authentication for Unix domain socket endpoint {Endpoint}: authentication mode {AuthenticationMode} is not supported by this transport.", _endpoint.Path, _authentication.Mode);
+                await writer.WriteLineAsync(CrossProcessHandshake.BuildAuthenticationErrorLine()).ConfigureAwait(false);
+                return false;
+            }
+
+            var authenticationLine = await ReadRequestLineAsync(reader, token).ConfigureAwait(false);
+            if (!CrossProcessHandshake.TryValidateClientAuthenticationLine(authenticationLine, helloLine, _authentication, out var error))
+            {
+                _logger.LogWarning("Rejected cross-process client authentication for Unix domain socket endpoint {Endpoint}: {Reason}", _endpoint.Path, error);
+                await writer.WriteLineAsync(CrossProcessHandshake.BuildAuthenticationErrorLine()).ConfigureAwait(false);
+                return false;
+            }
+
+            await writer.WriteLineAsync(CrossProcessHandshake.BuildAuthenticationOkLine()).ConfigureAwait(false);
+            return true;
         }
 
         private static IReadOnlyDictionary<string, MethodInfo[]> BuildDispatchTable(object impl)

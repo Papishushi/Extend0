@@ -1,5 +1,6 @@
 ﻿using Extend0.Metadata.CodeGen;
 using Extend0.Metadata.Contract;
+using Extend0.Lifecycle.Assurance;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Indexing.Internal.BuiltIn;
 using Extend0.Metadata.Indexing.Registries;
@@ -122,6 +123,10 @@ namespace Extend0.Metadata.Internal
 
             _colIndexByName = tempColIndexByName.ToFrozenDictionary();
 
+            EnforceStorageProtection(spec);
+            EnforceStorageContinuity(spec);
+            EnforceHardwareAttestation(spec);
+
             _store = spec.MapPath is null
                 ? new InMemoryStore(_columns)
                 : spec.Storage.Normalize().Layout == TableStorageLayout.Chunked
@@ -139,6 +144,66 @@ namespace Extend0.Metadata.Internal
 
             GetOrCreateColKeyIndex();
             GetOrCreateGlobalKeyIndex();
+        }
+
+        private static void EnforceStorageProtection(TableSpec spec)
+        {
+            if (!spec.Protection.RequiresProtection)
+                return;
+
+            if (string.IsNullOrWhiteSpace(spec.MapPath))
+                throw new InvalidOperationException("Protected storage is required, but the table has no backing MapPath.");
+
+            var evidence = StorageProtectionVerifier.DiagnosePath(spec.MapPath, spec.Protection);
+            if (evidence.Decision != StorageProtectionDecision.FailClosed)
+                return;
+
+            var details = string.Join("; ", evidence.Findings
+                .Where(static finding => finding.Severity == StorageProtectionFindingSeverity.Error)
+                .Select(static finding => $"{finding.Id}: {finding.Message}"));
+
+            throw new InvalidOperationException(
+                $"Protected storage policy is not satisfied for table '{spec.Name}'. Decision={evidence.Decision}. {details}");
+        }
+
+        private static void EnforceStorageContinuity(TableSpec spec)
+        {
+            if (!spec.Continuity.RequiresContinuity)
+                return;
+
+            if (string.IsNullOrWhiteSpace(spec.MapPath))
+                throw new InvalidOperationException("Storage continuity is required, but the table has no backing MapPath.");
+
+            var evidence = StorageContinuityVerifier.DiagnosePath(spec.MapPath, spec.Continuity);
+            if (evidence.Decision != StorageContinuityDecision.FailClosed)
+                return;
+
+            var details = string.Join("; ", evidence.Findings
+                .Where(static finding => finding.Severity == StorageContinuityFindingSeverity.Error)
+                .Select(static finding => $"{finding.Id}: {finding.Message}"));
+
+            throw new InvalidOperationException(
+                $"Storage continuity policy is not satisfied for table '{spec.Name}'. Decision={evidence.Decision}. {details}");
+        }
+
+        private static void EnforceHardwareAttestation(TableSpec spec)
+        {
+            if (!spec.Attestation.RequiresAttestation)
+                return;
+
+            if (string.IsNullOrWhiteSpace(spec.MapPath))
+                throw new InvalidOperationException("Hardware attestation is required, but the table has no backing MapPath.");
+
+            var evidence = HardwareAttestationVerifier.DiagnosePath(spec.MapPath, spec.Attestation);
+            if (evidence.Decision != HardwareAttestationDecision.FailClosed)
+                return;
+
+            var details = string.Join("; ", evidence.Findings
+                .Where(static finding => finding.Severity == HardwareAttestationFindingSeverity.Error)
+                .Select(static finding => $"{finding.Id}: {finding.Message}"));
+
+            throw new InvalidOperationException(
+                $"Hardware attestation policy is not satisfied for table '{spec.Name}'. Decision={evidence.Decision}. {details}");
         }
 
         /// <summary>
@@ -166,7 +231,16 @@ namespace Extend0.Metadata.Internal
             if (!loaded)
                 throw new InvalidOperationException("File is not a valid metadata table.");
 
-            return new MetadataTable(new(spec.Name, spec.MapPath, columns) { Storage = spec.Storage });
+            return new MetadataTable(new(spec.Name, spec.MapPath, columns)
+            {
+                Storage = spec.Storage,
+                Protection = spec.Protection,
+                Continuity = spec.Continuity,
+                Attestation = spec.Attestation,
+                SchemaVersion = spec.EffectiveSchemaVersion,
+                SchemaId = spec.SchemaId,
+                SchemaDescription = spec.SchemaDescription
+            });
         }
 
         /// <summary>
@@ -195,7 +269,16 @@ namespace Extend0.Metadata.Internal
             if (!loaded)
                 throw new InvalidOperationException("File is not a valid metadata table.");
 
-            return new MetadataTable(new(_spec.Name, _spec.MapPath, columns) { Storage = _spec.Storage });
+            return new MetadataTable(new(_spec.Name, _spec.MapPath, columns)
+            {
+                Storage = _spec.Storage,
+                Protection = _spec.Protection,
+                Continuity = _spec.Continuity,
+                Attestation = _spec.Attestation,
+                SchemaVersion = _spec.EffectiveSchemaVersion,
+                SchemaId = _spec.SchemaId,
+                SchemaDescription = _spec.SchemaDescription
+            });
         }
 
         /// <summary>

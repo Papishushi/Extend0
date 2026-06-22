@@ -21,6 +21,14 @@ public static class LifecycleCommand
         }
 
         var command = args[0];
+        if (string.Equals(command, "assurance", StringComparison.OrdinalIgnoreCase))
+            return LifecycleAssuranceCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        if (string.Equals(command, "certificate", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(command, "certificates", StringComparison.OrdinalIgnoreCase))
+        {
+            return LifecycleCertificateCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
+        }
+
         if (string.Equals(command, "probe", StringComparison.OrdinalIgnoreCase))
             return LifecycleProbeCommand.RunAsync(args[1..], output, error, workingDirectory, cancellationToken);
         if (string.Equals(command, "diagnose", StringComparison.OrdinalIgnoreCase)
@@ -43,10 +51,14 @@ public static class LifecycleCommand
     private static void WriteHelp(TextWriter writer)
     {
         writer.WriteLine("Usage:");
-        writer.WriteLine("  extend0 lifecycle probe [--name <identity>] [--transport <kind>] [--endpoint <name>] [--connect] [--json]");
-        writer.WriteLine("  extend0 lifecycle diagnose [--name <identity>] [--transport <kind>] [--endpoint <name>] [--json]");
+        writer.WriteLine("  extend0 lifecycle probe [--name <identity>] [--transport <kind>] [--endpoint <name>] [--auth <mode>] [--connect] [--json]");
+        writer.WriteLine("  extend0 lifecycle diagnose [--name <identity>] [--transport <kind>] [--endpoint <name>] [--auth <mode>] [--json]");
+        writer.WriteLine("  extend0 lifecycle assurance storage diagnose <path> [--require <level>] [--json]");
+        writer.WriteLine("  extend0 lifecycle certificate dns-01 order --domain <domain> --email <email> --accept-terms --state <path> [--protect-state passphrase] [--json]");
         writer.WriteLine();
         writer.WriteLine("Commands:");
+        writer.WriteLine("  assurance  Validate cross-service assurance evidence such as protected storage posture.");
+        writer.WriteLine("  certificate Prepare certificate proofs such as ACME DNS-01 TXT records.");
         writer.WriteLine("  probe       Resolve lifecycle transport/protocol/endpoint details and optionally test connectivity.");
         writer.WriteLine("  diagnose    Connect to an owner, validate handshake, and report service info, lease status, and heartbeat.");
     }

@@ -1,5 +1,8 @@
 ﻿using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Extend0.Lifecycle.Assurance;
+using Extend0.Metadata.CodeGen;
 
 namespace Extend0.Metadata.Schema
 {
@@ -43,6 +46,24 @@ namespace Extend0.Metadata.Schema
         public TableStorageOptions Storage { get; init; }
 
         /// <summary>
+        /// Optional fail-closed protection policy for the table backing path.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public StorageProtectionPolicy Protection { get; init; }
+
+        /// <summary>
+        /// Optional fail-closed continuity policy for owner movement or cross-node recovery.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public StorageContinuityPolicy Continuity { get; init; }
+
+        /// <summary>
+        /// Optional fail-closed hardware-attestation policy for the execution environment that accesses the table.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public HardwareAttestationPolicy Attestation { get; init; }
+
+        /// <summary>
         /// Performs basic validation of the <see cref="TableSpec"/> fields.
         /// </summary>
         /// <exception cref="ArgumentException">
@@ -64,7 +85,24 @@ namespace Extend0.Metadata.Schema
             if (SchemaDescription is not null && string.IsNullOrWhiteSpace(SchemaDescription))
                 throw new ArgumentException("TableSpec.SchemaDescription cannot be empty when provided.");
 
+            for (int i = 0; i < Columns.Length; i++)
+            {
+                var column = Columns[i];
+                if (string.IsNullOrWhiteSpace(column.Name))
+                    throw new ArgumentException($"TableSpec.Columns[{i}].Name cannot be empty.");
+
+                var keyBytes = column.Size.GetKeySize();
+                var valueBytes = column.Size.GetValueSize();
+                if (valueBytes <= 0)
+                    throw new ArgumentOutOfRangeException(nameof(Columns), valueBytes, $"TableSpec.Columns[{i}] must reserve at least one value byte.");
+                if (keyBytes > Helpers.MaxPackedSegmentBytes || valueBytes > Helpers.MaxPackedSegmentBytes)
+                    throw new ArgumentOutOfRangeException(nameof(Columns), $"TableSpec.Columns[{i}] exceeds the current packed size encoding.");
+            }
+
             Storage.Validate();
+            Protection.Validate();
+            Continuity.Validate();
+            Attestation.Validate();
         }
 
         /// <summary>
@@ -108,22 +146,18 @@ namespace Extend0.Metadata.Schema
         /// <see langword="false"/> to throw if the file is present.
         /// </param>
         /// <returns>The full path of the created (or overwritten) file.</returns>
-        public string SaveToDirectory(string directory, string extension = ".meta.tablespec.json", bool overwrite = true)
+        public string SaveToDirectory(string directory, string extension = Helpers.DefaultSpecExtension, bool overwrite = true)
         {
-            if (Storage.Normalize().Layout == TableStorageLayout.Chunked)
-            {
-                var tableDirectory = Path.Combine(directory, Helpers.SanitizeFileName(Name).ToLowerInvariant());
-                Directory.CreateDirectory(tableDirectory);
-                var specPath = Path.Combine(tableDirectory, "tablespec.json");
-                SaveToFile(specPath, overwrite);
-                return specPath;
-            }
-
-            var fileName = Helpers.SanitizeFileName(Name) + extension;
-            var full = Path.Combine(directory, fileName.ToLowerInvariant());
-            SaveToFile(full, overwrite);
-            return full;
+            var specPath = GetSpecPathInDirectory(directory, extension);
+            SaveToFile(specPath, overwrite);
+            return specPath;
         }
+
+        /// <summary>
+        /// Computes the path that <see cref="SaveToDirectory(string, string, bool)"/> would use for this spec.
+        /// </summary>
+        public string GetSpecPathInDirectory(string directory, string extension = Helpers.DefaultSpecExtension) =>
+            Helpers.GetSpecPathInDirectory(directory, Name, Storage, extension);
 
         /// <summary>
         /// Compares two <see cref="TableSpec"/> values structurally, including their column layouts by value.
@@ -137,6 +171,15 @@ namespace Extend0.Metadata.Schema
                 return false;
 
             if (Storage.Normalize() != other.Storage.Normalize())
+                return false;
+
+            if (Protection != other.Protection)
+                return false;
+
+            if (Continuity != other.Continuity)
+                return false;
+
+            if (Attestation != other.Attestation)
                 return false;
 
             if (EffectiveSchemaVersion != other.EffectiveSchemaVersion)
@@ -166,6 +209,9 @@ namespace Extend0.Metadata.Schema
             hash.Add(Name, StringComparer.Ordinal);
             hash.Add(MapPath, StringComparer.Ordinal);
             hash.Add(Storage.Normalize());
+            hash.Add(Protection);
+            hash.Add(Continuity);
+            hash.Add(Attestation);
             hash.Add(EffectiveSchemaVersion);
             hash.Add(SchemaId, StringComparer.Ordinal);
             hash.Add(SchemaDescription, StringComparer.Ordinal);

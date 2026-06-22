@@ -206,6 +206,27 @@ public static class TableSpecCompatibility
                 "storage-chunk-size-change",
                 $"Storage chunk size changes from {sourceStorage.ChunkSize} to {targetStorage.ChunkSize}."));
         }
+
+        if (source.Protection != target.Protection)
+        {
+            findings.Add(TableSpecCompatibilityFinding.Info(
+                "storage-protection-policy-change",
+                $"Storage protection policy changes from '{source.Protection.RequiredLevel}' to '{target.Protection.RequiredLevel}'."));
+        }
+
+        if (source.Continuity != target.Continuity)
+        {
+            findings.Add(TableSpecCompatibilityFinding.Info(
+                "storage-continuity-policy-change",
+                $"Storage continuity policy changes from '{source.Continuity.RequiredLevel}' to '{target.Continuity.RequiredLevel}'."));
+        }
+
+        if (source.Attestation != target.Attestation)
+        {
+            findings.Add(TableSpecCompatibilityFinding.Info(
+                "hardware-attestation-policy-change",
+                $"Hardware attestation policy changes from '{source.Attestation.RequiredLevel}' to '{target.Attestation.RequiredLevel}'."));
+        }
     }
 
     private static void CompareColumns(

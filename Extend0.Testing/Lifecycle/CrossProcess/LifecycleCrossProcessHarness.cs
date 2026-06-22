@@ -17,8 +17,10 @@ public static class LifecycleCrossProcessHarness
 
     public static CrossProcessProtocolDescriptor TcpSocketProtocolDescriptor => TcpSocketTransportProtocol.Descriptor;
 
-    public static string BuildHelloLine(CrossProcessProtocolDescriptor descriptor) =>
-        CrossProcessHandshake.BuildHelloLine(descriptor);
+    public static CrossProcessProtocolDescriptor TlsTcpSocketProtocolDescriptor => TlsTcpSocketTransportProtocol.Descriptor;
+
+    public static string BuildHelloLine(CrossProcessProtocolDescriptor descriptor, CrossProcessAuthenticationOptions? authentication = null) =>
+        CrossProcessHandshake.BuildHelloLine(descriptor, authentication);
 
     public static bool TryValidateHelloLine(string helloLine, CrossProcessProtocolDescriptor expectedProtocol, out string error) =>
         CrossProcessHandshake.TryValidateHelloLine(helloLine, expectedProtocol, out error);
@@ -26,14 +28,34 @@ public static class LifecycleCrossProcessHarness
     public static Mutex CreateOwnedMutex(string baseName, bool preferGlobal, out bool createdNew, out bool isGlobal) =>
         CrossProcessUtils.CreateOwned(baseName, preferGlobal, out createdNew, out isGlobal, NullLogger.Instance);
 
-    public static ICrossProcessServerHost CreateNamedPipeServer(string endpointName, object implementation, CancellationToken ct) =>
-        new NamedPipeServer(endpointName, implementation, NullLogger<NamedPipeServer>.Instance, ct);
+    public static ICrossProcessServerHost CreateNamedPipeServer(
+        string endpointName,
+        object implementation,
+        CancellationToken ct,
+        CrossProcessAuthenticationOptions? authentication = null) =>
+        new NamedPipeServer(endpointName, implementation, NullLogger<NamedPipeServer>.Instance, ct, authentication: authentication);
 
-    public static ICrossProcessServerHost CreateUnixDomainSocketServer(string endpointName, object implementation, CancellationToken ct) =>
-        new UnixDomainSocketServer(endpointName, implementation, NullLogger<UnixDomainSocketServer>.Instance, ct);
+    public static ICrossProcessServerHost CreateUnixDomainSocketServer(
+        string endpointName,
+        object implementation,
+        CancellationToken ct,
+        CrossProcessAuthenticationOptions? authentication = null) =>
+        new UnixDomainSocketServer(endpointName, implementation, NullLogger<UnixDomainSocketServer>.Instance, ct, authentication: authentication);
 
-    public static ICrossProcessServerHost CreateTcpSocketServer(string endpointName, object implementation, CancellationToken ct) =>
-        new TcpSocketServer(endpointName, implementation, NullLogger<TcpSocketServer>.Instance, ct);
+    public static ICrossProcessServerHost CreateTcpSocketServer(
+        string endpointName,
+        object implementation,
+        CancellationToken ct,
+        CrossProcessAuthenticationOptions? authentication = null) =>
+        new TcpSocketServer(endpointName, implementation, NullLogger<TcpSocketServer>.Instance, ct, authentication: authentication);
+
+    public static ICrossProcessServerHost CreateTlsTcpSocketServer(
+        string endpointName,
+        object implementation,
+        CancellationToken ct,
+        CrossProcessTlsOptions tls,
+        CrossProcessAuthenticationOptions? authentication = null) =>
+        new TlsTcpSocketServer(endpointName, implementation, NullLogger<TlsTcpSocketServer>.Instance, ct, authentication: authentication, tls: tls);
 
     public static Task StopNamedPipeServerAsync(ICrossProcessServerHost host) =>
         host is NamedPipeServer server
@@ -42,6 +64,9 @@ public static class LifecycleCrossProcessHarness
 
     public static string BuildNamedPipeEndpointName(string logicalName) =>
         CrossProcessUtils.BuildPipeName(logicalName);
+
+    public static string BuildTestServiceOwnershipName(string logicalName) =>
+        CrossProcessUtils.BuildNameFor<ITestCrossProcessService>(logicalName);
 
     public static string BuildUnixDomainSocketEndpointName(string logicalName) =>
         UnixDomainSocketEndpointName.BuildPath(logicalName);
@@ -116,6 +141,42 @@ public static class LifecycleCrossProcessHarness
         bool ClientIsOwner,
         ServerTransportFactoryContext ServerContext,
         ClientTransportFactoryContext ClientContext);
+
+    public static async Task<OwnerRuntimeEndpointResult> RunNamedPipeOwnerRuntimeEndpointScenario(string serviceName)
+    {
+        using var owner = CrossProcessOrchestrator<ITestCrossProcessService>.GetOrStart(
+            () => new TestCrossProcessService(),
+            name: serviceName,
+            serverName: ".");
+
+        var serviceInfo = await owner.Service.GetServiceInfoAsync().ConfigureAwait(false);
+        var lease = await owner.Service.GetLeaseAsync().ConfigureAwait(false);
+        var canConnect = await owner.Service.CanConnectAsync().ConfigureAwait(false);
+
+        return new OwnerRuntimeEndpointResult(
+            owner.IsOwner,
+            serviceInfo.EndpointName,
+            serviceInfo.EndpointServerName,
+            serviceInfo.TransportKind,
+            lease.OwnershipName,
+            lease.CoordinationKind,
+            lease.CoordinationScope,
+            lease.IsExclusive,
+            lease.IsActive,
+            canConnect);
+    }
+
+    public sealed record OwnerRuntimeEndpointResult(
+        bool OwnerIsOwner,
+        string? EndpointName,
+        string? EndpointServerName,
+        TransportKind TransportKind,
+        string OwnershipName,
+        string CoordinationKind,
+        string? CoordinationScope,
+        bool LeaseIsExclusive,
+        bool LeaseIsActive,
+        bool CanConnect);
 
     public static bool RunHostFailureRecoveryScenario(string serviceName, CrossProcessProtocolDescriptor protocol)
     {

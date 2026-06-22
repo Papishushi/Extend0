@@ -92,7 +92,7 @@ public static class MetaDbSnapshotCommand
         writer.WriteLine("  extend0 metadb snapshot <path> --out <snapshot-dir> [--label <text>] [--overwrite] [--json]");
         writer.WriteLine();
         writer.WriteLine("Arguments:");
-        writer.WriteLine("  <path>    TableSpec file, map path sidecar, or chunked table directory.");
+        writer.WriteLine("  <path>    TableSpec file, map path resolved via TableSpec save conventions, or chunked table directory.");
         writer.WriteLine();
         writer.WriteLine("Options:");
         writer.WriteLine("  --out <snapshot-dir>  Directory where the snapshot will be written.");

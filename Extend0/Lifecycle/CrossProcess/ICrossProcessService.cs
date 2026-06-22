@@ -54,6 +54,15 @@
         Task<ServiceInfo> GetServiceInfoAsync();
 
         /// <summary>
+        /// Retrieves the current ownership lease snapshot for the hosted service.
+        /// </summary>
+        /// <returns>
+        /// A task that completes with a <see cref="Lease"/> describing the owner identity,
+        /// coordination primitive, endpoint, fingerprint and optional expiration.
+        /// </returns>
+        Task<Lease> GetLeaseAsync();
+
+        /// <summary>
         /// Probes the configured transport endpoint to determine whether a server is
         /// currently listening for connections.
         /// </summary>

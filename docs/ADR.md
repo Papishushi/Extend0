@@ -48,6 +48,13 @@ Future ADRs may supersede earlier decisions, but they must do so explicitly and 
 | [1-013](ADR/1-013-LIFECYCLE-ADR-ADOPT-UNIX-DOMAIN-SOCKET-BUILT-IN-TRANSPORT.md) | Adopt Unix Domain Socket Built-In Transport | Accepted | Adds `UnixDomainSocket` as a local socket-path built-in transport under the shared Lifecycle protocol descriptor and handshake model. |
 | [1-014](ADR/1-014-LIFECYCLE-ADR-ADOPT-LIFECYCLE-DIAGNOSTICS-COMMAND.md) | Adopt Lifecycle Diagnostics Command | Accepted | Defines `extend0 lifecycle diagnose` for owner observation, handshake status, service info, heartbeat liveness, and lease exposure reporting. |
 | [1-015](ADR/1-015-CODEGEN-ADR-ADOPT-TYPED-METADB-TABLE-API-GENERATION.md) | Adopt Typed MetaDB Table API Generation | Accepted | Defines generated strongly typed MetaDB table wrappers from enriched `*.typed.tablespec.json` descriptors. |
+| [1-016](ADR/1-016-LIFECYCLE-ADR-ADOPT-OBSERVABLE-LEASE-SNAPSHOT.md) | Adopt Observable Lease Snapshot | Accepted | Defines `Lease` and `GetLeaseAsync()` as the transport-neutral ownership snapshot exposed by Lifecycle services and diagnostics. |
+| [1-017](ADR/1-017-LIFECYCLE-ADR-ADOPT-RPC-AUTHENTICATION-MODEL.md) | Adopt RPC Authentication Model | Accepted | Defines transport-neutral Lifecycle RPC authentication and adds HMAC plus signed-challenge proofs for built-in transports. |
+| [1-018](ADR/1-018-LIFECYCLE-ADR-ADOPT-TLS-TCP-SOCKET-BUILT-IN-TRANSPORT.md) | Adopt TLS TCP Socket Built-In Transport | Accepted | Adds `TlsTcpSocket` as the built-in encrypted TCP transport with server certificate validation and optional mTLS. |
+| [1-019](ADR/1-019-METADB-ADR-ADOPT-EVIDENCE-BASED-STORAGE-PROTECTION.md) | Adopt Evidence-Based Storage Protection | Accepted | Adds fail-closed storage protection policy, evidence diagnostics, and protected path enforcement without adding encrypted hot storage. |
+| [1-020](ADR/1-020-METADB-ADR-ADOPT-STORAGE-CONTINUITY-FOR-OWNERSHIP-MOVEMENT.md) | Adopt Storage Continuity for Ownership Movement | Accepted | Separates Lifecycle ownership movement from MetaDB state continuity and adds fail-closed shared/replicated storage evidence. |
+| [1-021](ADR/1-021-METADB-ADR-ADOPT-HARDWARE-ATTESTATION-EVIDENCE-FOR-STORAGE-ACCESS.md) | Adopt Hardware Attestation Evidence for Storage Access | Accepted | Adds fail-closed trusted-execution evidence for MetaDB storage access without embedding vendor-specific attestation stacks in core. |
+| [1-022](ADR/1-022-LIFECYCLE-ADR-PROMOTE-ASSURANCE-POLICIES-TO-LIFECYCLE.md) | Promote Assurance Policies to Lifecycle | Accepted | Moves generic protection, continuity, and attestation policy/evidence concepts to Lifecycle Assurance while keeping MetaDB physical storage validation in MetaDB. |
 
 ## Usage Notes
 

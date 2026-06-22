@@ -55,6 +55,21 @@
         public CrossProcessProtocolDescriptor? ProtocolDescriptor { get; init; }
 
         /// <summary>
+        /// Authentication options applied to the cross-process handshake.
+        /// Defaults to unauthenticated compatibility mode. Use
+        /// <see cref="CrossProcessAuthenticationOptions.SharedSecretHmac(string)"/> when the owner and clients
+        /// should prove knowledge of a shared secret before any RPC call is accepted.
+        /// </summary>
+        public CrossProcessAuthenticationOptions Authentication { get; init; } = CrossProcessAuthenticationOptions.None;
+
+        /// <summary>
+        /// TLS configuration used when <see cref="TransportKind"/> is <see cref="CrossProcess.TransportKind.TlsTcpSocket"/>.
+        /// Server-side owners must provide a server certificate. Clients use these options for target-host validation,
+        /// custom certificate validation, and optional client certificates for mTLS.
+        /// </summary>
+        public CrossProcessTlsOptions? Tls { get; init; }
+
+        /// <summary>
         /// Optional explicit endpoint name override for the selected transport.
         /// When omitted, the transport factory derives the endpoint from the logical service identity.
         /// </summary>

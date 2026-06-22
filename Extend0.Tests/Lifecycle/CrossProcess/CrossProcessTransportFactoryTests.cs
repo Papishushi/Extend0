@@ -23,6 +23,14 @@ public sealed class CrossProcessTransportFactoryTests
     }
 
     [Fact]
+    public void ResolveProtocolDescriptor_ReturnsBuiltInTlsTcpSocketDescriptor()
+    {
+        var descriptor = CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.TlsTcpSocket);
+
+        Assert.Equal(LifecycleCrossProcessHarness.TlsTcpSocketProtocolDescriptor, descriptor);
+    }
+
+    [Fact]
     public void ResolveProtocolDescriptor_ReturnsBuiltInUnixDomainSocketDescriptor()
     {
         var descriptor = CrossProcessTransportFactory.ResolveProtocolDescriptor(TransportKind.UnixDomainSocket);
@@ -82,6 +90,7 @@ public sealed class CrossProcessTransportFactoryTests
         Assert.Equal(LifecycleCrossProcessHarness.BuildUnixDomainSocketEndpointName("Extend0.Test.Service"), unixDomainSocketEndpoint);
         Assert.EndsWith(".sock", unixDomainSocketEndpoint, StringComparison.Ordinal);
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("tcp", TransportKind.TcpSocket));
+        Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("tls", TransportKind.TlsTcpSocket));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("none", TransportKind.None));
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("custom", TransportKind.Custom));
     }

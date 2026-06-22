@@ -8,10 +8,14 @@ namespace Extend0.Lifecycle.CrossProcess
     /// <param name="EndpointName">Resolved endpoint name the client should target.</param>
     /// <param name="ServerName">Resolved server or machine name for the client transport.</param>
     /// <param name="ConnectTimeoutMs">Connection timeout requested for the client transport.</param>
+    /// <param name="Authentication">Authentication options the client transport should use during handshake.</param>
+    /// <param name="Tls">TLS options used by TLS-capable transports.</param>
     public sealed record ClientTransportFactoryContext(
         TransportKind TransportKind,
         CrossProcessProtocolDescriptor Protocol,
         string EndpointName,
         string ServerName,
-        int ConnectTimeoutMs);
+        int ConnectTimeoutMs,
+        CrossProcessAuthenticationOptions? Authentication = null,
+        CrossProcessTlsOptions? Tls = null);
 }

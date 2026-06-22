@@ -22,6 +22,27 @@ public sealed class CrossProcessOrchestratorTests
     }
 
     [Fact]
+    public async Task GetOrStart_ConfiguresOwnerServiceInfoWithResolvedRuntimeEndpoint()
+    {
+        var serviceName = $"runtime-endpoint-{Guid.NewGuid():N}";
+        var result = await LifecycleCrossProcessHarness.RunNamedPipeOwnerRuntimeEndpointScenario(serviceName);
+        var expectedEndpoint = CrossProcessTransportFactory.ResolveEndpointNameFor<LifecycleCrossProcessHarness.ITestCrossProcessService>(
+            serviceName,
+            TransportKind.NamedPipe);
+
+        Assert.True(result.OwnerIsOwner);
+        Assert.Equal(expectedEndpoint, result.EndpointName);
+        Assert.Equal(".", result.EndpointServerName);
+        Assert.Equal(TransportKind.NamedPipe, result.TransportKind);
+        Assert.Equal(LifecycleCrossProcessHarness.BuildTestServiceOwnershipName(serviceName), result.OwnershipName);
+        Assert.Equal("OSMutex", result.CoordinationKind);
+        Assert.False(string.IsNullOrWhiteSpace(result.CoordinationScope));
+        Assert.True(result.LeaseIsExclusive);
+        Assert.True(result.LeaseIsActive);
+        Assert.True(result.CanConnect);
+    }
+
+    [Fact]
     public void GetOrStart_WhenServerFactoryThrows_ReleasesState_AndAllowsRetry()
     {
         var serviceName = $"recover-{Guid.NewGuid():N}";

@@ -40,16 +40,19 @@ Under major `1`, `lifecycle diagnose`:
 
 ## Lease Reporting
 
-Lifecycle currently enforces ownership through owner coordination and OS-level primitives, but it does not expose a standalone lease record through `ICrossProcessService`.
+Lifecycle originally enforced ownership through owner coordination and OS-level primitives without exposing a standalone lease record through `ICrossProcessService`.
 
-Therefore, `lifecycle diagnose` must not invent lease state.
+Therefore, `lifecycle diagnose` must not invent lease state when an owner cannot expose it.
 
-It reports:
+ADR 1-016 extends this command with an observable `Lease` snapshot returned by `ICrossProcessService.GetLeaseAsync()`.
+
+Current diagnostics report:
 
 - `NotExposed` when no compatible owner is observed or lease state cannot be inferred
+- `Active` or `Inactive` when the owner returns a structured lease snapshot
 - `ImpliedByOwnerObservation` when a compatible owner responds and heartbeat can be queried
 
-A future explicit lease/ownership record may extend this output, but that requires a compatible runtime contract change.
+Future persistent lease records or distributed lease protocols still require their own ADR.
 
 ## Relationship to `lifecycle probe`
 
@@ -61,7 +64,7 @@ A future explicit lease/ownership record may extend this output, but that requir
 
 - Lifecycle has a first-class troubleshooting command for owner, endpoint, transport, handshake, and heartbeat issues.
 - Handshake failures become visible as their own diagnostic state instead of being collapsed into generic connectivity failure.
-- The current absence of an exposed lease record is explicit and machine-readable.
+- Lease availability is explicit and machine-readable.
 - Future Lifecycle runtime changes can add richer lease/heartbeat data without changing the basic command boundary.
 
 ## Non-Goals

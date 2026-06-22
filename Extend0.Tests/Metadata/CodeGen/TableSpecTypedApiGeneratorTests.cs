@@ -92,6 +92,8 @@ public sealed class TableSpecTypedApiGeneratorTests
         Assert.Contains("public global::Extend0.Metadata.Typed.MetadataUtf8Column NodeName", generatedText);
         Assert.Contains("public global::Extend0.Metadata.Typed.MetadataRefsColumn Services", generatedText);
         Assert.Contains("public static global::Extend0.Metadata.Schema.TableSpec CreateSpec", generatedText);
+        Assert.Contains("global::Extend0.Metadata.Schema.TableSpec.Helpers.PackColumnSize", generatedText);
+        Assert.DoesNotContain("PackUnchecked", generatedText);
 
         var wrapperType = outputCompilation.GetTypeByMetadataName("Consumer.Generated.ClusterNodesTable");
         Assert.NotNull(wrapperType);

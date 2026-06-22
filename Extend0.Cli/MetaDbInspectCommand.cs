@@ -72,102 +72,7 @@ public static class MetaDbInspectCommand
     }
 
     internal static bool TryResolveSpecPath(string inputPath, out string specPath, out string error)
-    {
-        var fullInput = Path.GetFullPath(inputPath);
-
-        if (Directory.Exists(fullInput))
-        {
-            var chunkedSpec = Path.Combine(fullInput, "tablespec.json");
-            if (File.Exists(chunkedSpec))
-            {
-                specPath = chunkedSpec;
-                error = string.Empty;
-                return true;
-            }
-
-            var specs = Directory.EnumerateFiles(fullInput, "*.tablespec.json").ToArray();
-            if (specs.Length == 1)
-            {
-                specPath = specs[0];
-                error = string.Empty;
-                return true;
-            }
-
-            specPath = string.Empty;
-            error = specs.Length == 0
-                ? $"No TableSpec found in directory '{fullInput}'."
-                : $"Multiple TableSpec files found in directory '{fullInput}'. Pass one explicitly.";
-            return false;
-        }
-
-        if (File.Exists(fullInput))
-        {
-            if (IsSpecFile(fullInput))
-            {
-                specPath = fullInput;
-                error = string.Empty;
-                return true;
-            }
-
-            var sidecar = fullInput + ".tablespec.json";
-            if (File.Exists(sidecar))
-            {
-                specPath = sidecar;
-                error = string.Empty;
-                return true;
-            }
-
-            var directory = Path.GetDirectoryName(fullInput);
-            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            {
-                var siblingSpecs = Directory.EnumerateFiles(directory, "*.tablespec.json").ToArray();
-                if (siblingSpecs.Length == 1)
-                {
-                    specPath = siblingSpecs[0];
-                    error = string.Empty;
-                    return true;
-                }
-
-                if (siblingSpecs.Length > 1)
-                {
-                    specPath = string.Empty;
-                    error = $"Input file '{fullInput}' has no direct sidecar and multiple TableSpec files exist in '{directory}'. Pass one explicitly.";
-                    return false;
-                }
-            }
-
-            specPath = string.Empty;
-            error = $"Input file '{fullInput}' is not a TableSpec and no sidecar '{sidecar}' exists.";
-            return false;
-        }
-
-        var missingSidecar = fullInput + ".tablespec.json";
-        if (File.Exists(missingSidecar))
-        {
-            specPath = missingSidecar;
-            error = string.Empty;
-            return true;
-        }
-
-        var missingChunkedSpec = Path.Combine(fullInput, "tablespec.json");
-        if (File.Exists(missingChunkedSpec))
-        {
-            specPath = missingChunkedSpec;
-            error = string.Empty;
-            return true;
-        }
-
-        specPath = string.Empty;
-        error = $"No TableSpec found for '{fullInput}'.";
-        return false;
-    }
-
-    private static bool IsSpecFile(string path)
-    {
-        var fileName = Path.GetFileName(path);
-        return string.Equals(fileName, "tablespec.json", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".tablespec.json", StringComparison.OrdinalIgnoreCase);
-    }
+        => TableSpec.Helpers.TryResolveSpecPath(inputPath, out specPath, out error);
 
     private static void WriteHumanReport(TextWriter output, MetaDbInspectReport report)
     {
@@ -194,7 +99,7 @@ public static class MetaDbInspectCommand
         writer.WriteLine("  extend0 metadb inspect <path> [--json]");
         writer.WriteLine();
         writer.WriteLine("Arguments:");
-        writer.WriteLine("  <path>    TableSpec file, map file with .tablespec.json sidecar, or chunked table directory.");
+        writer.WriteLine("  <path>    TableSpec file, map path resolved via TableSpec save conventions, or chunked table directory.");
         writer.WriteLine();
         writer.WriteLine("Options:");
         writer.WriteLine("  --json    Emit a machine-readable JSON report.");

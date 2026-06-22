@@ -33,7 +33,7 @@ The following directions are in-bounds for major `1`, but should not dominate th
 - deeper `UByteC` integration
 - a native ontology subsystem inside Extend0
 - MetaDB-backed semantic or coordination workflows
-- additional transports beyond the current `NamedPipe`, `UnixDomainSocket`, and `TcpSocket` built-ins
+- additional transports beyond the current `NamedPipe`, `UnixDomainSocket`, `TcpSocket`, and `TlsTcpSocket` built-ins
 - cross-service ontology-backed interoperability
 
 ## Governing ADR

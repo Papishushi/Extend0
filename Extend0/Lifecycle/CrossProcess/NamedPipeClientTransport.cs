@@ -93,7 +93,8 @@ namespace Extend0.Lifecycle.CrossProcess
             string serverName,
             string pipeName,
             int timeoutMs,
-            CrossProcessProtocolDescriptor? protocol = null)
+            CrossProcessProtocolDescriptor? protocol = null,
+            CrossProcessAuthenticationOptions? authentication = null)
         {
             var expectedProtocol = protocol ?? NamedPipeTransportProtocol.Descriptor;
             _pipe = new NamedPipeClientStream(serverName, pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -110,8 +111,17 @@ namespace Extend0.Lifecycle.CrossProcess
             if (serverHello is null)
                 throw new IOException("Invalid server handshake: missing greeting.");
 
-            if (!CrossProcessHandshake.TryValidateHelloLine(serverHello, expectedProtocol, out var handshakeError))
+            if (!CrossProcessHandshake.TryValidateHelloLine(serverHello, expectedProtocol, out var hello, out var handshakeError))
                 throw new IOException($"Invalid server handshake: {handshakeError}");
+
+            var authLine = CrossProcessHandshake.CreateClientAuthenticationLine(hello!, authentication);
+            if (authLine is not null)
+            {
+                _writer.WriteLine(authLine);
+                var authenticationAck = _reader.ReadLine();
+                if (!CrossProcessHandshake.TryValidateAuthenticationOkLine(authenticationAck, out var authenticationError))
+                    throw new IOException($"Authentication failed: {authenticationError}");
+            }
         }
 
         /// <summary>

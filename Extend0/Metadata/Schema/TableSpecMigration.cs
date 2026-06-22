@@ -18,7 +18,10 @@ public enum TableSpecMigrationStepKind
     ChangeColumnShape = 8,
     ChangeColumnCapacity = 9,
     ChangeColumnReadOnlyFlag = 10,
-    ManualDataTransform = 11
+    ManualDataTransform = 11,
+    ChangeStorageProtectionPolicy = 12,
+    ChangeStorageContinuityPolicy = 13,
+    ChangeHardwareAttestationPolicy = 14
 }
 
 /// <summary>
@@ -141,6 +144,30 @@ public static class TableSpecMigration
                 TableSpecMigrationStepKind.ChangeChunkSize,
                 TableSpecMigrationImpact.StorageRewrite,
                 $"Storage chunk size changes from {sourceStorage.ChunkSize} to {targetStorage.ChunkSize}."));
+        }
+
+        if (source.Protection != target.Protection)
+        {
+            steps.Add(new TableSpecMigrationStep(
+                TableSpecMigrationStepKind.ChangeStorageProtectionPolicy,
+                TableSpecMigrationImpact.MetadataOnly,
+                $"Storage protection policy changes from '{source.Protection.RequiredLevel}' to '{target.Protection.RequiredLevel}'."));
+        }
+
+        if (source.Continuity != target.Continuity)
+        {
+            steps.Add(new TableSpecMigrationStep(
+                TableSpecMigrationStepKind.ChangeStorageContinuityPolicy,
+                TableSpecMigrationImpact.MetadataOnly,
+                $"Storage continuity policy changes from '{source.Continuity.RequiredLevel}' to '{target.Continuity.RequiredLevel}'."));
+        }
+
+        if (source.Attestation != target.Attestation)
+        {
+            steps.Add(new TableSpecMigrationStep(
+                TableSpecMigrationStepKind.ChangeHardwareAttestationPolicy,
+                TableSpecMigrationImpact.MetadataOnly,
+                $"Hardware attestation policy changes from '{source.Attestation.RequiredLevel}' to '{target.Attestation.RequiredLevel}'."));
         }
     }
 

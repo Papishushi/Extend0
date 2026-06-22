@@ -95,6 +95,8 @@ public static class CrossProcessHandleHarness
         public Task<ServiceInfo> GetServiceInfoAsync() =>
             Task.FromResult(new ServiceInfo("contract", "impl", "1.0", "fp", "machine", 1, "proc", DateTimeOffset.UtcNow, null, null, null, TransportKind.None));
 
+        public Task<Lease> GetLeaseAsync() => Task.FromResult(CreateTestLease(ContractName));
+
         public Task<bool> CanConnectAsync() => Task.FromResult(true);
 
         public void Dispose()
@@ -142,6 +144,8 @@ public static class CrossProcessHandleHarness
         public Task<ServiceInfo> GetServiceInfoAsync() =>
             Task.FromResult(new ServiceInfo("contract", "impl", "1.0", "fp", "machine", 1, "proc", DateTimeOffset.UtcNow, null, null, null, TransportKind.None));
 
+        public Task<Lease> GetLeaseAsync() => Task.FromResult(CreateTestLease(ContractName));
+
         public Task<bool> CanConnectAsync() => Task.FromResult(true);
 
         public void Dispose() => DisposeCalls++;
@@ -183,5 +187,29 @@ public static class CrossProcessHandleHarness
             Dispose();
             return ValueTask.CompletedTask;
         }
+    }
+
+    private static Lease CreateTestLease(string contractName)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new Lease(
+            "test-lease",
+            contractName,
+            contractName,
+            "fp",
+            "machine",
+            1,
+            "proc",
+            now,
+            now,
+            null,
+            null,
+            null,
+            TransportKind.None,
+            "Test",
+            null,
+            "Process",
+            true,
+            true);
     }
 }
