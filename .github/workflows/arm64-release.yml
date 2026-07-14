@@ -125,12 +125,18 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ needs.version.outputs.version }}
         run: |
-          dotnet run --project eng/Extend0.ReleaseSmoke/Extend0.ReleaseSmoke.csproj `
+          dotnet build eng/Extend0.ReleaseSmoke/Extend0.ReleaseSmoke.csproj `
+            -c Release `
+            -r ${{ matrix.rid }}
+          if ($LASTEXITCODE -ne 0) { throw 'MetaDB ARM64 release smoke build failed' }
+          $json = & dotnet run --project eng/Extend0.ReleaseSmoke/Extend0.ReleaseSmoke.csproj `
+            --no-build `
             -c Release `
             -r ${{ matrix.rid }} `
-            -- $env:EXPECTED_VERSION | Set-Content -Encoding utf8 metadb-smoke.json
+            -- $env:EXPECTED_VERSION
           if ($LASTEXITCODE -ne 0) { throw 'MetaDB ARM64 release smoke failed' }
-          $smoke = Get-Content metadb-smoke.json -Raw | ConvertFrom-Json
+          $json | Set-Content -Encoding utf8 metadb-smoke.json
+          $smoke = $json | ConvertFrom-Json
           if ($smoke.metadb_ready -ne $true -or $smoke.restart -ne $true -or $smoke.cleanup -ne $true) {
             throw 'MetaDB release smoke did not complete every lifecycle phase'
           }
