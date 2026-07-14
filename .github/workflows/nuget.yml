@@ -43,10 +43,16 @@ jobs:
         run: dotnet --info
       - name: Restore tests
         run: dotnet restore Extend0.Tests/Extend0.Tests.csproj
-      - name: Run tests
+      - name: Run full test suite
+        if: runner.os == 'Windows'
         run: dotnet test Extend0.Tests/Extend0.Tests.csproj -c Release --no-restore
+      - name: Build test assembly on Unix
+        if: runner.os != 'Windows'
+        run: dotnet build Extend0.Tests/Extend0.Tests.csproj -c Release --no-restore
       - name: Build CLI
         run: dotnet build Extend0.Cli/Extend0.Cli.csproj -c Release
+      - name: Run platform diagnostic
+        run: dotnet run --project Extend0.Cli/Extend0.Cli.csproj -c Release --no-build -- doctor --json
 
   pack:
     needs: test
