@@ -14,7 +14,6 @@
 		<Description>Generates blittable MetadataEntry{Key}x{Value} structs (GC Free).</Description>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<SuppressWarnings>RS1035</SuppressWarnings>
-		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
 		<AssemblyVersion>1.0.9691.690</AssemblyVersion>
 		<FileVersion>1.0.9691.690</FileVersion>
