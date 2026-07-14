@@ -69,7 +69,7 @@ internal sealed class CrossProcessFileLease : IDisposable
 
         try
         {
-            if (_usesRegionLock)
+            if (_usesRegionLock && OperatingSystem.IsLinux())
             {
                 try { stream.Unlock(0, 1); }
                 catch (IOException)
