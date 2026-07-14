@@ -266,9 +266,7 @@ namespace Extend0.Metadata.Internal
         {
             // The current table owns this lease, so reopening it without closing is rejected
             // consistently on every supported operating system.
-            using (MetadataStorageLease.Acquire(_spec.MapPath))
-            {
-            }
+            MetadataStorageLease.Acquire(_spec.MapPath).Dispose();
 
             var storage = _spec.Storage.Normalize();
             var loaded = storage.Layout == TableStorageLayout.Chunked
