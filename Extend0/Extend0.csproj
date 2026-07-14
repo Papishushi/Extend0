@@ -5,6 +5,8 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<AssemblyVersion>1.1.9691.41434</AssemblyVersion>
+		<PackageVersion>$(AssemblyVersion)</PackageVersion>
+		<InformationalVersion>$(AssemblyVersion)</InformationalVersion>
 		<FileVersion>1.1.9691.41434</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
@@ -22,7 +24,6 @@
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageReleaseNotes>
 		</PackageReleaseNotes>
-		<Version>1.0.9535</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
