@@ -165,6 +165,9 @@ jobs:
     needs: pack
     runs-on: ubuntu-latest
     environment: nuget
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/download-artifact@v7.0.0
         with:
@@ -173,16 +176,17 @@ jobs:
       - uses: actions/setup-dotnet@v5.4.0
         with:
           dotnet-version: 10.0.x
+      - name: Request short-lived NuGet API key
+        id: nuget-login
+        uses: NuGet/login@v1.2.0
+        with:
+          user: papishushi
       - name: Publish coherent package set to NuGet
         shell: bash
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           VERSION: ${{ needs.pack.outputs.version }}
         run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::Repository or nuget environment secret NUGET_API_KEY is not configured"
-            exit 1
-          fi
           source_url="https://api.nuget.org/v3/index.json"
           dotnet nuget push "artifacts/Extend0.MetadataEntry.Generator.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
           dotnet nuget push "artifacts/Extend0.BlittableAdapter.Generator.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
