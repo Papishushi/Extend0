@@ -66,7 +66,7 @@ jobs:
       - uses: actions/setup-dotnet@v5.4.0
         with:
           global-json-file: global.json
-      - name: Verify coherent package version
+      - name: Verify coherent assembly and package version
         id: version
         shell: bash
         run: |
@@ -81,14 +81,14 @@ jobs:
           ]
           versions = {}
           for project in projects:
-              value = ET.parse(project).findtext(".//Version")
+              value = ET.parse(project).findtext(".//AssemblyVersion")
               if not value:
-                  raise SystemExit(f"{project} has no Version")
+                  raise SystemExit(f"{project} has no AssemblyVersion")
               versions[project] = value
 
           unique = set(versions.values())
           if len(unique) != 1:
-              raise SystemExit(f"package versions are not aligned: {versions}")
+              raise SystemExit(f"assembly versions are not aligned: {versions}")
           print(f"version={unique.pop()}")
           PY
       - name: Build package binaries
