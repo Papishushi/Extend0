@@ -54,8 +54,8 @@ That means:
 ## Portable Persistent-Storage Contract
 
 Persistent single-file and chunked tables use one cooperative writer lease per normalized `MapPath`.
-The lease is held for the lifetime of the mapped store and is backed by an OS byte-range lock on the
-stable `<MapPath>.extend0.lock` sidecar. A second owner receives
+The lease is held for the lifetime of the mapped store and is backed by an OS-enforced exclusive
+handle or byte-range lock on the stable `<MapPath>.extend0.lock` sidecar. A second owner receives
 `MetadataTableLockedException` on Windows, Linux, and macOS.
 
 Open, delete, move-aside, and recovery follow these rules:

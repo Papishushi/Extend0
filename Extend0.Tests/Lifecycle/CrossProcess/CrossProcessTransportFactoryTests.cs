@@ -81,12 +81,19 @@ public sealed class CrossProcessTransportFactoryTests
         var namedPipeEndpoint = CrossProcessTransportFactory.ResolveEndpointName(
             "Extend0.Test.Service",
             TransportKind.NamedPipe);
+        var explicitNamedPipeEndpoint = CrossProcessTransportFactory.ResolveEndpointName(
+            "ignored",
+            TransportKind.NamedPipe,
+            explicitEndpointName: "a-human-readable-but-potentially-long-pipe-name");
         var unixDomainSocketEndpoint = CrossProcessTransportFactory.ResolveEndpointName(
             "Extend0.Test.Service",
             TransportKind.UnixDomainSocket);
 
         Assert.Equal("explicit-endpoint", explicitEndpoint);
         Assert.Equal(LifecycleCrossProcessHarness.BuildNamedPipeEndpointName("Extend0.Test.Service"), namedPipeEndpoint);
+        Assert.Equal(
+            LifecycleCrossProcessHarness.BuildNamedPipeEndpointName("a-human-readable-but-potentially-long-pipe-name"),
+            explicitNamedPipeEndpoint);
         Assert.Equal(LifecycleCrossProcessHarness.BuildUnixDomainSocketEndpointName("Extend0.Test.Service"), unixDomainSocketEndpoint);
         Assert.EndsWith(".sock", unixDomainSocketEndpoint, StringComparison.Ordinal);
         Assert.Throws<NotSupportedException>(() => CrossProcessTransportFactory.ResolveEndpointName("tcp", TransportKind.TcpSocket));

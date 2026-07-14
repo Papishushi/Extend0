@@ -223,6 +223,11 @@ namespace Extend0.Metadata.Internal
         /// </exception>
         public static IMetadataTable Open(TableSpec spec)
         {
+            // Fail with the domain-specific ownership error before platform-specific mapping APIs do.
+            using (MetadataStorageLease.Acquire(spec.MapPath))
+            {
+            }
+
             var storage = spec.Storage.Normalize();
             var loaded = storage.Layout == TableStorageLayout.Chunked
                 ? SegmentedMappedStore.TryLoadColumns(spec.MapPath, out var columns)
@@ -261,6 +266,12 @@ namespace Extend0.Metadata.Internal
         /// </exception>
         public IMetadataTable Open()
         {
+            // The current table owns this lease, so reopening it without closing is rejected
+            // consistently on every supported operating system.
+            using (MetadataStorageLease.Acquire(_spec.MapPath))
+            {
+            }
+
             var storage = _spec.Storage.Normalize();
             var loaded = storage.Layout == TableStorageLayout.Chunked
                 ? SegmentedMappedStore.TryLoadColumns(_spec.MapPath, out var columns)

@@ -10,7 +10,7 @@ namespace Extend0.Metadata.Storage.Internal;
 /// <para>
 /// File sharing flags are not a portable ownership primitive: Unix permits unlinking an open
 /// mapped file and does not consistently enforce <see cref="FileShare.None"/>. Extend0 therefore
-/// coordinates through a stable sidecar file and an OS byte-range lock.
+/// coordinates through a stable sidecar file and an OS-enforced exclusive handle or byte-range lock.
 /// </para>
 /// <para>
 /// The in-process registry complements the OS lock because some Unix lock implementations treat
@@ -23,12 +23,14 @@ internal sealed class MetadataStorageLease : IDisposable
     private static readonly ConcurrentDictionary<string, byte> OwnedPaths = new(GetPathComparer());
 
     private readonly string _key;
+    private readonly bool _usesRegionLock;
     private FileStream? _stream;
 
-    private MetadataStorageLease(string key, FileStream stream)
+    private MetadataStorageLease(string key, FileStream stream, bool usesRegionLock)
     {
         _key = key;
         _stream = stream;
+        _usesRegionLock = usesRegionLock;
     }
 
     internal static MetadataStorageLease Acquire(string tablePath)
@@ -52,13 +54,15 @@ internal sealed class MetadataStorageLease : IDisposable
             if (!string.IsNullOrWhiteSpace(parent))
                 Directory.CreateDirectory(parent);
 
+            var usesRegionLock = OperatingSystem.IsLinux();
             stream = new FileStream(
                 leasePath,
                 FileMode.OpenOrCreate,
                 FileAccess.ReadWrite,
-                FileShare.ReadWrite | FileShare.Delete);
-            stream.Lock(0, 1);
-            return new MetadataStorageLease(key, stream);
+                usesRegionLock ? FileShare.ReadWrite | FileShare.Delete : FileShare.None);
+            if (usesRegionLock)
+                stream.Lock(0, 1);
+            return new MetadataStorageLease(key, stream, usesRegionLock);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -100,7 +104,11 @@ internal sealed class MetadataStorageLease : IDisposable
 
         try
         {
-            try { stream.Unlock(0, 1); }
+            try
+            {
+                if (_usesRegionLock)
+                    stream.Unlock(0, 1);
+            }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
