@@ -106,7 +106,7 @@ internal sealed class MetadataStorageLease : IDisposable
         {
             try
             {
-                if (_usesRegionLock)
+                if (_usesRegionLock && OperatingSystem.IsLinux())
                     stream.Unlock(0, 1);
             }
             catch (IOException)
