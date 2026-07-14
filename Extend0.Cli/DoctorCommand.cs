@@ -1,3 +1,6 @@
+using Extend0.Metadata;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
@@ -78,12 +81,43 @@ public static class DoctorCommand
         CheckFile(checks, root, "test-project", Path.Combine("Extend0.Tests", "Extend0.Tests.csproj"), required: false);
         CheckFile(checks, root, "testing-harness-project", Path.Combine("Extend0.Testing", "Extend0.Testing.csproj"), required: false);
 
+        var metaDbReady = CheckMetaDbManager(checks);
         CheckTargetFramework(checks, root);
         CheckCliToolConfiguration(checks, root);
         CheckReadmeTargetFramework(checks, root);
         CheckOntologyAccessSurfaceRange(checks, root);
 
-        return DoctorReport.Create(root, DateTimeOffset.UtcNow, checks);
+        return DoctorReport.Create(
+            GetProductVersion(),
+            RuntimeInformation.RuntimeIdentifier,
+            RuntimeInformation.OSArchitecture.ToString(),
+            metaDbReady,
+            root,
+            DateTimeOffset.UtcNow,
+            checks);
+    }
+
+    private static bool CheckMetaDbManager(List<DoctorCheck> checks)
+    {
+        try
+        {
+            using var manager = MetaDB.CreateManager();
+            checks.Add(DoctorCheck.Pass("metadb-manager", "Constructed the public MetaDB manager."));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            checks.Add(new DoctorCheck("metadb-manager", DoctorStatus.Error, $"Could not construct the public MetaDB manager: {ex.Message}"));
+            return false;
+        }
+    }
+
+    private static string GetProductVersion()
+    {
+        var informationalVersion = typeof(MetaDB).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        return informationalVersion?.Split('+', 2)[0] ?? "unknown";
     }
 
     private static void CheckFile(List<DoctorCheck> checks, string root, string id, string relativePath, bool required)
@@ -216,6 +250,9 @@ public static class DoctorCommand
     private static void WriteHumanReport(TextWriter output, DoctorReport report)
     {
         output.WriteLine("Extend0 doctor");
+        output.WriteLine($"Version: {report.Version}");
+        output.WriteLine($"Runtime: {report.RuntimeIdentifier} ({report.Architecture})");
+        output.WriteLine($"MetaDB ready: {report.MetaDbReady}");
         output.WriteLine($"Root: {report.RepositoryRoot}");
         output.WriteLine();
 
