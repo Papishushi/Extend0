@@ -780,12 +780,13 @@ public sealed class MetaDBManagerBehaviorTests
         try
         {
             var queuePath = Path.Combine(tempRoot, "deletes.log");
-            using var handle = MetaDBManagerHarness.CreateManager(factory: _ => MetadataTableHarness.CreateTable(CreateSupportedSpec("QueueFallback", 1)), deleteQueuePath: queuePath);
+            using var handle = MetaDBManagerHarness.CreateManager(
+                factory: _ => MetadataTableHarness.CreateTable(CreateSupportedSpec("QueueFallback", 1)),
+                deleteQueuePath: queuePath,
+                startDeleteWorker: false);
 
             var disabledPath = Path.Combine(tempRoot, "disabled.map");
             File.WriteAllText(disabledPath, "locked");
-            using var disabledLock = new FileStream(disabledPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-
             handle.SetDeleteQueuePath(string.Empty);
             handle.EnqueueDelete(disabledPath);
 
@@ -795,8 +796,6 @@ public sealed class MetaDBManagerBehaviorTests
             Directory.CreateDirectory(queueAsDirectory);
             var persistenceFailurePath = Path.Combine(tempRoot, "persist-failure.map");
             File.WriteAllText(persistenceFailurePath, "locked");
-            using var persistenceFailureLock = new FileStream(persistenceFailurePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-
             handle.SetDeleteQueuePath(queueAsDirectory);
             handle.EnqueueDelete(persistenceFailurePath);
             handle.EnqueueDelete(persistenceFailurePath);
