@@ -104,7 +104,7 @@ jobs:
           dotnet pack Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj -c Release --no-build -o artifacts
           dotnet pack Extend0/Extend0.csproj -c Release --no-build -o artifacts
           dotnet pack Extend0.Cli/Extend0.Cli.csproj -c Release --no-build -o artifacts
-          printf '%s\\n' "${{ steps.version.outputs.version }}" > artifacts/version.txt
+          printf '%s\n' "${{ steps.version.outputs.version }}" > artifacts/version.txt
       - name: Inspect package identities and versions
         shell: bash
         run: |
