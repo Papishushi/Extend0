@@ -14,7 +14,6 @@
 		<Description>Generates blittable object structs (GC Free) from a definition file '.blit.json' .</Description>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<SuppressWarnings>RS1035</SuppressWarnings>
-		<WarningsNotAsErrors>NU5128</WarningsNotAsErrors>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
 		<AssemblyVersion>1.0.9691.41434</AssemblyVersion>
 		<FileVersion>1.0.9691.41434</FileVersion>
@@ -25,6 +24,7 @@
 		<PackageProjectUrl>https://github.com/Papishushi/Extend0</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Papishushi/Extend0</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
+		<SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
 		<PackageTags>extend0;metadb;metadata;key-value-store;embedded-database;memory-mapped;mmap;</PackageTags>
 		<NeutralLanguage>en-001</NeutralLanguage>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>

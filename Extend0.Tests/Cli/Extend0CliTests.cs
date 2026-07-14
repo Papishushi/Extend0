@@ -691,6 +691,10 @@ public sealed class Extend0CliTests
 
             using var document = JsonDocument.Parse(output.ToString());
             Assert.Equal(0, exitCode);
+            Assert.Equal("1.0.9535", document.RootElement.GetProperty("version").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("runtime_identifier").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("architecture").GetString()));
+            Assert.True(document.RootElement.GetProperty("metadb_ready").GetBoolean());
             Assert.Equal(0, document.RootElement.GetProperty("ErrorCount").GetInt32());
             Assert.True(document.RootElement.GetProperty("PassCount").GetInt32() > 0);
             Assert.Equal(string.Empty, error.ToString());
@@ -1713,19 +1717,24 @@ public sealed class Extend0CliTests
         return root;
     }
 
-    private static Task RunRawNamedPipeHandshakeServerAsync(string pipeName, Func<NamedPipeServerStream, Task> handler) =>
-        Task.Run(async () =>
-        {
-            await using var server = new NamedPipeServerStream(
-                pipeName,
-                PipeDirection.InOut,
-                1,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous);
+    private static Task RunRawNamedPipeHandshakeServerAsync(string pipeName, Func<NamedPipeServerStream, Task> handler)
+    {
+        var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
 
-            await server.WaitForConnectionAsync();
-            await handler(server);
+        return Task.Run(async () =>
+        {
+            await using (server)
+            {
+                await server.WaitForConnectionAsync();
+                await handler(server);
+            }
         });
+    }
 
     private static string CreateTempDirectory()
     {

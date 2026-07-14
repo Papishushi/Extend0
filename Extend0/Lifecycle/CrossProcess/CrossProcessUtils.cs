@@ -186,7 +186,7 @@ internal static class CrossProcessUtils
     /// Builds a cross-platform, named-pipe-safe endpoint name from an arbitrary base name.
     /// </summary>
     /// <param name="baseName">
-    /// The arbitrary identifier to encode into the pipe name (converted from UTF-8 bytes).
+    /// The arbitrary identifier to hash into the pipe name (converted from UTF-8 bytes).
     /// </param>
     /// <param name="prefix">
     /// Optional prefix to prepend (e.g., <c>"CPS."</c>). If <c>null</c>, nothing is prepended.
@@ -198,34 +198,33 @@ internal static class CrossProcessUtils
     /// </returns>
     /// <remarks>
     /// <para>
-    /// The method encodes <paramref name="baseName"/> as Base64URL (trims trailing <c>'='</c>,
-    /// replaces <c>'+'</c> with <c>'-'</c> and <c>'/'</c> with <c>'_'</c>).
-    /// </para>
-    /// <para>
-    /// To keep names short, if the encoded value exceeds a conservative maximum (<c>220</c> characters),
-    /// the result is truncated to the first <c>100</c> characters and a dot plus a 16-hex
-    /// SHA-256 suffix is appended. This preserves determinism while reducing collision risk and
-    /// staying well within typical OS limits for pipe names.
+    /// Pipe names are represented by a SHA-256 digest. On Unix, .NET implements named pipes with
+    /// Unix-domain sockets and prepends a platform-specific temporary-directory path. A compact,
+    /// fixed-size name is therefore required to remain below Linux and macOS socket-path limits.
     /// </para>
     /// </remarks>
     /// <example>
     /// <code>
-    /// var pipeName = BuildPipeName("CPS:MyService:abc123"); // e.g., "CPS.LUNTOX..._..."
+    /// var pipeName = BuildPipeName("CPS:MyService:abc123"); // e.g., "CPS.5dbf..."
     /// </code>
     /// </example>
     public static string BuildPipeName(string baseName, string? prefix = "CPS.")
     {
         ArgumentNullException.ThrowIfNull(baseName);
 
-        // Base64URL encode (no '+', '/', or '=')
-        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(baseName))
-                  .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-        // Keep it short; fall back to a hashed suffix if too long
-        const int max = 220; // headroom for prefixes
-        if (b64.Length <= max) return (prefix ?? string.Empty) + b64;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(baseName))).ToLowerInvariant();
-        return $"{prefix ?? string.Empty}{b64[..100]}.{hash[..16]}";
+        return $"{prefix ?? string.Empty}{hash[..32]}";
+    }
+
+    /// <summary>
+    /// Preserves already-safe physical pipe names and hashes longer logical names.
+    /// </summary>
+    internal static string NormalizePipeName(string pipeName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
+        return Encoding.UTF8.GetByteCount(pipeName) <= 36
+            ? pipeName
+            : BuildPipeName(pipeName);
     }
 
 }

@@ -1,3 +1,6 @@
+using Extend0.Metadata;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
@@ -78,12 +81,62 @@ public static class DoctorCommand
         CheckFile(checks, root, "test-project", Path.Combine("Extend0.Tests", "Extend0.Tests.csproj"), required: false);
         CheckFile(checks, root, "testing-harness-project", Path.Combine("Extend0.Testing", "Extend0.Testing.csproj"), required: false);
 
+        var metaDbReady = CheckMetaDbManager(checks);
         CheckTargetFramework(checks, root);
         CheckCliToolConfiguration(checks, root);
         CheckReadmeTargetFramework(checks, root);
         CheckOntologyAccessSurfaceRange(checks, root);
 
-        return DoctorReport.Create(root, DateTimeOffset.UtcNow, checks);
+        return DoctorReport.Create(
+            GetProductVersion(),
+            RuntimeInformation.RuntimeIdentifier,
+            RuntimeInformation.OSArchitecture.ToString(),
+            metaDbReady,
+            root,
+            DateTimeOffset.UtcNow,
+            checks);
+    }
+
+    private static bool CheckMetaDbManager(List<DoctorCheck> checks)
+    {
+        var probeRoot = Path.Combine(Path.GetTempPath(), "Extend0.Doctor", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(probeRoot);
+            var deleteQueuePath = Path.Combine(probeRoot, "metadb.deletes.log");
+            using var manager = MetaDB.CreateManager(deleteQueuePath: deleteQueuePath);
+            checks.Add(DoctorCheck.Pass("metadb-manager", "Constructed the public MetaDB manager."));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            checks.Add(new DoctorCheck("metadb-manager", DoctorStatus.Error, $"Could not construct the public MetaDB manager: {ex.Message}"));
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(probeRoot))
+                    Directory.Delete(probeRoot, recursive: true);
+            }
+            catch (IOException)
+            {
+                // The readiness result remains valid even if temporary probe cleanup is delayed.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The readiness result remains valid even if temporary probe cleanup is delayed.
+            }
+        }
+    }
+
+    private static string GetProductVersion()
+    {
+        var informationalVersion = typeof(MetaDB).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        return informationalVersion?.Split('+', 2)[0] ?? "unknown";
     }
 
     private static void CheckFile(List<DoctorCheck> checks, string root, string id, string relativePath, bool required)
@@ -216,6 +269,9 @@ public static class DoctorCommand
     private static void WriteHumanReport(TextWriter output, DoctorReport report)
     {
         output.WriteLine("Extend0 doctor");
+        output.WriteLine($"Version: {report.Version}");
+        output.WriteLine($"Runtime: {report.RuntimeIdentifier} ({report.Architecture})");
+        output.WriteLine($"MetaDB ready: {report.MetaDbReady}");
         output.WriteLine($"Root: {report.RepositoryRoot}");
         output.WriteLine();
 

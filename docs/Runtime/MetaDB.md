@@ -51,6 +51,26 @@ That means:
 - preserve the conceptual distinction between the `MetaDB` system and the manager that operates it
 - keep demo tables out of the core domain vocabulary unless they become accepted architecture
 
+## Portable Persistent-Storage Contract
+
+Persistent single-file and chunked tables use one cooperative writer lease per normalized `MapPath`.
+The lease is held for the lifetime of the mapped store and is backed by an OS-enforced exclusive
+handle or byte-range lock on the stable `<MapPath>.extend0.lock` sidecar. A second owner receives
+`MetadataTableLockedException` on Windows, Linux, and macOS.
+
+Open, delete, move-aside, and recovery follow these rules:
+
+- opening an already-owned table fails without replacing or truncating its storage
+- deletion and move-aside must acquire the same lease and otherwise remain queued for retry
+- missing files are a successful idempotent delete
+- a released or abandoned process lease permits a later owner to open or clean up the table
+- sidecar files are retained intentionally so every process continues to coordinate on the same inode
+- the read-only file attribute is not a portable deletion lock; Unix uses directory permissions while Windows may reject deletion or rename
+
+The contract is cooperative. External programs that ignore the sidecar can still rename or unlink an
+open file on Unix. Deployments must keep the table and sidecar together and grant mutation access only
+to actors that follow the Extend0 ownership protocol.
+
 ## Schema Evolution
 
 `TableSpec` is the schema contract for a MetaDB table.

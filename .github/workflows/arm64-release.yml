@@ -1,0 +1,269 @@
+name: ARM64 release artifacts
+
+on:
+  pull_request:
+    paths:
+      - "Extend0/**"
+      - "Extend0.Cli/**"
+      - "Extend0.MetadataEntry.Generator/**"
+      - "Extend0.Tests/**"
+      - "eng/Extend0.ReleaseSmoke/**"
+      - "docs/Runtime/ARM64.md"
+      - "global.json"
+      - ".github/workflows/arm64-release.yml"
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "Extend0/**"
+      - "Extend0.Cli/**"
+      - "Extend0.MetadataEntry.Generator/**"
+      - "eng/Extend0.ReleaseSmoke/**"
+      - "global.json"
+      - ".github/workflows/arm64-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arm64-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - name: Read and validate package version
+        id: version
+        shell: bash
+        run: |
+          version="$(python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          projects = [
+              "Extend0/Extend0.csproj",
+              "Extend0.Cli/Extend0.Cli.csproj",
+          ]
+          versions = {ET.parse(project).findtext(".//Version") for project in projects}
+          if None in versions or len(versions) != 1:
+              raise SystemExit(f"ARM64 project versions are not aligned: {versions}")
+          print(versions.pop())
+          PY
+          )"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag '$GITHUB_REF_NAME' must equal 'v$version'." >&2
+            exit 1
+          fi
+
+  native-smoke:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+            executable: ./publish/extend0
+            archive: tar.gz
+          - rid: win-arm64
+            runner: windows-11-arm
+            executable: ./publish/extend0.exe
+            archive: zip
+          - rid: osx-arm64
+            runner: macos-15
+            executable: ./publish/extend0
+            archive: tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          global-json-file: global.json
+      - name: Require native ARM64 runner
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -ne 'ARM64') {
+            throw "RID ${{ matrix.rid }} requires a native ARM64 runner; RUNNER_ARCH=$env:RUNNER_ARCH"
+          }
+      - name: Publish self-contained CLI
+        shell: pwsh
+        run: |
+          dotnet publish Extend0.Cli/Extend0.Cli.csproj `
+            -c Release `
+            -r ${{ matrix.rid }} `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+          if ('${{ matrix.rid }}' -eq 'win-arm64') {
+            Move-Item publish/Extend0.Cli.exe publish/extend0.exe
+          } else {
+            Move-Item publish/Extend0.Cli publish/extend0
+          }
+      - name: Validate doctor JSON and version
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $json = & '${{ matrix.executable }}' doctor --repo $env:GITHUB_WORKSPACE --json
+          if ($LASTEXITCODE -ne 0) { throw 'extend0 doctor failed' }
+          $json | Set-Content -Encoding utf8 doctor.json
+          $report = $json | ConvertFrom-Json
+          if ($report.version -ne $env:EXPECTED_VERSION) {
+            throw "doctor version '$($report.version)' does not match '$env:EXPECTED_VERSION'"
+          }
+          if ($report.metadb_ready -ne $true) { throw 'doctor did not report metadb_ready=true' }
+          if ($report.architecture -ne 'Arm64') { throw "doctor reported architecture '$($report.architecture)'" }
+          if ($report.ErrorCount -ne 0) { throw "doctor reported $($report.ErrorCount) errors" }
+      - name: Exercise MetaDB create, restart, and cleanup
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          dotnet build eng/Extend0.ReleaseSmoke/Extend0.ReleaseSmoke.csproj `
+            -c Release `
+            -r ${{ matrix.rid }}
+          if ($LASTEXITCODE -ne 0) { throw 'MetaDB ARM64 release smoke build failed' }
+          $json = & dotnet run --project eng/Extend0.ReleaseSmoke/Extend0.ReleaseSmoke.csproj `
+            --no-build `
+            -c Release `
+            -r ${{ matrix.rid }} `
+            -- $env:EXPECTED_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'MetaDB ARM64 release smoke failed' }
+          $json | Set-Content -Encoding utf8 metadb-smoke.json
+          $smoke = $json | ConvertFrom-Json
+          if ($smoke.metadb_ready -ne $true -or $smoke.restart -ne $true -or $smoke.cleanup -ne $true) {
+            throw 'MetaDB release smoke did not complete every lifecycle phase'
+          }
+      - name: Stage native archive
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RID: ${{ matrix.rid }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          Copy-Item doctor.json publish/doctor.json
+          Copy-Item metadb-smoke.json publish/metadb-smoke.json
+          New-Item -ItemType Directory -Force native | Out-Null
+          $name = "extend0-cli-$env:VERSION-$env:RID"
+          if ($env:ARCHIVE -eq 'zip') {
+            Compress-Archive -Path publish/* -DestinationPath "native/$name.zip"
+          } else {
+            tar -czf "native/$name.tar.gz" -C publish .
+            if ($LASTEXITCODE -ne 0) { throw 'tar failed' }
+          }
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: extend0-arm64-raw-${{ needs.version.outputs.version }}-${{ matrix.rid }}
+          path: native/
+          if-no-files-found: error
+          retention-days: 14
+
+  finalize:
+    needs: [version, native-smoke]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-arm64
+            archive: tar.gz
+          - rid: win-arm64
+            archive: zip
+          - rid: osx-arm64
+            archive: tar.gz
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/download-artifact@v7.0.0
+        with:
+          name: extend0-arm64-raw-${{ needs.version.outputs.version }}-${{ matrix.rid }}
+          path: input
+      - name: Extract smoke-tested payload
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RID: ${{ matrix.rid }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p payload
+          name="extend0-cli-$VERSION-$RID"
+          if [[ "$ARCHIVE" == "zip" ]]; then
+            unzip -q "input/$name.zip" -d payload
+          else
+            tar -xzf "input/$name.tar.gz" -C payload
+          fi
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: payload
+          format: spdx-json
+          output-file: payload/sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Build immutable archive and checksum
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RID: ${{ matrix.rid }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p dist
+          name="extend0-cli-$VERSION-$RID"
+          cp payload/sbom.spdx.json "dist/$name.spdx.json"
+          if [[ "$ARCHIVE" == "zip" ]]; then
+            (cd payload && zip -qr "../dist/$name.zip" .)
+          else
+            tar -czf "dist/$name.tar.gz" -C payload .
+          fi
+          (cd dist && sha256sum "$name.$ARCHIVE" > "$name.$ARCHIVE.sha256")
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/extend0-cli-${{ needs.version.outputs.version }}-${{ matrix.rid }}.${{ matrix.archive }}
+      - name: Attest SPDX SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/extend0-cli-${{ needs.version.outputs.version }}-${{ matrix.rid }}.${{ matrix.archive }}
+          sbom-path: dist/extend0-cli-${{ needs.version.outputs.version }}-${{ matrix.rid }}.spdx.json
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: extend0-arm64-${{ needs.version.outputs.version }}-${{ matrix.rid }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, finalize]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7.0.0
+        with:
+          pattern: extend0-arm64-${{ needs.version.outputs.version }}-*
+          path: dist
+          merge-multiple: true
+      - name: Publish immutable versioned release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "Extend0 $GITHUB_REF_NAME"
