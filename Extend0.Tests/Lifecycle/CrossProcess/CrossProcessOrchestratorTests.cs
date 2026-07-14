@@ -35,7 +35,7 @@ public sealed class CrossProcessOrchestratorTests
         Assert.Equal(".", result.EndpointServerName);
         Assert.Equal(TransportKind.NamedPipe, result.TransportKind);
         Assert.Equal(LifecycleCrossProcessHarness.BuildTestServiceOwnershipName(serviceName), result.OwnershipName);
-        Assert.Equal("OSMutex", result.CoordinationKind);
+        Assert.Equal(OperatingSystem.IsWindows() ? "OSMutex" : "OSFileLease", result.CoordinationKind);
         Assert.False(string.IsNullOrWhiteSpace(result.CoordinationScope));
         Assert.True(result.LeaseIsExclusive);
         Assert.True(result.LeaseIsActive);

@@ -245,7 +245,7 @@ public sealed class NamedPipeTransportTests
     [Fact]
     public async Task NamedPipeClientTransport_RejectsInvalidHandshake()
     {
-        var pipeName = $"Extend0.Tests.BadHandshake.{Guid.NewGuid():N}";
+        var pipeName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.BadHandshake.{Guid.NewGuid():N}");
         var serverTask = RunRawServerAsync(
             pipeName,
             static async server =>
@@ -266,7 +266,7 @@ public sealed class NamedPipeTransportTests
     [Fact]
     public async Task NamedPipeClientTransport_RejectsMissingGreeting()
     {
-        var pipeName = $"Extend0.Tests.MissingHello.{Guid.NewGuid():N}";
+        var pipeName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.MissingHello.{Guid.NewGuid():N}");
         var serverTask = RunRawServerAsync(
             pipeName,
             static server =>
@@ -287,7 +287,7 @@ public sealed class NamedPipeTransportTests
     [Fact]
     public async Task NamedPipeClientTransport_ReturnsSoftErrors_ForMalformedJsonAndClosedTransport()
     {
-        var malformedPipe = $"Extend0.Tests.MalformedJson.{Guid.NewGuid():N}";
+        var malformedPipe = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.MalformedJson.{Guid.NewGuid():N}");
         var malformedServerTask = RunRawServerAsync(
             malformedPipe,
             async server =>
@@ -308,7 +308,7 @@ public sealed class NamedPipeTransportTests
 
         await malformedServerTask;
 
-        var closedPipe = $"Extend0.Tests.ClosedTransport.{Guid.NewGuid():N}";
+        var closedPipe = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.ClosedTransport.{Guid.NewGuid():N}");
         var closedServerTask = RunRawServerAsync(
             closedPipe,
             async server =>
@@ -326,7 +326,7 @@ public sealed class NamedPipeTransportTests
 
         await closedServerTask;
 
-        var eofPipe = $"Extend0.Tests.EofTransport.{Guid.NewGuid():N}";
+        var eofPipe = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.EofTransport.{Guid.NewGuid():N}");
         var eofServerTask = RunRawServerAsync(
             eofPipe,
             async server =>
@@ -350,7 +350,7 @@ public sealed class NamedPipeTransportTests
     [Fact]
     public async Task NamedPipeClientTransport_ReturnsSoftError_WhenCalledAfterDispose()
     {
-        var pipeName = $"Extend0.Tests.DisposedTransport.{Guid.NewGuid():N}";
+        var pipeName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.DisposedTransport.{Guid.NewGuid():N}");
         var serverTask = RunRawServerAsync(
             pipeName,
             async server =>
@@ -390,7 +390,7 @@ public sealed class NamedPipeTransportTests
     [Fact]
     public async Task NamedPipeClientTransport_PropagatesReadCancellation()
     {
-        var pipeName = $"Extend0.Tests.CancellableRead.{Guid.NewGuid():N}";
+        var pipeName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"Extend0.Tests.CancellableRead.{Guid.NewGuid():N}");
         var serverTask = RunRawServerAsync(
             pipeName,
             async server =>

@@ -295,7 +295,12 @@ namespace Extend0.Metadata
         /// defaults to <c>{AppContext.BaseDirectory}\metadb.deletes.log</c>.
         /// Ignored when running in browser (<see cref="OperatingSystem.IsBrowser"/>).
         /// </param>
-        public MetaDBManager(ILogger? logger, Func<TableSpec?, IMetadataTable>? factory = null, CapacityPolicy capacityPolicy = CapacityPolicy.Throw, string? deleteQueuePath = null)
+        public MetaDBManager(
+            ILogger? logger,
+            Func<TableSpec?, IMetadataTable>? factory = null,
+            CapacityPolicy capacityPolicy = CapacityPolicy.Throw,
+            string? deleteQueuePath = null,
+            bool startDeleteWorker = true)
         {
             _log = logger;
             _isLogActivated = _log != null && _log.IsEnabled(LogLevel.Debug);
@@ -307,7 +312,9 @@ namespace Extend0.Metadata
             {
                 _deleteQueuePath = deleteQueuePath ?? Path.Combine(AppContext.BaseDirectory, DELETES_FILE_DEFAULT_NAME);
                 LoadDeleteQueueFromDisk();
-                _deleteWorkerTask = Task.Run(() => DeleteWorkerLoopAsync(_deleteCts.Token));
+                _deleteWorkerTask = startDeleteWorker
+                    ? Task.Run(() => DeleteWorkerLoopAsync(_deleteCts.Token))
+                    : Task.CompletedTask;
             }
             else
             {

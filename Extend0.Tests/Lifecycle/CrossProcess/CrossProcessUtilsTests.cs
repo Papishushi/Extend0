@@ -37,7 +37,8 @@ public sealed class CrossProcessUtilsTests
         Assert.Matches("^[A-Za-z0-9._-]+$", shortName);
         Assert.StartsWith("P.", longName, StringComparison.Ordinal);
         Assert.Contains('.', longName);
-        Assert.True(longName.Length < 220);
+        Assert.Equal(shortName.Length, longName.Length);
+        Assert.True(longName.Length <= 36);
     }
 
     [Fact]

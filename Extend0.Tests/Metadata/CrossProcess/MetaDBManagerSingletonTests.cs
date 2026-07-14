@@ -6,6 +6,7 @@ using Extend0.Testing.Metadata.Internal;
 
 namespace Extend0.Tests.Metadata.CrossProcess;
 
+[Collection(Extend0.Tests.Metadata.Storage.MappedStorageCollection.Name)]
 public sealed class MetaDBManagerSingletonTests
 {
     [Fact]

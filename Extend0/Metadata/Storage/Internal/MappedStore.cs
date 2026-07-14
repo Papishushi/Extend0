@@ -50,6 +50,7 @@ namespace Extend0.Metadata.Storage.Internal
         private FileHeader* _hdr;
         private ColumnDesc* _cols;
         private readonly string _path;     // Path to the mapped file
+        private readonly MetadataStorageLease _storageLease;
         private long _length;              // Current file length
         private readonly int _chunkSize;
         private readonly int _slabAlignment;
@@ -189,28 +190,38 @@ namespace Extend0.Metadata.Storage.Internal
 
             var fullPath = Path.GetFullPath(spec.MapPath);
             _path = fullPath;
+            _storageLease = MetadataStorageLease.Acquire(fullPath);
 
-            using var mutationLock = AcquireMapMutationLock(fullPath);
-
-            var dir = Path.GetDirectoryName(fullPath)!;
-            Directory.CreateDirectory(dir);
-            spec.SaveToDirectory(dir);
-
-            ThrowParsed(() =>
+            try
             {
-                using (var fs = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read))
+                using var mutationLock = AcquireMapMutationLock(fullPath);
+
+                var dir = Path.GetDirectoryName(fullPath)!;
+                Directory.CreateDirectory(dir);
+                spec.SaveToDirectory(dir);
+
+                ThrowParsed(() =>
                 {
-                    if (fs.Length < fileSize) fs.SetLength(fileSize);
-                    _length = fs.Length;
-                }
-            });
+                    using (var fs = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read))
+                    {
+                        if (fs.Length < fileSize) fs.SetLength(fileSize);
+                        _length = fs.Length;
+                    }
+                });
 
-            OpenMapping();
+                ThrowParsed(OpenMapping);
 
-            // Initialize header and column descriptors if the file is new / uninitialized
-            InitializeMappedFile(columns, batch);
+                // Initialize header and column descriptors if the file is new / uninitialized
+                InitializeMappedFile(columns, batch);
 
-            if (rented is not null) ArrayPool<ColumnDesc>.Shared.Return(rented, clearArray: true);
+                if (rented is not null) ArrayPool<ColumnDesc>.Shared.Return(rented, clearArray: true);
+            }
+            catch
+            {
+                _storageLease.Dispose();
+                if (rented is not null) ArrayPool<ColumnDesc>.Shared.Return(rented, clearArray: true);
+                throw;
+            }
         }
 
         /// <summary>
@@ -712,8 +723,15 @@ namespace Extend0.Metadata.Storage.Internal
         public void Dispose()
         {
             if (_disposed) return;
-            CloseMapping(flush: true);
-            _disposed = true;
+            try
+            {
+                CloseMapping(flush: true);
+            }
+            finally
+            {
+                _storageLease.Dispose();
+                _disposed = true;
+            }
         }
 
         /// <inheritdoc/>

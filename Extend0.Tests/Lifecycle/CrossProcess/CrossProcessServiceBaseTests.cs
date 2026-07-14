@@ -1,4 +1,5 @@
 using Extend0.Lifecycle.CrossProcess;
+using Extend0.Testing.Lifecycle.CrossProcess;
 using Microsoft.Extensions.Logging;
 using System.IO.Pipes;
 
@@ -19,7 +20,7 @@ public sealed class CrossProcessServiceBaseTests
     [Fact]
     public async Task CanConnectAsync_DefaultProbe_ReturnsTrue_WhenNamedPipeServerIsListening()
     {
-        var pipeName = $"extend0-probe-{Guid.NewGuid():N}";
+        var pipeName = LifecycleCrossProcessHarness.BuildNamedPipeEndpointName($"extend0-probe-{Guid.NewGuid():N}");
         using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
         var waitServer = server.WaitForConnectionAsync();
         var service = new DefaultProbeTestService(pipeName);

@@ -46,6 +46,9 @@ public static class MetadataStorageHarness
     public static ICellStore CreateMappedStore(TableSpec spec) =>
         new MappedStore(spec);
 
+    public static IDisposable AcquireStorageLease(string path) =>
+        MetadataStorageLease.Acquire(path);
+
     public static bool TryLoadMappedColumns(string path, out ColumnConfiguration[] columns) =>
         MappedStore.TryLoadColumns(path, out columns);
 

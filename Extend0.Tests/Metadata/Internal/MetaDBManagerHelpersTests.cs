@@ -6,6 +6,7 @@ using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using Extend0.Metadata.Storage.Contract;
 using Extend0.Testing.Metadata.Internal;
+using Extend0.Testing.Metadata.Storage;
 
 namespace Extend0.Tests.Metadata.Internal;
 
@@ -160,7 +161,7 @@ public sealed class MetaDBManagerHelpersTests
             var lockedPath = Path.Combine(tempRoot, "locked.bin");
             File.WriteAllText(lockedPath, "locked");
 
-            using var lockHandle = new FileStream(lockedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var lockHandle = MetadataStorageHarness.AcquireStorageLease(lockedPath);
             var deleted = await MetaDBManagerHelpersHarness.TryDeleteWithRetries(lockedPath, attempts: 2);
 
             Assert.False(deleted);

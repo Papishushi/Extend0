@@ -53,7 +53,8 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <param name="baseName">Logical cross-process service identity.</param>
         /// <param name="transportKind">Transport kind that will back the endpoint.</param>
         /// <param name="explicitEndpointName">
-        /// Optional endpoint override supplied by the caller. When provided, it is returned as-is.
+        /// Optional endpoint override supplied by the caller. Named-pipe overrides are converted to
+        /// the same fixed-size physical name as derived pipe endpoints; other transports use the value as-is.
         /// </param>
         /// <param name="allowLogicalFallback">
         /// When <see langword="true"/>, unsupported built-in kinds fall back to the logical base name so custom
@@ -66,7 +67,9 @@ namespace Extend0.Lifecycle.CrossProcess
             bool allowLogicalFallback = false)
         {
             if (!string.IsNullOrWhiteSpace(explicitEndpointName))
-                return explicitEndpointName;
+                return transportKind == TransportKind.NamedPipe
+                    ? CrossProcessUtils.NormalizePipeName(explicitEndpointName)
+                    : explicitEndpointName;
 
             return transportKind switch
             {
