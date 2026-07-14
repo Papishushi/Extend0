@@ -16,6 +16,8 @@
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
 		<AssemblyVersion>1.1.9691.41434</AssemblyVersion>
+		<PackageVersion>$(AssemblyVersion)</PackageVersion>
+		<InformationalVersion>$(AssemblyVersion)</InformationalVersion>
 		<FileVersion>1.1.9691.41434</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
@@ -31,7 +33,6 @@
 		<PackageReleaseNotes>
 			Update dependencies to latest versions. Fix NU5128.
 		</PackageReleaseNotes>
-		<Version>1.0.9535</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
