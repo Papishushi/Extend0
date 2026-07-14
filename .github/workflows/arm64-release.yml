@@ -5,6 +5,7 @@ on:
     paths:
       - "Extend0/**"
       - "Extend0.Cli/**"
+      - "Extend0.MetadataEntry.Generator/**"
       - "Extend0.Tests/**"
       - "eng/Extend0.ReleaseSmoke/**"
       - "docs/Runtime/ARM64.md"
@@ -16,6 +17,7 @@ on:
     paths:
       - "Extend0/**"
       - "Extend0.Cli/**"
+      - "Extend0.MetadataEntry.Generator/**"
       - "eng/Extend0.ReleaseSmoke/**"
       - "global.json"
       - ".github/workflows/arm64-release.yml"

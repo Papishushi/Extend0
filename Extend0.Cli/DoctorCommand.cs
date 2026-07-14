@@ -99,9 +99,12 @@ public static class DoctorCommand
 
     private static bool CheckMetaDbManager(List<DoctorCheck> checks)
     {
+        var probeRoot = Path.Combine(Path.GetTempPath(), "Extend0.Doctor", Guid.NewGuid().ToString("N"));
         try
         {
-            using var manager = MetaDB.CreateManager();
+            Directory.CreateDirectory(probeRoot);
+            var deleteQueuePath = Path.Combine(probeRoot, "metadb.deletes.log");
+            using var manager = MetaDB.CreateManager(deleteQueuePath: deleteQueuePath);
             checks.Add(DoctorCheck.Pass("metadb-manager", "Constructed the public MetaDB manager."));
             return true;
         }
@@ -109,6 +112,22 @@ public static class DoctorCommand
         {
             checks.Add(new DoctorCheck("metadb-manager", DoctorStatus.Error, $"Could not construct the public MetaDB manager: {ex.Message}"));
             return false;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(probeRoot))
+                    Directory.Delete(probeRoot, recursive: true);
+            }
+            catch (IOException)
+            {
+                // The readiness result remains valid even if temporary probe cleanup is delayed.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The readiness result remains valid even if temporary probe cleanup is delayed.
+            }
         }
     }
 
