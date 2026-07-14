@@ -3,19 +3,25 @@ name: NuGet packages
 on:
   pull_request:
     paths:
-      - "Extend0/Extend0.csproj"
-      - "Extend0.Cli/Extend0.Cli.csproj"
-      - "Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj"
-      - "Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj"
+      - "Extend0/**"
+      - "Extend0.Cli/**"
+      - "Extend0.MetadataEntry.Generator/**"
+      - "Extend0.BlittableAdapter.Generator/**"
+      - "Extend0.Testing/**"
+      - "Extend0.Tests/**"
+      - "Extend0.TestProcessHost/**"
       - "global.json"
       - ".github/workflows/nuget.yml"
   push:
     branches: [main]
     paths:
-      - "Extend0/Extend0.csproj"
-      - "Extend0.Cli/Extend0.Cli.csproj"
-      - "Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj"
-      - "Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj"
+      - "Extend0/**"
+      - "Extend0.Cli/**"
+      - "Extend0.MetadataEntry.Generator/**"
+      - "Extend0.BlittableAdapter.Generator/**"
+      - "Extend0.Testing/**"
+      - "Extend0.Tests/**"
+      - "Extend0.TestProcessHost/**"
       - "global.json"
       - ".github/workflows/nuget.yml"
   workflow_dispatch:
@@ -44,11 +50,7 @@ jobs:
       - name: Restore tests
         run: dotnet restore Extend0.Tests/Extend0.Tests.csproj
       - name: Run full test suite
-        if: runner.os == 'Windows'
         run: dotnet test Extend0.Tests/Extend0.Tests.csproj -c Release --no-restore
-      - name: Build test assembly on Unix
-        if: runner.os != 'Windows'
-        run: dotnet build Extend0.Tests/Extend0.Tests.csproj -c Release --no-restore
       - name: Build CLI
         run: dotnet build Extend0.Cli/Extend0.Cli.csproj -c Release
       - name: Run platform diagnostic
