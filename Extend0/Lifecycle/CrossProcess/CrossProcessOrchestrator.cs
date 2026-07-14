@@ -101,10 +101,26 @@ namespace Extend0.Lifecycle.CrossProcess
                 endpointName,
                 allowLogicalFallback: clientTransportFactory is not null || serverTransportFactory is not null);
 
-            var m = CrossProcessUtils.CreateOwned(baseName, preferGlobalMutex, out bool createdNew, out bool isGlobal);
+            IDisposable? ownershipLease;
+            bool createdNew;
+            bool isGlobal;
+            string coordinationKind;
 
-            if (createdNew) return HostBranch(factory, baseName, resolvedEndpointName, serverName, resolvedProtocolDescriptor, transportKind, m, isGlobal, authentication, tls, serverTransportFactory);
-            else return ClientBranch(serverName, connectTimeoutMs, resolvedEndpointName, resolvedProtocolDescriptor, transportKind, m, authentication, tls, clientTransportFactory);
+            if (OperatingSystem.IsWindows())
+            {
+                ownershipLease = CrossProcessUtils.CreateOwned(baseName, preferGlobalMutex, out createdNew, out isGlobal);
+                coordinationKind = "OSMutex";
+            }
+            else
+            {
+                createdNew = CrossProcessFileLease.TryAcquire(baseName, out var fileLease);
+                ownershipLease = fileLease;
+                isGlobal = false;
+                coordinationKind = "OSFileLease";
+            }
+
+            if (createdNew) return HostBranch(factory, baseName, resolvedEndpointName, serverName, resolvedProtocolDescriptor, transportKind, ownershipLease!, isGlobal, coordinationKind, authentication, tls, serverTransportFactory);
+            else return ClientBranch(serverName, connectTimeoutMs, resolvedEndpointName, resolvedProtocolDescriptor, transportKind, ownershipLease, authentication, tls, clientTransportFactory);
         }
 
         /// <summary>
@@ -116,12 +132,12 @@ namespace Extend0.Lifecycle.CrossProcess
             string endpointName,
             CrossProcessProtocolDescriptor protocolDescriptor,
             TransportKind transportKind,
-            Mutex m,
+            IDisposable? ownershipLease,
             CrossProcessAuthenticationOptions? authentication,
             CrossProcessTlsOptions? tls,
             Func<ClientTransportFactoryContext, IClientTransport>? clientTransportFactory)
         {
-            try { m.Dispose(); } catch { }
+            try { ownershipLease?.Dispose(); } catch { }
 
             var transport = CrossProcessTransportFactory.CreateClientTransport(
                 new ClientTransportFactoryContext(transportKind, protocolDescriptor, endpointName, serverName, connectTimeoutMs, authentication, tls),
@@ -152,8 +168,9 @@ namespace Extend0.Lifecycle.CrossProcess
             string serverName,
             CrossProcessProtocolDescriptor protocolDescriptor,
             TransportKind transportKind,
-            Mutex m,
+            IDisposable ownershipLease,
             bool isGlobal,
+            string coordinationKind,
             CrossProcessAuthenticationOptions? authentication,
             CrossProcessTlsOptions? tls,
             Func<ServerTransportFactoryContext, ICrossProcessServerHost>? serverTransportFactory)
@@ -169,7 +186,7 @@ namespace Extend0.Lifecycle.CrossProcess
                     serviceBase.ConfigureRuntimeEndpoint(endpointName, serverName, transportKind);
                     serviceBase.ConfigureRuntimeLease(
                         ownershipName,
-                        "OSMutex",
+                        coordinationKind,
                         ownershipName,
                         ResolveCoordinationScope(isGlobal));
                 }
@@ -181,14 +198,14 @@ namespace Extend0.Lifecycle.CrossProcess
                 return new CrossProcessHandle<TService>(
                     impl,
                     isOwner: true,
-                    mutex: m,
+                    mutex: ownershipLease,
                     cts: cts,
                     server: server,
                     transport: null);
             }
             catch
             {
-                TryDisposeState(m, cts, server, impl);
+                TryDisposeState(ownershipLease, cts, server, impl);
                 throw;
             }
         }
@@ -201,14 +218,22 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <summary>
         /// Best-effort cleanup for partially initialized owner state after a hosting failure.
         /// </summary>
-        private static void TryDisposeState(Mutex m, CancellationTokenSource? cts, ICrossProcessServerHost? server, TService? service)
+        private static void TryDisposeState(IDisposable ownershipLease, CancellationTokenSource? cts, ICrossProcessServerHost? server, TService? service)
         {
             try { cts?.Cancel(); } catch { }
             try { server?.Dispose(); } catch { }
             TryDisposeService(service);
             try { cts?.Dispose(); } catch { }
-            try { m.ReleaseMutex(); } catch { }
-            try { m.Dispose(); } catch { }
+            try
+            {
+                if (ownershipLease is Mutex mutex)
+                    mutex.ReleaseMutex();
+                ownershipLease.Dispose();
+            }
+            catch
+            {
+                try { ownershipLease.Dispose(); } catch { }
+            }
         }
 
         /// <summary>

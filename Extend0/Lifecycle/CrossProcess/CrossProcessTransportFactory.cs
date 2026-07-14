@@ -68,7 +68,7 @@ namespace Extend0.Lifecycle.CrossProcess
         {
             if (!string.IsNullOrWhiteSpace(explicitEndpointName))
                 return transportKind == TransportKind.NamedPipe
-                    ? CrossProcessUtils.BuildPipeName(explicitEndpointName)
+                    ? CrossProcessUtils.NormalizePipeName(explicitEndpointName)
                     : explicitEndpointName;
 
             return transportKind switch

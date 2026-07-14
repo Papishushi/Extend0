@@ -11,12 +11,12 @@
     /// <remarks>
     /// <para>
     /// The handle encapsulates the resources needed to host or access a cross-process singleton:
-    /// the service instance/proxy, an optional named-pipe server (owner only), a process-wide
-    /// mutex (owner only), and a client transport (non-owner only).
+        /// the service instance/proxy, an optional named-pipe server (owner only), a cross-process
+        /// ownership lease (owner only), and a client transport (non-owner only).
     /// </para>
     /// <para>
     /// Disposing the handle tears down these resources in a safe order:
-    /// client transport → cancel hosting token → dispose server → release mutex → dispose service (owner only).
+        /// client transport → cancel hosting token → dispose server → release ownership lease → dispose service (owner only).
     /// Both <see cref="Dispose"/> and <see cref="DisposeAsync"/> are idempotent.
     /// </para>
     /// </remarks>
@@ -42,7 +42,7 @@
         /// </summary>
         public bool IsOwner { get; }
 
-        private readonly Mutex? _mutex;
+        private readonly IDisposable? _ownershipLease;
         private readonly CancellationTokenSource? _cts;
         private readonly ICrossProcessServerHost? _server;
         private readonly IClientTransport? _transport;
@@ -55,18 +55,18 @@
         /// The service instance to expose. For owners, the real implementation; for non-owners, the proxy.
         /// </param>
         /// <param name="isOwner">Whether this handle represents the hosting (owner) side.</param>
-        /// <param name="mutex">The process-wide mutex used to establish ownership (owner only).</param>
+        /// <param name="mutex">The mutex or file lease used to establish ownership (owner only).</param>
         /// <param name="cts">Cancellation token source used to stop the server loop (owner only).</param>
         /// <param name="server">The owner-side server host responsible for exposing the service (owner only).</param>
         /// <param name="transport">The client transport used by the proxy (non-owner only).</param>
         /// <exception cref="ArgumentNullException"><paramref name="service"/> is <c>null</c>.</exception>
         internal CrossProcessHandle(
-            TService service, bool isOwner, Mutex? mutex, CancellationTokenSource? cts,
+            TService service, bool isOwner, IDisposable? mutex, CancellationTokenSource? cts,
             ICrossProcessServerHost? server, IClientTransport? transport)
         {
             Service    = service ?? throw new ArgumentNullException(nameof(service));
             IsOwner    = isOwner;
-            _mutex     = mutex;
+            _ownershipLease = mutex;
             _cts       = cts;
             _server    = server;
             _transport = transport;
@@ -93,8 +93,7 @@
 
             DisposeServerSync();
 
-            ReleaseMutexSafe();
-            DisposeMutexSafe();
+            DisposeOwnershipLeaseSafe();
 
             DisposeServiceSync();
         }
@@ -169,8 +168,7 @@
 
             await DisposeServerAsync().ConfigureAwait(false);
 
-            ReleaseMutexSafe();
-            DisposeMutexSafe();
+            DisposeOwnershipLeaseSafe();
 
             await DisposeServiceAsync().ConfigureAwait(false);
         }
@@ -250,34 +248,18 @@
         /// Any exception (for example, releasing a mutex not owned by the current thread)
         /// is swallowed because it is non-fatal once the handle is being disposed.
         /// </remarks>
-        private void ReleaseMutexSafe()
+        private void DisposeOwnershipLeaseSafe()
         {
             try
             {
-                _mutex?.ReleaseMutex();
-            }
-            catch
-            {
-                // Mutex state issues during shutdown are non-fatal for the process.
-            }
-        }
+                if (_ownershipLease is Mutex mutex)
+                    mutex.ReleaseMutex();
 
-        /// <summary>
-        /// Safely disposes the underlying mutex instance, if any.
-        /// </summary>
-        /// <remarks>
-        /// Disposing the OS handle for the mutex is the final cleanup step.
-        /// Failures are ignored because they are not actionable at this stage.
-        /// </remarks>
-        private void DisposeMutexSafe()
-        {
-            try
-            {
-                _mutex?.Dispose();
+                _ownershipLease?.Dispose();
             }
             catch
             {
-                // Non-actionable failure when releasing OS handle during teardown.
+                try { _ownershipLease?.Dispose(); } catch { }
             }
         }
 

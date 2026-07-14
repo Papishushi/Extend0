@@ -216,4 +216,15 @@ internal static class CrossProcessUtils
         return $"{prefix ?? string.Empty}{hash[..32]}";
     }
 
+    /// <summary>
+    /// Preserves already-safe physical pipe names and hashes longer logical names.
+    /// </summary>
+    internal static string NormalizePipeName(string pipeName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
+        return Encoding.UTF8.GetByteCount(pipeName) <= 36
+            ? pipeName
+            : BuildPipeName(pipeName);
+    }
+
 }
