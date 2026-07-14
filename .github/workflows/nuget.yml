@@ -89,15 +89,22 @@ jobs:
               raise SystemExit(f"package versions are not aligned: {versions}")
           print(f"version={unique.pop()}")
           PY
+      - name: Build package binaries
+        shell: bash
+        run: |
+          dotnet build Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj -c Release -p:GeneratePackageOnBuild=false
+          dotnet build Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj -c Release -p:GeneratePackageOnBuild=false
+          dotnet build Extend0/Extend0.csproj -c Release -p:GeneratePackageOnBuild=false
+          dotnet build Extend0.Cli/Extend0.Cli.csproj -c Release -p:GeneratePackageOnBuild=false
       - name: Pack all public artifacts
         shell: bash
         run: |
           mkdir -p artifacts
-          dotnet pack Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj -c Release -o artifacts
-          dotnet pack Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj -c Release -o artifacts
-          dotnet pack Extend0/Extend0.csproj -c Release -o artifacts
-          dotnet pack Extend0.Cli/Extend0.Cli.csproj -c Release -o artifacts
-          printf '%s\n' "${{ steps.version.outputs.version }}" > artifacts/version.txt
+          dotnet pack Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj -c Release --no-build -o artifacts
+          dotnet pack Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj -c Release --no-build -o artifacts
+          dotnet pack Extend0/Extend0.csproj -c Release --no-build -o artifacts
+          dotnet pack Extend0.Cli/Extend0.Cli.csproj -c Release --no-build -o artifacts
+          printf '%s\\n' "${{ steps.version.outputs.version }}" > artifacts/version.txt
       - name: Inspect package identities and versions
         shell: bash
         run: |
