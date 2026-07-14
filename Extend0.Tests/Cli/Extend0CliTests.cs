@@ -691,7 +691,7 @@ public sealed class Extend0CliTests
 
             using var document = JsonDocument.Parse(output.ToString());
             Assert.Equal(0, exitCode);
-            Assert.Equal("1.0.9535", document.RootElement.GetProperty("version").GetString());
+            Assert.Equal(typeof(Extend0.Metadata.MetaDB).Assembly.GetName().Version?.ToString(), document.RootElement.GetProperty("version").GetString());
             Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("runtime_identifier").GetString()));
             Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("architecture").GetString()));
             Assert.True(document.RootElement.GetProperty("metadb_ready").GetBoolean());
