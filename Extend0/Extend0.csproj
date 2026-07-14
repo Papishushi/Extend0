@@ -4,8 +4,8 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyVersion>1.0.9691.41434</AssemblyVersion>
-		<FileVersion>1.0.9691.41434</FileVersion>
+		<AssemblyVersion>1.1.9691.41434</AssemblyVersion>
+		<FileVersion>1.1.9691.41434</FileVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<AssemblyName>Extend0</AssemblyName>
 		<PackageId>Extend0</PackageId>

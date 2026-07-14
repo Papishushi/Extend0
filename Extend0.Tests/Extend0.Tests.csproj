@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyVersion>1.0.9691.41434</AssemblyVersion>
-    <FileVersion>1.0.9691.41434</FileVersion>
+    <AssemblyVersion>1.1.9691.41434</AssemblyVersion>
+    <FileVersion>1.1.9691.41434</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,9 +39,7 @@
     <ItemGroup>
       <_TestProcessHostFiles Include="$(MSBuildProjectDirectory)\..\Extend0.TestProcessHost\bin\$(Configuration)\net10.0\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(_TestProcessHostFiles)"
-          DestinationFolder="$(OutDir)process-host"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_TestProcessHostFiles)" DestinationFolder="$(OutDir)process-host" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

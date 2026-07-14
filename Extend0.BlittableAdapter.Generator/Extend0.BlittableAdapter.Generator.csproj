@@ -15,8 +15,8 @@
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<SuppressWarnings>RS1035</SuppressWarnings>
 		<IsRoslynAnalyzer>true</IsRoslynAnalyzer>
-		<AssemblyVersion>1.0.9691.41434</AssemblyVersion>
-		<FileVersion>1.0.9691.41434</FileVersion>
+		<AssemblyVersion>1.1.9691.41434</AssemblyVersion>
+		<FileVersion>1.1.9691.41434</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<PackageIcon>Extend0.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
