@@ -128,15 +128,23 @@ jobs:
               with zipfile.ZipFile(package) as archive:
                   nuspec = next(name for name in archive.namelist() if name.endswith(".nuspec"))
                   document = ET.fromstring(archive.read(nuspec))
-                  namespace = {"n": "http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd"}
-                  metadata = document.find("n:metadata", namespace)
-                  if metadata is None:
-                      metadata = document.find("metadata")
-                  package_id = metadata.findtext("n:id", namespaces=namespace) or metadata.findtext("id")
-                  package_version = (
-                      metadata.findtext("n:version", namespaces=namespace)
-                      or metadata.findtext("version")
+                  local_name = lambda element: element.tag.rsplit("}", 1)[-1]
+                  metadata = next(
+                      (element for element in document if local_name(element) == "metadata"),
+                      None,
                   )
+                  if metadata is None:
+                      raise SystemExit(f"{package.name} has no nuspec metadata element")
+
+                  def metadata_text(name):
+                      element = next(
+                          (child for child in metadata if local_name(child) == name),
+                          None,
+                      )
+                      return element.text if element is not None else None
+
+                  package_id = metadata_text("id")
+                  package_version = metadata_text("version")
                   if package_version != version:
                       raise SystemExit(
                           f"{package.name} contains version {package_version}, expected {version}"
