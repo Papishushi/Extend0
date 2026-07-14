@@ -5,6 +5,7 @@ using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using Extend0.Testing.Metadata.Indexing.Registries;
 using Extend0.Testing.Metadata.Internal;
+using Extend0.Testing.Metadata.Storage;
 using Extend0.Tests.Metadata.Storage;
 using Extend0.Tests.TestUtilities;
 using Microsoft.Extensions.Logging;
@@ -669,11 +670,14 @@ public sealed class MetaDBManagerBehaviorTests
             var secondPath = Path.Combine(tempRoot, "second.map");
             File.WriteAllText(firstPath, "first");
             File.WriteAllText(secondPath, "second");
-            using var firstLock = new FileStream(firstPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            using var secondLock = new FileStream(secondPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var firstLock = MetadataStorageHarness.AcquireStorageLease(firstPath);
+            using var secondLock = MetadataStorageHarness.AcquireStorageLease(secondPath);
             File.WriteAllText(queuePath, "  " + firstPath + "  " + Environment.NewLine + Environment.NewLine + secondPath + Environment.NewLine);
 
-            using var loaded = MetaDBManagerHarness.CreateManager(factory: _ => MetadataTableHarness.CreateTable(CreateSupportedSpec("Loaded", 1)), deleteQueuePath: queuePath);
+            using var loaded = MetaDBManagerHarness.CreateManager(
+                factory: _ => MetadataTableHarness.CreateTable(CreateSupportedSpec("Loaded", 1)),
+                deleteQueuePath: queuePath,
+                startDeleteWorker: false);
             Assert.Equal([firstPath, secondPath], loaded.GetPendingDeletePaths());
 
             var thirdPath = Path.Combine(tempRoot, "third.map");
@@ -754,8 +758,8 @@ public sealed class MetaDBManagerBehaviorTests
             await File.WriteAllTextAsync(lockedMapPath, "map");
             await File.WriteAllTextAsync(lockedSpecPath, "spec");
 
-            using var mapLock = new FileStream(lockedMapPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            using var specLock = new FileStream(lockedSpecPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var mapLock = MetadataStorageHarness.AcquireStorageLease(lockedMapPath);
+            using var specLock = MetadataStorageHarness.AcquireStorageLease(lockedSpecPath);
 
             var lockedDelete = await handle.TryDeleteNow(lockedMapPath, lockedSpecPath, Guid.NewGuid());
 
@@ -825,14 +829,21 @@ public sealed class MetaDBManagerBehaviorTests
 
             var deleted = await handle.TryDeleteNow(mapPath, specPath, Guid.NewGuid());
             var pending = handle.GetPendingDeletePaths();
-            var movedPath = Assert.Single(pending, path => path.Contains(".deleting.", StringComparison.Ordinal));
-
-            Assert.False(deleted);
             Assert.False(File.Exists(mapPath));
-            Assert.StartsWith(mapPath + ".deleting.", movedPath, StringComparison.Ordinal);
-            Assert.True(File.Exists(movedPath));
-
-            File.SetAttributes(movedPath, FileAttributes.Normal);
+            if (OperatingSystem.IsWindows())
+            {
+                var movedPath = Assert.Single(pending, path => path.Contains(".deleting.", StringComparison.Ordinal));
+                Assert.False(deleted);
+                Assert.StartsWith(mapPath + ".deleting.", movedPath, StringComparison.Ordinal);
+                Assert.True(File.Exists(movedPath));
+                File.SetAttributes(movedPath, FileAttributes.Normal);
+            }
+            else
+            {
+                // Unix deletion is controlled by directory permissions, not the file's read-only bit.
+                Assert.True(deleted);
+                Assert.Empty(pending);
+            }
         }
         finally
         {
@@ -857,8 +868,8 @@ public sealed class MetaDBManagerBehaviorTests
             await File.WriteAllTextAsync(mapPath, "map");
             await File.WriteAllTextAsync(specPath, "spec");
 
-            using var mapLock = new FileStream(mapPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            using var specLock = new FileStream(specPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var mapLock = MetadataStorageHarness.AcquireStorageLease(mapPath);
+            using var specLock = MetadataStorageHarness.AcquireStorageLease(specPath);
 
             await handle.CleanupEphemeralDeleteAsync(throwIfDeleteFails: false, Guid.NewGuid(), mapPath, specPath);
             Assert.Contains(mapPath, handle.GetPendingDeletePaths());
@@ -999,7 +1010,7 @@ public sealed class MetaDBManagerBehaviorTests
             spec.SaveToFile(mapPath + ".tablespec.json");
             File.WriteAllBytes(mapPath, [0]);
 
-            using var mapLock = new FileStream(mapPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var mapLock = MetadataStorageHarness.AcquireStorageLease(mapPath);
             using var handle = MetaDBManagerHarness.CreateManager();
             var manager = handle.Contract;
 

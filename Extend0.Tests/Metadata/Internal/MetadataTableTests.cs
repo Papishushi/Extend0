@@ -1,5 +1,6 @@
 using Extend0.Metadata;
 using Extend0.Metadata.Contract;
+using Extend0.Metadata.Diagnostics;
 using Extend0.Metadata.Indexing.Contract;
 using Extend0.Metadata.Schema;
 using Extend0.Tests.Metadata.Storage;
@@ -384,7 +385,7 @@ public sealed class MetadataTableTests
                 var cell = table.GetOrCreateCell(0, 0);
                 Assert.True(cell.TrySetKey("alpha"));
 
-                Assert.ThrowsAny<IOException>(() => table.Open());
+                Assert.Throws<MetadataTableLockedException>(() => table.Open());
             }
 
             using var reopened = MetadataTableHarness.OpenTable(spec);

@@ -30,6 +30,7 @@ namespace Extend0.Metadata.Storage.Internal
         };
 
         private readonly string _directory;
+        private readonly MetadataStorageLease _storageLease;
         private readonly string _chunksDirectory;
         private readonly int _chunkSize;
         private readonly ColumnState[] _columns;
@@ -43,34 +44,43 @@ namespace Extend0.Metadata.Storage.Internal
                 throw new ArgumentException("SegmentedMappedStore requires chunked table storage.", nameof(spec));
 
             _directory = Path.GetFullPath(spec.MapPath);
+            _storageLease = MetadataStorageLease.Acquire(_directory);
             _chunksDirectory = Path.Combine(_directory, ChunksDirectoryName);
             _chunkSize = storage.ChunkSize;
             _colNameUtf8 = new byte[spec.Columns.Length][];
 
-            using var mutationLock = AcquireMutationLock(_directory);
-            Directory.CreateDirectory(_chunksDirectory);
-            spec.SaveToFile(Path.Combine(_directory, SpecFileName));
-
-            var manifestPath = GetManifestPath(_directory);
-            if (File.Exists(manifestPath))
+            try
             {
-                var manifest = LoadManifest(manifestPath);
-                _columns = CreateStatesFromManifest(spec, manifest);
+                using var mutationLock = AcquireMutationLock(_directory);
+                Directory.CreateDirectory(_chunksDirectory);
+                spec.SaveToFile(Path.Combine(_directory, SpecFileName));
+
+                var manifestPath = GetManifestPath(_directory);
+                if (File.Exists(manifestPath))
+                {
+                    var manifest = LoadManifest(manifestPath);
+                    _columns = CreateStatesFromManifest(spec, manifest);
+                }
+                else
+                {
+                    _columns = CreateInitialStates(spec.Columns);
+                    SaveManifest();
+                }
+
+                for (int i = 0; i < _columns.Length; i++)
+                {
+                    var keySize = _columns[i].KeySize;
+                    var max = Math.Max(0, keySize - 1);
+                    var bytes = Encoding.UTF8.GetBytes(spec.Columns[i].Name);
+                    _colNameUtf8[i] = bytes.Length > max ? bytes.AsSpan(0, max).ToArray() : bytes;
+
+                    EnsureChunkCount(_columns[i], GetRequiredChunkCount(_columns[i]));
+                }
             }
-            else
+            catch
             {
-                _columns = CreateInitialStates(spec.Columns);
-                SaveManifest();
-            }
-
-            for (int i = 0; i < _columns.Length; i++)
-            {
-                var keySize = _columns[i].KeySize;
-                var max = Math.Max(0, keySize - 1);
-                var bytes = Encoding.UTF8.GetBytes(spec.Columns[i].Name);
-                _colNameUtf8[i] = bytes.Length > max ? bytes.AsSpan(0, max).ToArray() : bytes;
-
-                EnsureChunkCount(_columns[i], GetRequiredChunkCount(_columns[i]));
+                _storageLease.Dispose();
+                throw;
             }
         }
 
@@ -248,12 +258,17 @@ namespace Extend0.Metadata.Storage.Internal
         public void Dispose()
         {
             if (_disposed) return;
-
-            foreach (var column in _columns)
-                foreach (var chunk in column.Chunks)
-                    chunk.Dispose();
-
-            _disposed = true;
+            try
+            {
+                foreach (var column in _columns)
+                    foreach (var chunk in column.Chunks)
+                        chunk.Dispose();
+            }
+            finally
+            {
+                _storageLease.Dispose();
+                _disposed = true;
+            }
         }
 
         public static bool TryLoadColumns(string path, out ColumnConfiguration[] columns)

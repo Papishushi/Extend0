@@ -3,7 +3,9 @@ using Extend0.Metadata.Diagnostics;
 using Extend0.Metadata.Schema;
 using Extend0.Metadata.Storage;
 using Extend0.Metadata.Storage.Contract;
+using Extend0.Testing.Metadata.Internal;
 using Extend0.Testing.Metadata.Storage;
+using System.Diagnostics;
 
 namespace Extend0.Tests.Metadata.Storage;
 
@@ -571,7 +573,7 @@ public sealed class MappedStoreTests
     }
 
     [Fact]
-    public void MappedStore_Create_TranslatesRealExclusiveFileLockToMetadataTableLockedException()
+    public void MappedStore_Create_TranslatesPortableStorageLeaseContentionToMetadataTableLockedException()
     {
         var tempRoot = CreateTempDirectory();
         try
@@ -580,7 +582,7 @@ public sealed class MappedStoreTests
             var spec = new TableSpec("LockedOpen", mapPath, [TableSpec.Helpers.Column("Name", 1, valueBytes: 64)]);
             File.WriteAllBytes(mapPath, [0]);
 
-            using var exclusiveLock = new FileStream(mapPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var exclusiveLock = MetadataStorageHarness.AcquireStorageLease(mapPath);
 
             var ex = Assert.Throws<MetadataTableLockedException>(() => MetadataStorageHarness.CreateMappedStore(spec));
 
@@ -591,6 +593,85 @@ public sealed class MappedStoreTests
         {
             Directory.Delete(tempRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task MappedStore_CrossProcessLease_BlocksOpenAndDeleteUntilOwnerExits()
+    {
+        var tempRoot = CreateTempDirectory();
+        Process? owner = null;
+        try
+        {
+            var mapPath = Path.Combine(tempRoot, "cross-process.map");
+            var readyPath = Path.Combine(tempRoot, "owner.ready");
+            var releasePath = Path.Combine(tempRoot, "owner.release");
+            var spec = new TableSpec("CrossProcessLease", mapPath, [TableSpec.Helpers.Column("Value", 1, valueBytes: 64)]);
+
+            using (MetadataStorageHarness.CreateMappedStore(spec))
+            {
+            }
+
+            var hostAssembly = Path.Combine(
+                AppContext.BaseDirectory,
+                "process-host",
+                "Extend0.TestProcessHost.dll");
+            Assert.True(File.Exists(hostAssembly), $"Cross-process test host was not found at '{hostAssembly}'.");
+
+            var startInfo = new ProcessStartInfo("dotnet")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add(hostAssembly);
+            startInfo.ArgumentList.Add("hold-mapped-store");
+            startInfo.ArgumentList.Add(mapPath);
+            startInfo.ArgumentList.Add(readyPath);
+            startInfo.ArgumentList.Add(releasePath);
+
+            owner = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start the cross-process lease test host.");
+            await WaitForFileOrProcessExit(owner, readyPath, TimeSpan.FromSeconds(15));
+
+            var openFailure = Assert.Throws<MetadataTableLockedException>(() => MetadataStorageHarness.CreateMappedStore(spec));
+            Assert.IsAssignableFrom<IOException>(openFailure.InnerException);
+
+            var deleted = await MetaDBManagerHelpersHarness.TryDeleteWithRetries(mapPath, attempts: 2);
+            Assert.False(deleted);
+            Assert.True(File.Exists(mapPath));
+
+            File.WriteAllText(releasePath, "release");
+            using var exitTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await owner.WaitForExitAsync(exitTimeout.Token);
+            Assert.Equal(0, owner.ExitCode);
+
+            using var reopened = MetadataStorageHarness.CreateMappedStore(spec);
+        }
+        finally
+        {
+            if (owner is { HasExited: false })
+            {
+                owner.Kill(entireProcessTree: true);
+                await owner.WaitForExitAsync();
+            }
+
+            owner?.Dispose();
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    private static async Task WaitForFileOrProcessExit(Process process, string path, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!File.Exists(path) && !process.HasExited && DateTime.UtcNow < deadline)
+            await Task.Delay(20);
+
+        if (File.Exists(path))
+            return;
+
+        var standardOutput = await process.StandardOutput.ReadToEndAsync();
+        var standardError = await process.StandardError.ReadToEndAsync();
+        throw new InvalidOperationException(
+            $"Cross-process lease host did not become ready. ExitCode={(process.HasExited ? process.ExitCode : -1)}; stdout={standardOutput}; stderr={standardError}");
     }
 
     [Theory]

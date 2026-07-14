@@ -142,6 +142,12 @@ public static class MetaDBManagerHarness
         ILogger? logger = null,
         Func<TableSpec?, IMetadataTable>? factory = null,
         CapacityPolicy capacityPolicy = CapacityPolicy.Throw,
-        string? deleteQueuePath = null) =>
-        new(new MetaDBManager(logger, factory ?? (spec => MetadataTableHarness.CreateTable(spec!.Value)), capacityPolicy, deleteQueuePath));
+        string? deleteQueuePath = null,
+        bool startDeleteWorker = true) =>
+        new(new MetaDBManager(
+            logger,
+            factory ?? (spec => MetadataTableHarness.CreateTable(spec!.Value)),
+            capacityPolicy,
+            deleteQueuePath,
+            startDeleteWorker));
 }
