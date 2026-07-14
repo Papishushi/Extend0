@@ -137,7 +137,11 @@ namespace Extend0.Lifecycle.CrossProcess
             CrossProcessTlsOptions? tls,
             Func<ClientTransportFactoryContext, IClientTransport>? clientTransportFactory)
         {
-            try { ownershipLease?.Dispose(); } catch { }
+            try { ownershipLease?.Dispose(); }
+            catch
+            {
+                // A losing ownership probe may already have released its resources.
+            }
 
             var transport = CrossProcessTransportFactory.CreateClientTransport(
                 new ClientTransportFactoryContext(transportKind, protocolDescriptor, endpointName, serverName, connectTimeoutMs, authentication, tls),
@@ -232,7 +236,11 @@ namespace Extend0.Lifecycle.CrossProcess
             }
             catch
             {
-                try { ownershipLease.Dispose(); } catch { }
+                try { ownershipLease.Dispose(); }
+                catch
+                {
+                    // Failure-path cleanup is best-effort; preserve the original hosting exception.
+                }
             }
         }
 

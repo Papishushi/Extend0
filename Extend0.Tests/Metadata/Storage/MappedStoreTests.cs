@@ -607,29 +607,9 @@ public sealed class MappedStoreTests
             var releasePath = Path.Combine(tempRoot, "owner.release");
             var spec = new TableSpec("CrossProcessLease", mapPath, [TableSpec.Helpers.Column("Value", 1, valueBytes: 64)]);
 
-            using (MetadataStorageHarness.CreateMappedStore(spec))
-            {
-            }
+            MetadataStorageHarness.CreateMappedStore(spec).Dispose();
 
-            var hostAssembly = Path.Combine(
-                AppContext.BaseDirectory,
-                "process-host",
-                "Extend0.TestProcessHost.dll");
-            Assert.True(File.Exists(hostAssembly), $"Cross-process test host was not found at '{hostAssembly}'.");
-
-            var startInfo = new ProcessStartInfo("dotnet")
-            {
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                UseShellExecute = false
-            };
-            startInfo.ArgumentList.Add(hostAssembly);
-            startInfo.ArgumentList.Add("hold-mapped-store");
-            startInfo.ArgumentList.Add(mapPath);
-            startInfo.ArgumentList.Add(readyPath);
-            startInfo.ArgumentList.Add(releasePath);
-
-            owner = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start the cross-process lease test host.");
+            owner = StartMappedStoreOwner(mapPath, readyPath, releasePath);
             await WaitForFileOrProcessExit(owner, readyPath, TimeSpan.FromSeconds(15));
 
             var openFailure = Assert.Throws<MetadataTableLockedException>(() => MetadataStorageHarness.CreateMappedStore(spec));
@@ -657,6 +637,30 @@ public sealed class MappedStoreTests
             owner?.Dispose();
             Directory.Delete(tempRoot, recursive: true);
         }
+    }
+
+    private static Process StartMappedStoreOwner(string mapPath, string readyPath, string releasePath)
+    {
+        var hostAssembly = Path.Combine(
+            AppContext.BaseDirectory,
+            "process-host",
+            "Extend0.TestProcessHost.dll");
+        Assert.True(File.Exists(hostAssembly), $"Cross-process test host was not found at '{hostAssembly}'.");
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(hostAssembly);
+        startInfo.ArgumentList.Add("hold-mapped-store");
+        startInfo.ArgumentList.Add(mapPath);
+        startInfo.ArgumentList.Add(readyPath);
+        startInfo.ArgumentList.Add(releasePath);
+
+        return Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start the cross-process lease test host.");
     }
 
     private static async Task WaitForFileOrProcessExit(Process process, string path, TimeSpan timeout)

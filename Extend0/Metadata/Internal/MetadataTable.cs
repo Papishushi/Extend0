@@ -224,9 +224,7 @@ namespace Extend0.Metadata.Internal
         public static IMetadataTable Open(TableSpec spec)
         {
             // Fail with the domain-specific ownership error before platform-specific mapping APIs do.
-            using (MetadataStorageLease.Acquire(spec.MapPath))
-            {
-            }
+            MetadataStorageLease.Acquire(spec.MapPath).Dispose();
 
             var storage = spec.Storage.Normalize();
             var loaded = storage.Layout == TableStorageLayout.Chunked

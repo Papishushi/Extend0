@@ -26,7 +26,7 @@ internal sealed class MetadataStorageLease : IDisposable
     private readonly bool _usesRegionLock;
     private FileStream? _stream;
 
-    private MetadataStorageLease(string key, FileStream stream, bool usesRegionLock)
+    public MetadataStorageLease(string key, FileStream stream, bool usesRegionLock)
     {
         _key = key;
         _stream = stream;
@@ -109,8 +109,14 @@ internal sealed class MetadataStorageLease : IDisposable
                 if (_usesRegionLock)
                     stream.Unlock(0, 1);
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException)
+            {
+                // Unlock is best-effort during teardown; disposing the stream releases the OS lock.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Unlock is best-effort during teardown; disposing the stream releases the OS lock.
+            }
         }
         finally
         {

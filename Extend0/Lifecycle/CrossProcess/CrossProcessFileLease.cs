@@ -15,7 +15,7 @@ internal sealed class CrossProcessFileLease : IDisposable
     private readonly bool _usesRegionLock;
     private FileStream? _stream;
 
-    private CrossProcessFileLease(string name, FileStream stream, bool usesRegionLock)
+    public CrossProcessFileLease(string name, FileStream stream, bool usesRegionLock)
     {
         _name = name;
         _stream = stream;
@@ -72,7 +72,10 @@ internal sealed class CrossProcessFileLease : IDisposable
             if (_usesRegionLock)
             {
                 try { stream.Unlock(0, 1); }
-                catch (IOException) { }
+                catch (IOException)
+                {
+                    // Unlock is best-effort during teardown; disposing the stream releases the OS lock.
+                }
             }
         }
         finally

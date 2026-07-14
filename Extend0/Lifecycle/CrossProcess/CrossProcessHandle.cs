@@ -259,7 +259,11 @@
             }
             catch
             {
-                try { _ownershipLease?.Dispose(); } catch { }
+                try { _ownershipLease?.Dispose(); }
+                catch
+                {
+                    // Teardown is best-effort and the handle is already marked as disposed.
+                }
             }
         }
 
