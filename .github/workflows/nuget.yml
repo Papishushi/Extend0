@@ -1,0 +1,169 @@
+name: NuGet packages
+
+on:
+  pull_request:
+    paths:
+      - "Extend0/Extend0.csproj"
+      - "Extend0.Cli/Extend0.Cli.csproj"
+      - "Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj"
+      - "Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj"
+      - "global.json"
+      - ".github/workflows/nuget.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Extend0/Extend0.csproj"
+      - "Extend0.Cli/Extend0.Cli.csproj"
+      - "Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj"
+      - "Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj"
+      - "global.json"
+      - ".github/workflows/nuget.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nuget-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          global-json-file: global.json
+      - name: Show SDK
+        run: dotnet --info
+      - name: Restore tests
+        run: dotnet restore Extend0.Tests/Extend0.Tests.csproj
+      - name: Run tests
+        run: dotnet test Extend0.Tests/Extend0.Tests.csproj -c Release --no-restore
+      - name: Build CLI
+        run: dotnet build Extend0.Cli/Extend0.Cli.csproj -c Release
+
+  pack:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          global-json-file: global.json
+      - name: Verify coherent package version
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import xml.etree.ElementTree as ET
+
+          projects = [
+              "Extend0/Extend0.csproj",
+              "Extend0.Cli/Extend0.Cli.csproj",
+              "Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj",
+              "Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj",
+          ]
+          versions = {}
+          for project in projects:
+              value = ET.parse(project).findtext(".//Version")
+              if not value:
+                  raise SystemExit(f"{project} has no Version")
+              versions[project] = value
+
+          unique = set(versions.values())
+          if len(unique) != 1:
+              raise SystemExit(f"package versions are not aligned: {versions}")
+          print(f"version={unique.pop()}")
+          PY
+      - name: Pack all public artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          dotnet pack Extend0.MetadataEntry.Generator/Extend0.MetadataEntry.Generator.csproj -c Release -o artifacts
+          dotnet pack Extend0.BlittableAdapter.Generator/Extend0.BlittableAdapter.Generator.csproj -c Release -o artifacts
+          dotnet pack Extend0/Extend0.csproj -c Release -o artifacts
+          dotnet pack Extend0.Cli/Extend0.Cli.csproj -c Release -o artifacts
+          printf '%s\n' "${{ steps.version.outputs.version }}" > artifacts/version.txt
+      - name: Inspect package identities and versions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          import zipfile
+
+          root = pathlib.Path("artifacts")
+          version = (root / "version.txt").read_text().strip()
+          expected = {
+              "Extend0",
+              "Extend0.Cli",
+              "Extend0.MetadataEntry.Generator",
+              "Extend0.BlittableAdapter.Generator",
+          }
+          found = set()
+          for package in root.glob("*.nupkg"):
+              if package.name.endswith(".symbols.nupkg"):
+                  continue
+              with zipfile.ZipFile(package) as archive:
+                  nuspec = next(name for name in archive.namelist() if name.endswith(".nuspec"))
+                  document = ET.fromstring(archive.read(nuspec))
+                  namespace = {"n": "http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd"}
+                  metadata = document.find("n:metadata", namespace)
+                  if metadata is None:
+                      metadata = document.find("metadata")
+                  package_id = metadata.findtext("n:id", namespaces=namespace) or metadata.findtext("id")
+                  package_version = (
+                      metadata.findtext("n:version", namespaces=namespace)
+                      or metadata.findtext("version")
+                  )
+                  if package_version != version:
+                      raise SystemExit(
+                          f"{package.name} contains version {package_version}, expected {version}"
+                      )
+                  found.add(package_id)
+          if found != expected:
+              raise SystemExit(f"package set mismatch: found={found}, expected={expected}")
+          PY
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: extend0-nuget-${{ steps.version.outputs.version }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: pack
+    runs-on: ubuntu-latest
+    environment: nuget
+    steps:
+      - uses: actions/download-artifact@v7.0.0
+        with:
+          name: extend0-nuget-${{ needs.pack.outputs.version }}
+          path: artifacts
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish coherent package set to NuGet
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ needs.pack.outputs.version }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::Repository or nuget environment secret NUGET_API_KEY is not configured"
+            exit 1
+          fi
+          source_url="https://api.nuget.org/v3/index.json"
+          dotnet nuget push "artifacts/Extend0.MetadataEntry.Generator.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/Extend0.BlittableAdapter.Generator.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/Extend0.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/Extend0.Cli.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
