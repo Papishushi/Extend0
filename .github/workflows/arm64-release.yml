@@ -100,6 +100,11 @@ jobs:
             -p:DebugSymbols=false `
             -o publish
           if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+          if ('${{ matrix.rid }}' -eq 'win-arm64') {
+            Move-Item publish/Extend0.Cli.exe publish/extend0.exe
+          } else {
+            Move-Item publish/Extend0.Cli publish/extend0
+          }
       - name: Validate doctor JSON and version
         shell: pwsh
         env:
