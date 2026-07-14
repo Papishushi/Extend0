@@ -69,6 +69,8 @@ internal sealed class CrossProcessFileLease : IDisposable
 
         try
         {
+            // Linux uses an explicit byte-range lock; Windows and macOS use FileShare.None.
+            // Disposing the stream below releases the active ownership primitive on every platform.
             if (_usesRegionLock && OperatingSystem.IsLinux())
             {
                 try { stream.Unlock(0, 1); }
