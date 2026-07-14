@@ -1,28 +1,12 @@
-﻿/// <summary>
-/// Declares the "catalog" of metadata entry shapes that the code generator must emit.
-/// </summary>
-/// <remarks>
-/// <para>
-/// This file contains a set of <c>[assembly: GenerateMetadataEntry(keyBytes, valueBytes)]</c>
-/// attributes that drive the <c>Extend0.MetadataEntry.Generator</c> source generator.
-/// Each attribute instructs the generator to produce a blittable
-/// <c>MetadataEntry{Key}x{Value}</c> struct for a specific fixed key/value layout.
-/// </para>
-/// <para>
-/// By pre-declaring the most common key/value size combinations (small tags, standard
-/// keys, long keys, and “chubby” blobs), we avoid:
-/// </para>
-/// <list type="bullet">
-///   <item><description>Allocations and per-entry shape metadata at runtime.</description></item>
-///   <item><description>Having to generate or reflect layouts dynamically.</description></item>
-///   <item><description>Inconsistent binary formats across processes or versions.</description></item>
-/// </list>
-/// <para>
-/// In other words: this file defines the fixed binary shapes that <see cref="Extend0.Metadata.Contract.IMetadataTable"/>,
-/// <see cref="Extend0.Metadata.Storage.Contract.ICellStore"/> and related components can rely on when packing keys and values into
-/// memory-mapped columns.
-/// </para>
-/// </remarks>
+// Declares the "catalog" of metadata entry shapes that the code generator must emit.
+//
+// This file contains a set of [assembly: GenerateMetadataEntry(keyBytes, valueBytes)]
+// attributes that drive the Extend0.MetadataEntry.Generator source generator.
+// Each attribute instructs the generator to produce a blittable
+// MetadataEntry{Key}x{Value} struct for a specific fixed key/value layout.
+//
+// By pre-declaring the most common key/value size combinations, we avoid allocations,
+// runtime layout reflection, and inconsistent binary formats across processes or versions.
 
 // Very small keys (tags, small IDs) — small/medium/large values
 [assembly: Extend0.Metadata.CodeGen.GenerateMetadataEntry(16, 64)]

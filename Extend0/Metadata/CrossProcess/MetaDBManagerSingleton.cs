@@ -34,7 +34,7 @@ namespace Extend0.Metadata.CrossProcess
     ///
     /// <para>
     /// <b>Factory note</b>:
-    /// the optional <paramref name="factory"/> delegate is captured only within the current process
+    /// the optional factory delegate is captured only within the current process
     /// (delegates cannot be transported cross-process). The upgrade handler reuses the last factory
     /// provided in the same process, when available.
     /// </para>
@@ -93,8 +93,8 @@ namespace Extend0.Metadata.CrossProcess
         /// <summary>
         /// Initializes a new cross-process singleton instance for MetaDB.
         /// </summary>
-        /// <param name="logger">
-        /// Logger used by the cross-process host/client infrastructure and passed to the hosted
+        /// <param name="loggerFactory">
+        /// Logger factory used by the cross-process host/client infrastructure and passed to the hosted
         /// <see cref="MetaDBManagerRPCCompatible"/> instance when this process becomes owner.
         /// </param>
         /// <param name="factory">

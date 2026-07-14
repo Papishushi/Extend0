@@ -5,6 +5,9 @@ using System.Text.Json.Serialization;
 
 namespace Extend0.Lifecycle.Certificates;
 
+/// <summary>
+/// Saves and loads ACME DNS-01 order state, optionally protecting it with portable passphrase encryption.
+/// </summary>
 public static class AcmeDns01StateFile
 {
     private const string ProtectedFormat = "extend0.acme-dns01-state";
@@ -21,6 +24,12 @@ public static class AcmeDns01StateFile
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    /// <summary>
+    /// Saves an ACME DNS-01 state file using the requested protection mode.
+    /// </summary>
+    /// <param name="path">Destination state file path.</param>
+    /// <param name="state">Order state to persist.</param>
+    /// <param name="protection">State protection options, or <see langword="null"/> for unprotected JSON.</param>
     public static void Save(
         string path,
         AcmeDns01OrderState state,
@@ -78,6 +87,13 @@ public static class AcmeDns01StateFile
         }
     }
 
+    /// <summary>
+    /// Loads an ACME DNS-01 state file and decrypts it when the file is passphrase-protected.
+    /// </summary>
+    /// <param name="path">Path to the state file.</param>
+    /// <param name="protection">Protection options used to decrypt protected state.</param>
+    /// <param name="detectedProtectionKind">Detected protection mode of the file on disk.</param>
+    /// <returns>The loaded ACME DNS-01 order state.</returns>
     public static AcmeDns01OrderState Load(
         string path,
         AcmeDns01StateProtectionOptions? protection,

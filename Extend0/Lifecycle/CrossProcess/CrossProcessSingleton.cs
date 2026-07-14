@@ -76,8 +76,11 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// <param name="options">
     /// Singleton registration and orchestration options (overwrite behavior, mode, endpoint name, timeouts, logging).
     /// </param>
+    /// <param name="loggerFactory">
+    /// Optional logger factory used by cross-process owner and client infrastructure.
+    /// </param>
     /// <exception cref="InvalidOperationException">
-    /// Thrown if the static service is already initialized and <see cref="SingletonOptions.Overwrite"/> is <see langword="false"/>.
+    /// Thrown if the static service is already initialized and overwrite is disabled.
     /// </exception>
     public CrossProcessSingleton(Func<TService> factory, CrossProcessSingletonOptions options, ILoggerFactory? loggerFactory = null) : base(options)
     {
@@ -135,12 +138,14 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// with the current caller when running in cross-process mode; otherwise <see langword="null"/>.
     /// The handle can be used to explicitly dispose the cross-process resources for this instance.
     /// </param>
+    /// <param name="loggerFactory">
+    /// Optional logger factory used by cross-process owner and client infrastructure.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="factory"/> is <c>null</c>.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when a singleton is already initialized and <see cref="CrossProcessSingletonOptions.Overwrite"/>
-    /// is <c>false</c>.
+    /// Thrown when a singleton is already initialized and <c>Overwrite</c> is <see langword="false"/>.
     /// </exception>
     private static void InitializeStatic(Func<TService> factory, CrossProcessSingletonOptions options, out CrossProcessHandle<TService>? instanceHandle, ILoggerFactory? loggerFactory = null)
     {
@@ -163,7 +168,7 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// Validates that the current singleton can be overwritten under the provided options.
     /// </summary>
     /// <param name="options">
-    /// Singleton configuration that includes the <see cref="CrossProcessSingletonOptions.Overwrite"/> flag.
+    /// Singleton configuration that includes the <c>Overwrite</c> flag.
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a singleton instance already exists and overwriting is not allowed.
@@ -228,6 +233,9 @@ public class CrossProcessSingleton<TService> : Singleton where TService : class,
     /// <param name="instanceHandle">
     /// When running in cross-process mode, receives the created <see cref="CrossProcessHandle{TService}"/>;
     /// otherwise <see langword="null"/>.
+    /// </param>
+    /// <param name="loggerFactory">
+    /// Optional logger factory used by cross-process owner and client infrastructure.
     /// </param>
     /// <remarks>
     /// This method assumes previous state has already been validated and torn down.

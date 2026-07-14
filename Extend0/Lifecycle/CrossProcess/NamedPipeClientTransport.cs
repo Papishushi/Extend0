@@ -79,6 +79,8 @@ namespace Extend0.Lifecycle.CrossProcess
         /// </param>
         /// <param name="pipeName">The OS pipe name to connect to.</param>
         /// <param name="timeoutMs">Connection timeout in milliseconds.</param>
+        /// <param name="protocol">Optional expected protocol descriptor. When omitted, the named-pipe default is used.</param>
+        /// <param name="authentication">Optional Extend0 protocol authentication settings.</param>
         /// <exception cref="TimeoutException">The connection attempt timed out.</exception>
         /// <exception cref="IOException">
         /// The server handshake was invalid or incompatible, or the pipe I/O failed.

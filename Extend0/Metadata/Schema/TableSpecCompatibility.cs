@@ -28,8 +28,19 @@ public enum TableSpecCompatibilityLevel
 /// </summary>
 public enum TableSpecCompatibilitySeverity
 {
+    /// <summary>
+    /// Informational finding that does not require migration by itself.
+    /// </summary>
     Info = 0,
+
+    /// <summary>
+    /// Warning finding that usually requires migration or operator attention.
+    /// </summary>
     Warning = 1,
+
+    /// <summary>
+    /// Error finding that makes the target schema incompatible without manual intervention.
+    /// </summary>
     Error = 2
 }
 
@@ -45,17 +56,29 @@ public sealed record TableSpecCompatibilityOptions(bool AllowSameVersionStructur
 /// <summary>
 /// A single compatibility observation.
 /// </summary>
+/// <param name="Severity">Severity assigned to the compatibility observation.</param>
+/// <param name="Id">Stable diagnostic identifier for the finding.</param>
+/// <param name="Message">Human-readable explanation of the finding.</param>
 public sealed record TableSpecCompatibilityFinding(
     TableSpecCompatibilitySeverity Severity,
     string Id,
     string Message)
 {
+    /// <summary>
+    /// Creates an informational compatibility finding.
+    /// </summary>
     public static TableSpecCompatibilityFinding Info(string id, string message) =>
         new(TableSpecCompatibilitySeverity.Info, id, message);
 
+    /// <summary>
+    /// Creates a warning compatibility finding.
+    /// </summary>
     public static TableSpecCompatibilityFinding Warning(string id, string message) =>
         new(TableSpecCompatibilitySeverity.Warning, id, message);
 
+    /// <summary>
+    /// Creates an error compatibility finding.
+    /// </summary>
     public static TableSpecCompatibilityFinding Error(string id, string message) =>
         new(TableSpecCompatibilitySeverity.Error, id, message);
 }
@@ -63,16 +86,29 @@ public sealed record TableSpecCompatibilityFinding(
 /// <summary>
 /// Result of comparing a source and target <see cref="TableSpec"/>.
 /// </summary>
+/// <param name="Source">Source schema currently represented by storage or code.</param>
+/// <param name="Target">Target schema that should become the new contract.</param>
+/// <param name="Level">Overall compatibility classification.</param>
+/// <param name="Findings">Detailed compatibility observations.</param>
 public sealed record TableSpecCompatibilityReport(
     TableSpec Source,
     TableSpec Target,
     TableSpecCompatibilityLevel Level,
     IReadOnlyList<TableSpecCompatibilityFinding> Findings)
 {
+    /// <summary>
+    /// Gets whether the target schema is compatible with the source schema.
+    /// </summary>
     public bool IsCompatible => Level == TableSpecCompatibilityLevel.Compatible;
 
+    /// <summary>
+    /// Gets whether the target schema is valid but requires migration.
+    /// </summary>
     public bool RequiresMigration => Level == TableSpecCompatibilityLevel.RequiresMigration;
 
+    /// <summary>
+    /// Gets whether the target schema is incompatible without explicit manual intervention.
+    /// </summary>
     public bool IsIncompatible => Level == TableSpecCompatibilityLevel.Incompatible;
 }
 
@@ -81,6 +117,13 @@ public sealed record TableSpecCompatibilityReport(
 /// </summary>
 public static class TableSpecCompatibility
 {
+    /// <summary>
+    /// Validates whether a target table spec is a safe evolution of a source table spec.
+    /// </summary>
+    /// <param name="source">Source schema currently represented by storage or code.</param>
+    /// <param name="target">Target schema that should become the new contract.</param>
+    /// <param name="options">Optional compatibility validation options.</param>
+    /// <returns>A compatibility report containing the overall level and findings.</returns>
     public static TableSpecCompatibilityReport Validate(
         TableSpec source,
         TableSpec target,

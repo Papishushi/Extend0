@@ -8,6 +8,9 @@ namespace Extend0.Lifecycle.Assurance;
 /// </summary>
 public static class StorageProtectionVerifier
 {
+    /// <summary>
+    /// Default manifest file name used to declare storage protection evidence.
+    /// </summary>
     public const string ManifestFileName = ".extend0-protection.json";
 
     private static readonly JsonSerializerOptions Json = new()
@@ -21,6 +24,14 @@ public static class StorageProtectionVerifier
         Json.Converters.Add(new JsonStringEnumConverter());
     }
 
+    /// <summary>
+    /// Diagnoses storage protection evidence for a path using an optional manifest.
+    /// </summary>
+    /// <param name="path">Path to verify.</param>
+    /// <param name="policy">Storage protection policy to enforce.</param>
+    /// <param name="manifestPath">Optional explicit manifest path. When omitted, parent directories are searched.</param>
+    /// <param name="verifiedAtUtc">Optional verification timestamp, mainly for deterministic tests.</param>
+    /// <returns>Evidence describing observed protection, policy outcome, and findings.</returns>
     public static StorageProtectionEvidence DiagnosePath(
         string path,
         StorageProtectionPolicy policy = default,
@@ -93,6 +104,14 @@ public static class StorageProtectionVerifier
             findings);
     }
 
+    /// <summary>
+    /// Diagnoses storage protection evidence for a path using a provider-supplied protected storage handle.
+    /// </summary>
+    /// <param name="path">Path to verify.</param>
+    /// <param name="handle">Protected storage handle that should cover the path.</param>
+    /// <param name="policy">Storage protection policy to enforce.</param>
+    /// <param name="verifiedAtUtc">Optional verification timestamp, mainly for deterministic tests.</param>
+    /// <returns>Evidence describing observed protection, policy outcome, and findings.</returns>
     public static StorageProtectionEvidence DiagnosePath(
         string path,
         IProtectedStorageHandle handle,
@@ -138,6 +157,12 @@ public static class StorageProtectionVerifier
             findings);
     }
 
+    /// <summary>
+    /// Saves a storage protection manifest as JSON.
+    /// </summary>
+    /// <param name="manifestPath">Destination manifest path.</param>
+    /// <param name="manifest">Manifest to serialize.</param>
+    /// <param name="overwrite">Whether an existing file may be overwritten.</param>
     public static void SaveManifest(string manifestPath, StorageProtectionManifest manifest, bool overwrite = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
@@ -153,6 +178,12 @@ public static class StorageProtectionVerifier
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, Json));
     }
 
+    /// <summary>
+    /// Determines whether a candidate path is equal to or inside a root path.
+    /// </summary>
+    /// <param name="rootPath">Root path that defines the protected scope.</param>
+    /// <param name="candidatePath">Path to test.</param>
+    /// <returns><see langword="true"/> when the candidate path is covered by the root; otherwise <see langword="false"/>.</returns>
     public static bool ContainsPath(string rootPath, string candidatePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);

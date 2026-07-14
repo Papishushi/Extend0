@@ -37,13 +37,13 @@ namespace Extend0.Metadata.Indexing.Definitions
     /// </para>
     /// <para>
     /// <b>Membership queries:</b> <see cref="GetMemberTables(TInnerKey)"/> and
-    /// <see cref="GetMemberTables(TInnerKey, out TInnerValue[]?)"/> scan partitions once and build result buffers using a small
+    /// <c>GetMemberTables(key, out values)</c> scan partitions once and build result buffers using a small
     /// <c>stackalloc</c> scratch for <see cref="Guid"/> ids (unmanaged) and <see cref="ArrayPool{T}"/> for any growth. Values are
     /// always buffered using <see cref="ArrayPool{T}"/> because <typeparamref name="TInnerValue"/> may be a managed type and cannot
     /// be stack-allocated safely.
     /// </para>
     /// <para>
-    /// <b>Binary fixed-size lookup scratch:</b> <see cref="GetScratchLookupKey(ReadOnlySpan{byte}, int)"/> materializes a fixed-size,
+    /// <b>Binary fixed-size lookup scratch:</b> <c>GetScratchLookupKey</c> materializes a fixed-size,
     /// zero-padded key into a thread-local buffer for allocation-free lookups when an index stores keys as fixed-size
     /// <see cref="byte"/> arrays. The returned buffer is ephemeral and must not be stored.
     /// </para>

@@ -141,6 +141,7 @@ namespace Extend0.Metadata.Internal
         /// Tries to decode a UTF-8 byte span into a printable string.
         /// </summary>
         /// <param name="v">The UTF-8 encoded bytes to decode.</param>
+        /// <param name="lenHint">Length hint used to slice the byte span before decoding.</param>
         /// <param name="text">
         /// When this method returns <see langword="true"/>, contains the decoded string.
         /// When it returns <see langword="false"/>, the value is undefined.

@@ -35,6 +35,10 @@ namespace Extend0.Metadata.Diagnostics
         /// The name of this library for use in logging and tracing.
         /// </summary>
         public const string LIBRARY_NAME = "Extend0.MetaDB";
+
+        /// <summary>
+        /// Gets the informational version of the assembly that contains the operation scope.
+        /// </summary>
         public static string LibraryVersion => s_LibraryVersion;
         private static readonly string s_LibraryVersion =
             typeof(OpScope).Assembly

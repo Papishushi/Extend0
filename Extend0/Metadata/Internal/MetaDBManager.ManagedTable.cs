@@ -37,12 +37,12 @@ namespace Extend0.Metadata
             /// Factory used to create the underlying <see cref="IMetadataTable"/> from the stored spec.
             /// </summary>
             /// <exception cref="ArgumentNullException">
-            /// Thrown if <paramref name="factory"/> is <see langword="null"/> when the <see cref="ManagedTable"/> is constructed.
+            /// Thrown if the factory is <see langword="null"/> when the <see cref="ManagedTable"/> is constructed.
             /// </exception>
             private readonly Func<TableSpec?, IMetadataTable> _factory = factory ?? throw new ArgumentNullException(nameof(factory));
 
             /// <summary>
-            /// Backing field for <see cref="Table"/>. Published with <see cref="Volatile.Read{T}(ref T)"/>
+            /// Backing field for <see cref="Table"/>. Published with <c>Volatile.Read</c>
             /// and <see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/>; <see langword="null"/> means “not created yet”.
             /// </summary>
             private IMetadataTable? _table; // published with Interlocked; null => not created

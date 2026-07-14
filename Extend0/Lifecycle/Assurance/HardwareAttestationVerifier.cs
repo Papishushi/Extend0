@@ -8,6 +8,9 @@ namespace Extend0.Lifecycle.Assurance;
 /// </summary>
 public static class HardwareAttestationVerifier
 {
+    /// <summary>
+    /// Default manifest file name used to declare hardware attestation evidence.
+    /// </summary>
     public const string ManifestFileName = ".extend0-attestation.json";
 
     private static readonly JsonSerializerOptions Json = new()
@@ -21,6 +24,14 @@ public static class HardwareAttestationVerifier
         Json.Converters.Add(new JsonStringEnumConverter());
     }
 
+    /// <summary>
+    /// Diagnoses hardware-attestation evidence for a path using an optional manifest.
+    /// </summary>
+    /// <param name="path">Path to verify.</param>
+    /// <param name="policy">Hardware-attestation policy to enforce.</param>
+    /// <param name="manifestPath">Optional explicit manifest path. When omitted, parent directories are searched.</param>
+    /// <param name="verifiedAtUtc">Optional verification timestamp, mainly for deterministic tests.</param>
+    /// <returns>Evidence describing observed attestation, policy outcome, and findings.</returns>
     public static HardwareAttestationEvidence DiagnosePath(
         string path,
         HardwareAttestationPolicy policy = default,
@@ -101,6 +112,12 @@ public static class HardwareAttestationVerifier
             findings);
     }
 
+    /// <summary>
+    /// Saves a hardware-attestation manifest as JSON.
+    /// </summary>
+    /// <param name="manifestPath">Destination manifest path.</param>
+    /// <param name="manifest">Manifest to serialize.</param>
+    /// <param name="overwrite">Whether an existing file may be overwritten.</param>
     public static void SaveManifest(string manifestPath, HardwareAttestationManifest manifest, bool overwrite = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);

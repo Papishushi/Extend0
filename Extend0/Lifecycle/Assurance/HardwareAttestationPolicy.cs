@@ -17,8 +17,14 @@ public readonly record struct HardwareAttestationPolicy(
     string? RequiredMeasurement = null,
     string? RequiredPolicyId = null)
 {
+    /// <summary>
+    /// Gets a policy that does not require hardware-attestation evidence.
+    /// </summary>
     public static HardwareAttestationPolicy None => default;
 
+    /// <summary>
+    /// Gets whether this policy requires any hardware-attestation evidence or identifier match.
+    /// </summary>
     public bool RequiresAttestation => RequiredLevel != HardwareAttestationLevel.None
         || RequiredTechnology != HardwareAttestationTechnology.None
         || RequiredProviderId is not null
@@ -26,6 +32,16 @@ public readonly record struct HardwareAttestationPolicy(
         || RequiredMeasurement is not null
         || RequiredPolicyId is not null;
 
+    /// <summary>
+    /// Creates a policy requiring at least the specified hardware-attestation level.
+    /// </summary>
+    /// <param name="requiredLevel">Minimum acceptable attestation evidence level.</param>
+    /// <param name="requiredTechnology">Optional required attestation technology.</param>
+    /// <param name="requiredProviderId">Optional provider id that must match the evidence.</param>
+    /// <param name="requiredAttestationId">Optional attestation identity that must match the evidence.</param>
+    /// <param name="requiredMeasurement">Optional code or platform measurement that must match the evidence.</param>
+    /// <param name="requiredPolicyId">Optional provider-defined policy id that must match the evidence.</param>
+    /// <returns>A hardware-attestation policy.</returns>
     public static HardwareAttestationPolicy Require(
         HardwareAttestationLevel requiredLevel,
         HardwareAttestationTechnology requiredTechnology = HardwareAttestationTechnology.None,
@@ -35,6 +51,9 @@ public readonly record struct HardwareAttestationPolicy(
         string? requiredPolicyId = null) =>
         new(requiredLevel, requiredTechnology, requiredProviderId, requiredAttestationId, requiredMeasurement, requiredPolicyId);
 
+    /// <summary>
+    /// Validates that the policy contains supported enum values and non-empty optional identifiers.
+    /// </summary>
     public void Validate()
     {
         if (!Enum.IsDefined(RequiredLevel))

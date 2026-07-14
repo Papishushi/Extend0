@@ -78,7 +78,7 @@ namespace Extend0.Metadata.Storage.Contract
         /// Column metadata describing the key/value sizes and initial capacity for the column.
         /// </param>
         /// <returns>
-        /// A <see cref="MetadataCell"/> bound to the requested location.
+        /// A <see cref="CodeGen.MetadataCell"/> bound to the requested location.
         /// </returns>
         /// <remarks>
         /// <para>

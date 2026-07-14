@@ -55,6 +55,7 @@ Future ADRs may supersede earlier decisions, but they must do so explicitly and 
 | [1-020](ADR/1-020-METADB-ADR-ADOPT-STORAGE-CONTINUITY-FOR-OWNERSHIP-MOVEMENT.md) | Adopt Storage Continuity for Ownership Movement | Accepted | Separates Lifecycle ownership movement from MetaDB state continuity and adds fail-closed shared/replicated storage evidence. |
 | [1-021](ADR/1-021-METADB-ADR-ADOPT-HARDWARE-ATTESTATION-EVIDENCE-FOR-STORAGE-ACCESS.md) | Adopt Hardware Attestation Evidence for Storage Access | Accepted | Adds fail-closed trusted-execution evidence for MetaDB storage access without embedding vendor-specific attestation stacks in core. |
 | [1-022](ADR/1-022-LIFECYCLE-ADR-PROMOTE-ASSURANCE-POLICIES-TO-LIFECYCLE.md) | Promote Assurance Policies to Lifecycle | Accepted | Moves generic protection, continuity, and attestation policy/evidence concepts to Lifecycle Assurance while keeping MetaDB physical storage validation in MetaDB. |
+| [1-023](ADR/1-023-LIFECYCLE-ADR-ADOPT-ACME-DNS-01-CERTIFICATE-LIFECYCLE.md) | Adopt ACME DNS-01 Certificate Lifecycle | Accepted | Defines the Lifecycle-owned ACME DNS-01 certificate flow, manual DNS provisioning boundary, protected state model, and certificate output responsibilities. |
 
 ## Usage Notes
 

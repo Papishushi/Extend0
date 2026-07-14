@@ -12,6 +12,14 @@ namespace Extend0.Metadata.Typed;
 /// <typeparam name="T">Unmanaged value stored in the fixed value segment.</typeparam>
 public sealed class MetadataValueColumn<T> : MetadataTypedColumnBase where T : unmanaged
 {
+    /// <summary>
+    /// Initializes an unmanaged-value typed column wrapper.
+    /// </summary>
+    /// <param name="table">Underlying dynamic MetaDB table.</param>
+    /// <param name="column">Zero-based column index in the underlying table.</param>
+    /// <param name="name">Expected schema column name.</param>
+    /// <param name="keySize">Fixed key segment size in bytes.</param>
+    /// <param name="valueSize">Fixed value segment size in bytes.</param>
     public MetadataValueColumn(IMetadataTable table, uint column, string name, int keySize, int valueSize)
         : base(table, column, name, keySize, valueSize)
     {

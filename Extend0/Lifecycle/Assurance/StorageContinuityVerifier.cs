@@ -8,6 +8,9 @@ namespace Extend0.Lifecycle.Assurance;
 /// </summary>
 public static class StorageContinuityVerifier
 {
+    /// <summary>
+    /// Default manifest file name used to declare storage continuity evidence.
+    /// </summary>
     public const string ManifestFileName = ".extend0-continuity.json";
 
     private static readonly JsonSerializerOptions Json = new()
@@ -21,6 +24,14 @@ public static class StorageContinuityVerifier
         Json.Converters.Add(new JsonStringEnumConverter());
     }
 
+    /// <summary>
+    /// Diagnoses storage continuity evidence for a path using an optional manifest.
+    /// </summary>
+    /// <param name="path">Path to verify.</param>
+    /// <param name="policy">Storage continuity policy to enforce.</param>
+    /// <param name="manifestPath">Optional explicit manifest path. When omitted, parent directories are searched.</param>
+    /// <param name="verifiedAtUtc">Optional verification timestamp, mainly for deterministic tests.</param>
+    /// <returns>Evidence describing observed continuity, policy outcome, and findings.</returns>
     public static StorageContinuityEvidence DiagnosePath(
         string path,
         StorageContinuityPolicy policy = default,
@@ -94,6 +105,12 @@ public static class StorageContinuityVerifier
             findings);
     }
 
+    /// <summary>
+    /// Saves a storage continuity manifest as JSON.
+    /// </summary>
+    /// <param name="manifestPath">Destination manifest path.</param>
+    /// <param name="manifest">Manifest to serialize.</param>
+    /// <param name="overwrite">Whether an existing file may be overwritten.</param>
     public static void SaveManifest(string manifestPath, StorageContinuityManifest manifest, bool overwrite = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);

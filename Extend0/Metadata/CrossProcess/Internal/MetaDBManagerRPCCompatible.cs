@@ -140,12 +140,12 @@ namespace Extend0.Metadata.CrossProcess.Internal
         ///   </description></item>
         /// </list>
         /// <para>
-        /// <c>_innerManager.Disposed</c> is read using <see cref="Volatile.Read(ref int)"/> to ensure the latest value is observed
+        /// <c>_innerManager.Disposed</c> is read using <c>Volatile.Read</c> to ensure the latest value is observed
         /// across threads without requiring a lock.
         /// </para>
         /// <para>
         /// If the inner manager is found disposed, this wrapper proactively calls <see cref="Dispose"/> to synchronize lifetimes,
-        /// then throws <see cref="ObjectDisposedException"/> using <see cref="ObjectDisposedException.ThrowIf(bool, string?)"/>.
+        /// then throws <see cref="ObjectDisposedException"/> using the platform disposal helper.
         /// </para>
         /// </remarks>
         /// <exception cref="ObjectDisposedException">
@@ -850,7 +850,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         ///   <item>
         ///     <description>
         ///     <see cref="IndexMutationStatusDTO.Ok"/> when the index was added (or replaced) successfully, with
-        ///     <see cref="IndexMutationResultDTO.Info"/> populated for the created index.
+        ///     the mutation result info populated for the created index.
         ///     </description>
         ///   </item>
         ///   <item>
@@ -1303,7 +1303,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// </para>
         /// <para>
         /// The index is created on demand (if missing) but <b>creation does not populate it</b>.
-        /// You must populate/rebuild it beforehand via <see cref="RebuildAllIndexes(bool)"/> or <see cref="RebuildIndexes(Guid, bool)"/>
+        /// You must populate/rebuild it beforehand via manager index rebuild operations
         /// with global indexing enabled. If the index is empty or stale, this method may return NotFound
         /// even if the key exists in the underlying storage.
         /// </para>

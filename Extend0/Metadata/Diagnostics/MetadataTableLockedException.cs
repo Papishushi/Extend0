@@ -10,7 +10,7 @@
     /// and rethrowing a domain-specific error that callers can catch to implement retry, backoff, or user feedback.
     /// </para>
     /// <para>
-    /// The <see cref="Exception.HResult"/> of this exception is copied from <paramref name="innerException"/> when available.
+    /// The <see cref="Exception.HResult"/> of this exception is copied from the inner exception when available.
     /// If no inner exception is provided, it defaults to <c>0x80070021</c> (LOCK_VIOLATION).
     /// </para>
     /// </remarks>

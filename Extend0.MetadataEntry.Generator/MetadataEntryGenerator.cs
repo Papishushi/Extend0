@@ -1004,7 +1004,7 @@ using System.Linq;
 namespace Extend0.Metadata.CodeGen
 {
     /// <summary>
-    /// Describes supported MetadataEntry variants. The value is encoded as (KeySize << 16) | ValueSize.
+    /// Describes supported MetadataEntry variants. The value is encoded as <c>(KeySize &lt;&lt; 16) | ValueSize</c>.
     /// </summary>
     public enum MetadataEntrySize : int
     {
@@ -1123,6 +1123,9 @@ namespace Extend0.Metadata.CodeGen
                 var k = pair.Key;
                 var v = pair.Value;
                 var packed = (k << 16) | v;
+                sb.AppendLine($"        /// <summary>");
+                sb.AppendLine($"        /// Represents a generated metadata entry with a {k}-byte key and a {v}-byte value.");
+                sb.AppendLine($"        /// </summary>");
                 sb.AppendLine($"        Entry{k}x{v} = 0x{packed:X8},");
             }
             return sb.ToString().TrimEnd('\r', '\n');

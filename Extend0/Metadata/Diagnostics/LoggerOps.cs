@@ -9,8 +9,7 @@ namespace Extend0.Metadata.Diagnostics
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="BeginOp(ILogger?, string, object?, LogLevel)"/> wraps the call in a
-    /// <see cref="OpScope"/>, automatically wiring it to
+    /// <see cref="BeginOp(ILogger?, string, object?, LogLevel)"/> wraps the call in a scope, automatically wiring it to
     /// <see cref="MetaDBManager.ActivitySrc"/> for distributed tracing.
     /// </para>
     /// </remarks>
@@ -28,7 +27,7 @@ namespace Extend0.Metadata.Diagnostics
         /// Minimum log level required to enable timing and start/end events. Defaults to <see cref="LogLevel.Information"/>.
         /// </param>
         /// <returns>
-        /// An <see cref="MetaDBManager.OpScope"/> that logs start/end/fail events and emits an
+        /// An <see cref="OpScope"/> that logs start/end/fail events and emits an
         /// <see cref="Activity"/> via <see cref="MetaDBManager.ActivitySrc"/>.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

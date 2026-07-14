@@ -5,6 +5,9 @@ namespace Extend0.Lifecycle.CrossProcess
     /// </summary>
     public enum TransportKind
     {
+        /// <summary>
+        /// No transport is selected or transport use is disabled.
+        /// </summary>
         None = 0,
 
         /// <summary>

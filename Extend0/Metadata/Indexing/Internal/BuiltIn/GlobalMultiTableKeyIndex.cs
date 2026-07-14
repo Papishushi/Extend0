@@ -654,7 +654,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// <param name="value">The value to associate with the key.</param>
     /// <returns><see langword="true"/> if the entry was added; otherwise <see langword="false"/>.</returns>
     /// <remarks>
-    /// This overload delegates to <see cref="AddFixed(byte[], ValueTuple{string, uint, uint}, Guid?)"/> to ensure
+    /// This overload delegates to <c>AddFixed</c> to ensure
     /// consistent pooling and cleanup semantics.
     /// </remarks>
     public override bool Add(byte[] key, Hit value) => AddFixed(key, value);
@@ -667,7 +667,7 @@ internal sealed class GlobalMultiTableKeyIndex(string name, int tablesCapacity =
     /// <param name="value">The value to associate with the key.</param>
     /// <returns><see langword="true"/> if the entry was added; otherwise <see langword="false"/>.</returns>
     /// <remarks>
-    /// This overload delegates to <see cref="AddFixed(byte[], ValueTuple{string, uint, uint}, Guid?)"/> and passes
+    /// This overload delegates to <c>AddFixed</c> and passes
     /// <paramref name="tableId"/> so the insertion targets a single partition while preserving pooling/ownership rules.
     /// </remarks>
     public override bool Add(Guid tableId, byte[] key, Hit value) => AddFixed(key, value, tableId);

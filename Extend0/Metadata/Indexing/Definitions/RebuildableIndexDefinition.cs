@@ -28,7 +28,7 @@ namespace Extend0.Metadata.Indexing.Definitions;
 /// <para>
 /// Implementers should:
 /// <list type="bullet">
-///   <item><description>Call <see cref="ThrowIfDisposed"/> before accessing state.</description></item>
+///   <item><description>Call the disposed guard before accessing state.</description></item>
 ///   <item><description>Use <see cref="IndexBase{TKey, TValue}.Rwls"/> to guard rebuild/lookup operations.</description></item>
 ///   <item><description>Define deterministic conflict semantics (e.g., last-wins) for duplicate keys.</description></item>
 /// </list>
@@ -120,7 +120,7 @@ public abstract class RebuildableIndexDefinition<TKey, TValue>(string name, IEqu
     /// <param name="owned">
     /// When this method returns <see langword="true"/>, contains a pooled buffer of length <c>keySize</c>
     /// filled with the cell key (and zero-padded to the fixed size). The caller owns this buffer and is
-    /// responsible for returning it to <see cref="Pool"/> when it is no longer needed (typically when clearing
+    /// responsible for returning it to the pool when it is no longer needed (typically when clearing
     /// or rebuilding the index).
     /// When this method returns <see langword="false"/>, contains <see cref="Array.Empty{T}"/>.
     /// </param>
@@ -175,6 +175,7 @@ public abstract class RebuildableIndexDefinition<TKey, TValue>(string name, IEqu
     /// <summary>
     /// Attempts to rent a pooled fixed-size key buffer and copy the provided key into it.
     /// </summary>
+    /// <param name="keySize">Fixed key size to rent and zero-pad to.</param>
     /// <param name="key">
     /// The input key bytes. May be shorter than the configured fixed size; in that case the returned buffer is
     /// zero-padded to <c>CachedKeySize</c>. If the input is longer than <c>CachedKeySize</c>, the method fails.

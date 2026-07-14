@@ -21,7 +21,7 @@ namespace Extend0.Metadata.Refs
     /// and the remaining bytes are divided into fixed slots of <see cref="EntrySize"/> bytes each.
     /// </para>
     /// <para>
-    /// The API is intentionally low-level and span-based so it can be used on top of <see cref="MetadataCell"/>
+    /// The API is intentionally low-level and span-based so it can be used on top of metadata cells
     /// without allocations, and so that callers can treat the VALUE buffer as a ref-vector “overlay”
     /// in any column configured with enough <c>ValueBytes</c>.
     /// </para>
@@ -39,8 +39,7 @@ namespace Extend0.Metadata.Refs
         /// <remarks>
         /// <para>
         /// The current helpers do not require this flag to be set, but it can be used by higher-level
-        /// code to distinguish between “never touched” buffers and those explicitly initialized with
-        /// <see cref="Init(Span{byte})"/>.
+        /// code to distinguish between "never touched" buffers and those explicitly initialized with <c>Init</c>.
         /// </para>
         /// </remarks>
         private const ushort InitializedMask = 0x01; // bit0 means “inited”
@@ -144,7 +143,7 @@ namespace Extend0.Metadata.Refs
         /// <param name="readOnlyBuf">Read-only VALUE buffer.</param>
         /// <param name="count">Outputs the stored count from the header (even if truncated).</param>
         /// <returns>
-        /// A read-only span over the entries region. Its length is <= <paramref name="count"/> if
+        /// A read-only span over the entries region. Its length is &lt;= <paramref name="count"/> if
         /// the buffer is shorter than the declared capacity.
         /// </returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

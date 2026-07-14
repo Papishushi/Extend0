@@ -22,6 +22,9 @@ public sealed record MetaDbSnapshotManifest(
     TableStorageOptions Storage,
     MetaDbSnapshotFile[] Files)
 {
+    /// <summary>
+    /// Gets whether the snapshot contains materialized runtime storage in addition to the table spec.
+    /// </summary>
     public bool ContainsRuntimeStorage =>
         Files.Any(static file => file.Role is "single-file-map" or "chunked-manifest" or "chunk");
 }
@@ -31,6 +34,9 @@ public sealed record MetaDbSnapshotManifest(
 /// </summary>
 public static class MetaDbSnapshot
 {
+    /// <summary>
+    /// Current snapshot manifest format version.
+    /// </summary>
     public const int CurrentFormatVersion = 1;
 
     private const string ManifestFileName = "snapshot.json";

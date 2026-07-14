@@ -11,16 +11,32 @@ public readonly record struct StorageProtectionPolicy(
     string? RequiredProviderId = null,
     string? RequiredProtectionId = null)
 {
+    /// <summary>
+    /// Gets a policy that does not require storage protection evidence.
+    /// </summary>
     public static StorageProtectionPolicy None => default;
 
+    /// <summary>
+    /// Gets whether this policy requires any storage protection evidence.
+    /// </summary>
     public bool RequiresProtection => RequiredLevel != StorageProtectionLevel.None;
 
+    /// <summary>
+    /// Creates a policy requiring at least the specified storage protection level.
+    /// </summary>
+    /// <param name="requiredLevel">Minimum acceptable protection evidence level.</param>
+    /// <param name="requiredProviderId">Optional provider id that must match the evidence.</param>
+    /// <param name="requiredProtectionId">Optional protected volume or mount id that must match the evidence.</param>
+    /// <returns>A storage protection policy.</returns>
     public static StorageProtectionPolicy Require(
         StorageProtectionLevel requiredLevel,
         string? requiredProviderId = null,
         string? requiredProtectionId = null) =>
         new(requiredLevel, requiredProviderId, requiredProtectionId);
 
+    /// <summary>
+    /// Validates that the policy contains supported enum values and non-empty optional identifiers.
+    /// </summary>
     public void Validate()
     {
         if (!Enum.IsDefined(RequiredLevel))

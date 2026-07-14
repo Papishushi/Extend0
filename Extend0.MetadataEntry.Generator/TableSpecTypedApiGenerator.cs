@@ -13,6 +13,9 @@ namespace Extend0.MetadataEntry.Generator;
 [Generator]
 public sealed class TableSpecTypedApiGenerator : IIncrementalGenerator
 {
+    /// <summary>
+    /// Registers the incremental pipeline that turns typed TableSpec additional files into generated wrappers.
+    /// </summary>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var specs = context.AdditionalTextsProvider

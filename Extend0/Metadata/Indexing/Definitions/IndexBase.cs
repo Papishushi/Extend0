@@ -27,6 +27,9 @@ namespace Extend0.Metadata.Indexing.Definitions
         ? new Dictionary<TKey, TValue>(capacity, comparer)
         : new Dictionary<TKey, TValue>(comparer);
 
+        /// <summary>
+        /// Gets the underlying dictionary used by the concrete index implementation.
+        /// </summary>
         protected Dictionary<TKey, TValue> Index => _index;
 
         /// <summary>

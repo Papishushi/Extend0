@@ -13,33 +13,13 @@
 /// should be treated as default values.
 /// </para>
 /// </remarks>
+/// <param name="Found">Indicates whether the lookup found a matching entry.</param>
+/// <param name="Col">Zero-based column index where the key was found; meaningful only when <paramref name="Found"/> is <see langword="true"/>.</param>
+/// <param name="Row">Zero-based row index where the key was found; meaningful only when <paramref name="Found"/> is <see langword="true"/>.</param>
+/// <param name="TableName">The name of the table where the key was found.</param>
 public readonly record struct IndexHitDTO(
-    /// <summary>
-    /// Indicates whether the lookup found a matching entry.
-    /// </summary>
     bool Found,
-
-    /// <summary>
-    /// Zero-based column index where the key was found.
-    /// </summary>
-    /// <remarks>
-    /// Only meaningful when <see cref="Found"/> is <see langword="true"/>.
-    /// </remarks>
     uint Col,
-
-    /// <summary>
-    /// Zero-based row index where the key was found.
-    /// </summary>
-    /// <remarks>
-    /// Only meaningful when <see cref="Found"/> is <see langword="true"/>.
-    /// </remarks>
     uint Row,
-
-    /// <summary>
-    /// The name of the table where the key was found.
-    /// </summary>
-    /// <remarks>
-    /// Only meaningful when <see cref="Found"/> is <see langword="true"/>.
-    /// </remarks>
     string TableName
 );

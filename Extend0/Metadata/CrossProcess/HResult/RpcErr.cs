@@ -6,7 +6,7 @@
     /// <remarks>
     /// <para>
     /// Values are intentionally small (1 byte) because they are packed into the low byte of the
-    /// <c>HRESULT</c> code produced by <see cref="MakeRpcHResult"/>.
+    /// <c>HRESULT</c> code produced by <c>MakeRpcHResult</c>.
     /// </para>
     /// <para>
     /// Keep this list conservative and version-stable. New values can be added, but existing values

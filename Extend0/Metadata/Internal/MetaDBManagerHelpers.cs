@@ -139,7 +139,7 @@ namespace Extend0.Metadata.Internal
         /// <remarks>
         /// <para>
         /// If both source and destination column blocks are contiguous (VALUE size equals stride),
-        /// the method uses a single call to <see cref="Buffer.MemoryCopy"/> for a fast bulk copy.
+        /// the method uses a single memory copy call for a fast bulk copy.
         /// </para>
         /// <para>
         /// For non-contiguous (strided) layouts, the method uses specialized strided copy routines
@@ -196,12 +196,12 @@ namespace Extend0.Metadata.Internal
         /// </param>
         /// <param name="valueSize">
         /// Size in bytes of each VALUE payload. This is used by
-        /// <see cref="StridedCopySelector(uint, uint, nuint, nuint, byte*, byte*, uint)"/>
+        /// <c>StridedCopySelector</c>
         /// to select the appropriate specialized worker.
         /// </param>
         /// <remarks>
         /// This helper normalizes the pitches and starting pointers for source and destination
-        /// and then delegates to <see cref="StridedCopySelector(uint, uint, nuint, nuint, byte*, byte*, uint)"/>
+        /// and then delegates to <c>StridedCopySelector</c>
         /// to perform the actual batched, strided copy.
         /// </remarks>
         private static unsafe void StridedCopy(uint rows, int batchSize, ColumnBlock srcBlk, ColumnBlock dstBlk, uint valueSize)
@@ -228,7 +228,7 @@ namespace Extend0.Metadata.Internal
         /// Destination <see cref="ColumnBlock"/> describing the VALUE layout in the target column.
         /// </param>
         /// <returns>
-        /// <see langword="true"/> if a single contiguous <see cref="Buffer.MemoryCopy"/> was performed;
+        /// <see langword="true"/> if a single contiguous memory copy was performed;
         /// otherwise <see langword="false"/>, so that the caller can fall back to a strided copy path.
         /// </returns>
         /// <remarks>
@@ -362,7 +362,7 @@ namespace Extend0.Metadata.Internal
         /// <remarks>
         /// <para>
         /// This method retrieves each cell via <c>TryGetCell</c>/<c>GetOrCreateCell</c> and copies the
-        /// value bytes with <see cref="Buffer.MemoryCopy"/>. It is intended as a correctness-oriented
+        /// value bytes with a memory copy. It is intended as a correctness-oriented
         /// fallback when contiguous or strided block copies cannot be used.
         /// </para>
         /// <para>
@@ -1349,7 +1349,7 @@ namespace Extend0.Metadata.Internal
         /// </para>
         /// <list type="bullet">
         ///   <item><description>
-        ///   Contiguous→contiguous copy (single bulk <see cref="Buffer.MemoryCopy"/>).
+        ///   Contiguous-to-contiguous copy (single bulk memory copy).
         ///   </description></item>
         ///   <item><description>
         ///   Strided copy specialized for VALUE sizes of 64, 128 or 256 bytes.

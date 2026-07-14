@@ -6,6 +6,13 @@ using System.Text.Json;
 
 namespace Extend0.Lifecycle.Certificates;
 
+/// <summary>
+/// Minimal ACME client for creating, validating, finalizing, and downloading DNS-01 certificate orders.
+/// </summary>
+/// <remarks>
+/// The client persists no state by itself. Callers must save the returned <see cref="AcmeDns01OrderState"/>
+/// and protect it when it contains real account or certificate private key material.
+/// </remarks>
 public sealed class AcmeDns01Client
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -13,11 +20,21 @@ public sealed class AcmeDns01Client
     private string? _newNonceUrl;
     private string? _nonce;
 
+    /// <summary>
+    /// Creates a client that uses the provided HTTP pipeline or a default <see cref="HttpClient"/>.
+    /// </summary>
+    /// <param name="httpClient">HTTP client used for ACME requests, or <see langword="null"/> to create one.</param>
     public AcmeDns01Client(HttpClient? httpClient = null)
     {
         _httpClient = httpClient ?? new HttpClient();
     }
 
+    /// <summary>
+    /// Creates an ACME account and DNS-01 order, returning local state and TXT records to publish.
+    /// </summary>
+    /// <param name="request">Validated DNS-01 order request.</param>
+    /// <param name="cancellationToken">Token used to cancel ACME network operations.</param>
+    /// <returns>Order state containing account key material, certificate key material, and DNS-01 authorizations.</returns>
     public async Task<AcmeDns01OrderState> CreateOrderAsync(
         AcmeDns01OrderRequest request,
         CancellationToken cancellationToken = default)
@@ -89,6 +106,14 @@ public sealed class AcmeDns01Client
             now);
     }
 
+    /// <summary>
+    /// Requests validation for pending DNS-01 challenges and polls the order until it settles or the wait period elapses.
+    /// </summary>
+    /// <param name="state">Previously created ACME DNS-01 order state.</param>
+    /// <param name="wait">Maximum time to poll for updated order status.</param>
+    /// <param name="pollInterval">Delay between polling attempts.</param>
+    /// <param name="cancellationToken">Token used to cancel ACME network operations.</param>
+    /// <returns>Refreshed order state after validation was requested.</returns>
     public async Task<AcmeDns01OrderState> RequestValidationAsync(
         AcmeDns01OrderState state,
         TimeSpan wait,
@@ -116,6 +141,12 @@ public sealed class AcmeDns01Client
         return await PollOrderAsync(state, account, wait, pollInterval, waitForCertificate: false, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Refreshes order and authorization status without requesting challenge validation.
+    /// </summary>
+    /// <param name="state">Previously created ACME DNS-01 order state.</param>
+    /// <param name="cancellationToken">Token used to cancel ACME network operations.</param>
+    /// <returns>Refreshed order state.</returns>
     public async Task<AcmeDns01OrderState> RefreshOrderAsync(
         AcmeDns01OrderState state,
         CancellationToken cancellationToken = default)
@@ -126,6 +157,14 @@ public sealed class AcmeDns01Client
         return await RefreshOrderAsync(state, account, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Finalizes a ready ACME order, downloads the issued certificate chain, and returns the updated state.
+    /// </summary>
+    /// <param name="state">Previously created ACME DNS-01 order state.</param>
+    /// <param name="wait">Maximum time to poll for certificate issuance.</param>
+    /// <param name="pollInterval">Delay between polling attempts.</param>
+    /// <param name="cancellationToken">Token used to cancel ACME network operations.</param>
+    /// <returns>Finalization result containing refreshed state and the PEM certificate chain.</returns>
     public async Task<AcmeDns01FinalizationResult> FinalizeAsync(
         AcmeDns01OrderState state,
         TimeSpan wait,
@@ -176,6 +215,16 @@ public sealed class AcmeDns01Client
         return new AcmeDns01FinalizationResult(refreshed, certificateChainPem);
     }
 
+    /// <summary>
+    /// Writes certificate finalization output files to a directory.
+    /// </summary>
+    /// <param name="result">Finalized ACME DNS-01 result.</param>
+    /// <param name="outputDirectory">Directory where certificate files should be written.</param>
+    /// <param name="pfxPassword">Optional password used to write a PFX file; when <see langword="null"/>, no PFX is written.</param>
+    /// <returns>Paths of the files written by this method.</returns>
+    /// <remarks>
+    /// The PEM private key and optional PFX are sensitive output and are not protected by ACME state protection.
+    /// </remarks>
     public static AcmeCertificateFiles WriteCertificateFiles(
         AcmeDns01FinalizationResult result,
         string outputDirectory,

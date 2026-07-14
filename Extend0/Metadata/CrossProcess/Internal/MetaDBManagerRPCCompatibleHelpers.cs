@@ -97,8 +97,8 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// <see cref="CellResultDTO.HasAnyValue"/> is computed by scanning for any non-zero byte.
         /// </para>
         /// <para>
-        /// <b>Key/value columns:</b> KEY is read via <see cref="MetadataCell.TryGetKey(out ReadOnlySpan{byte})"/>; when present,
-        /// VALUE is read via <see cref="MetadataCell.TryGetValue(ReadOnlySpan{byte}, out ReadOnlySpan{byte})"/> using that KEY.
+        /// <b>Key/value columns:</b> KEY is read from the cell first; when present,
+        /// VALUE is read using that KEY.
         /// </para>
         /// <para>
         /// Copies (raw arrays and/or UTF-8 strings) are created only according to <paramref name="mode"/> to avoid
@@ -258,8 +258,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// with length <paramref name="valCap"/>; presence is detected via <c>AnyNonZero</c>.
         /// </para>
         /// <para>
-        /// For key/value columns, KEY is obtained via <see cref="MetadataCell.TryGetKey(out ReadOnlySpan{byte})"/> and, when present,
-        /// VALUE is obtained via <see cref="MetadataCell.TryGetValue(ReadOnlySpan{byte}, out ReadOnlySpan{byte})"/>.
+        /// For key/value columns, KEY is obtained first and, when present, VALUE is obtained using that KEY.
         /// </para>
         /// </remarks>
         private static unsafe ReadCellUnsafeResult ReadCellUnsafe(int valCap, bool isKeyValue, MetadataCell cell)
@@ -520,6 +519,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// </summary>
         /// <param name="dst">Destination pointer.</param>
         /// <param name="cap">Segment capacity in bytes.</param>
+        /// <param name="src">Source payload bytes.</param>
         internal static unsafe void WriteFixed(byte* dst, int cap, byte[] src)
         {
             var span = new Span<byte>(dst, cap);
@@ -632,6 +632,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// <typeparam name="T">Return type of the operation.</typeparam>
         /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
         /// <param name="body">The operation body.</param>
+        /// <param name="throwIfDisposed">Callback that throws if the RPC target has already been disposed.</param>
         /// <returns>The value produced by <paramref name="body"/>.</returns>
         /// <exception cref="Exception">
         /// Re-throws the original exception after stamping <see cref="Exception.HResult"/>.
@@ -658,6 +659,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// </summary>
         /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
         /// <param name="body">The operation body.</param>
+        /// <param name="throwIfDisposed">Callback that throws if the RPC target has already been disposed.</param>
         /// <remarks>
         /// Internally calls <see cref="Rpc{T}"/> to reuse error stamping logic.
         /// </remarks>
@@ -672,6 +674,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// </summary>
         /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
         /// <param name="body">The async operation body.</param>
+        /// <param name="throwIfDisposed">Callback that throws if the RPC target has already been disposed.</param>
         /// <returns>A task representing the operation.</returns>
         /// <exception cref="Exception">
         /// Re-throws the original exception after stamping <see cref="Exception.HResult"/>.
@@ -702,6 +705,7 @@ namespace Extend0.Metadata.CrossProcess.Internal
         /// <typeparam name="T">Return type of the operation.</typeparam>
         /// <param name="op">The operation identifier to encode into the <c>HRESULT</c>.</param>
         /// <param name="body">The async operation body.</param>
+        /// <param name="throwIfDisposed">Callback that throws if the RPC target has already been disposed.</param>
         /// <returns>A task producing the value returned by <paramref name="body"/>.</returns>
         /// <exception cref="Exception">
         /// Re-throws the original exception after stamping <see cref="Exception.HResult"/>.

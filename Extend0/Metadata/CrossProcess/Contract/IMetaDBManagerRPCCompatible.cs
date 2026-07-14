@@ -19,12 +19,12 @@ namespace Extend0.Metadata.CrossProcess.Contract;
 /// </para>
 /// <list type="bullet">
 ///   <item><description><b>Registration</b>: define tables and their schema (<see cref="IMetaDBManagerCommon.RegisterTable(string,string,ColumnConfiguration[])"/>, <see cref="IMetaDBManagerCommon.RegisterTable(TableSpec,bool)"/>).</description></item>
-///   <item><description><b>Identity</b>: resolve table ids by name (<see cref="IMetaDBManagerCommon.TryGetIdByName(string,out Guid)"/>).</description></item>
+///   <item><description><b>Identity</b>: resolve table ids by name.</description></item>
 ///   <item><description><b>Open/Close</b>: close managed instances using strict or best-effort semantics (<see cref="IMetaDBManagerCommon.CloseStrict(Guid)"/>, <see cref="IMetaDBManagerCommon.CloseStrict(string)"/>, <see cref="IMetaDBManagerCommon.CloseAll"/>, <see cref="IMetaDBManagerCommon.CloseAllStrict"/>).</description></item>
 ///   <item><description><b>Reads</b>: read cell/row/column/block values as serializable payloads and produce human-readable previews (<see cref="ReadCell(Guid,uint,uint,CellPayloadModeDTO)"/>, <see cref="ReadBlock(Guid,uint[],uint,uint,CellPayloadModeDTO)"/>, <see cref="PreviewTable(Guid, uint)"/>).</description></item>
 ///   <item><description><b>Data movement</b>: copy and fill columns without delegates (<see cref="IMetaDBManagerCommon.CopyColumn"/>, <see cref="FillColumn"/>, <see cref="FillColumnRaw"/>).</description></item>
 ///   <item><description><b>Relationships</b>: maintain parent/child references and ref-vectors without factory callbacks (<see cref="IMetaDBManagerCommon.EnsureRefVec"/>, <see cref="IMetaDBManagerCommon.LinkRef"/>, <see cref="GetOrCreateAndLinkChild(Guid,uint,uint,TableSpec,uint,uint)"/>).</description></item>
-///   <item><description><b>Maintenance</b>: rebuild indexes and manage background deletion workers (<see cref="IMetaDBManagerCommon.RebuildIndexes"/>, <see cref="IMetaDBManagerCommon.RebuildAllIndexes"/>, <see cref="IMetaDBManagerCommon.RestartDeleteWorker(string?)"/>).</description></item>
+///   <item><description><b>Maintenance</b>: rebuild indexes and manage background deletion workers.</description></item>
 /// </list>
 /// <para>
 /// This interface intentionally excludes APIs that:
@@ -93,7 +93,7 @@ public interface IMetaDBManagerRPCCompatible : IMetaDBManagerCommon, ICrossProce
     /// The returned payload is detached from any underlying mapped view; callers may safely retain it beyond the RPC call.
     /// </para>
     /// <para>
-    /// For text output (<see cref="CellResultDTO.Utf8"/>), implementations should decode bytes as UTF-8 on a best-effort basis,
+    /// For text output, implementations should decode bytes as UTF-8 on a best-effort basis,
     /// typically treating empty or all-zero payloads as missing. For non-printable or invalid UTF-8, implementations may return
     /// <see langword="null"/> (or an implementation-defined placeholder) while still returning raw bytes when requested.
     /// </para>
@@ -228,8 +228,8 @@ public interface IMetaDBManagerRPCCompatible : IMetaDBManagerCommon, ICrossProce
     /// <param name="policy">Capacity policy applied when growth is needed.</param>
     /// <param name="cellPayloadMode">
     /// Describes which parts of <see cref="CellResultDTO"/> should be considered for writes.
-    /// For example, <see cref="CellPayloadModeDTO.Utf8Only"/> uses <see cref="CellResultDTO.Utf8"/>,
-    /// <see cref="CellPayloadModeDTO.RawOnly"/> uses <see cref="CellResultDTO.Raw"/>, and <see cref="CellPayloadModeDTO.Both"/>
+    /// For example, <see cref="CellPayloadModeDTO.Utf8Only"/> uses UTF-8 payload fields,
+    /// <see cref="CellPayloadModeDTO.RawOnly"/> uses raw payload fields, and <see cref="CellPayloadModeDTO.Both"/>
     /// prefers raw bytes when present and otherwise falls back to UTF-8 encoding (implementation-defined).
     /// </param>
     /// <remarks>

@@ -17,21 +17,24 @@ namespace Extend0.Metadata.Contract;
 /// Core responsibilities typically include:
 /// </para>
 /// <list type="bullet">
-///   <item><description><b>Registration</b>: define tables and their schema (<see cref="RegisterTable(string, string, ColumnConfiguration[])"/>, <see cref="RegisterTable(TableSpec, bool)"/>).</description></item>
+///   <item><description><b>Registration</b>: define tables and their schema (<c>RegisterTable</c> overloads).</description></item>
 ///   <item><description><b>Resolution</b>: obtain an active table instance by id or name (<see cref="GetOrCreate(Guid)"/>, <see cref="TryGetManaged(Guid, out IMetadataTable?)"/>, <see cref="TryGetTableIfCreated(string, out IMetadataTable?)"/>).</description></item>
-///   <item><description><b>Open/Close</b>: open tables from a backing map path and close managed instances (<see cref="Open(string)"/>, <see cref="CloseStrict(Guid)"/>, <see cref="CloseAll"/>).</description></item>
-///   <item><description><b>Data population</b>: fill or copy columns efficiently (<see cref="FillColumn"/>, <see cref="FillColumn{T}"/>, <see cref="CopyColumn"/>).</description></item>
-///   <item><description><b>Relationships</b>: maintain parent/child references and ref-vectors (<see cref="LinkRef"/>, <see cref="EnsureRefVec"/>, <see cref="GetOrCreateAndLinkChild"/>).</description></item>
-///   <item><description><b>Maintenance</b>: rebuild indexes and run operations under a named scope (<see cref="RebuildIndexes"/>, <see cref="Run"/>, <see cref="RunWithReindexAll"/>).</description></item>
-///   <item><description><b>Ephemeral scopes</b>: open-use-close tables for one-off operations, optionally deleting backing files (<see cref="WithTableEphemeral"/>).</description></item>
+///   <item><description><b>Open/Close</b>: open tables from a backing map path and close managed instances.</description></item>
+///   <item><description><b>Data population</b>: fill or copy columns efficiently.</description></item>
+///   <item><description><b>Relationships</b>: maintain parent/child references and ref-vectors.</description></item>
+///   <item><description><b>Maintenance</b>: rebuild indexes and run operations under a named scope.</description></item>
+///   <item><description><b>Ephemeral scopes</b>: open-use-close tables for one-off operations, optionally deleting backing files.</description></item>
 /// </list>
 /// <para>
 /// Implementations are expected to be thread-safe where appropriate, and to honor best-effort vs strict semantics
-/// as exposed by the API (e.g., <see cref="CloseAll"/> vs <see cref="CloseAllStrict"/>).
+/// as exposed by the API, for example best-effort close-all operations versus strict close-all operations.
 /// </para>
 /// </remarks>
 public interface IMetaDBManager : IMetaDBManagerCommon
 {
+    /// <summary>
+    /// Gets the cross-table index registry owned by this manager.
+    /// </summary>
     ICrossTableIndexesRegistry Indexes { get; }
 
     /// <summary>
@@ -293,6 +296,7 @@ public interface IMetaDBManager : IMetaDBManagerCommon
     /// When <see langword="true"/>, exceptions thrown during compaction are propagated to the caller.
     /// When <see langword="false"/>, exceptions are swallowed and the method returns <see langword="false"/>.
     /// </param>
+    /// <param name="cancellationToken">Token used to cancel compaction work.</param>
     /// <returns>
     /// <see langword="true"/> if the table is not created (<c>IsCreated == false</c>) or if compaction succeeds.
     /// <see langword="false"/> if the table is created but compaction is not supported or fails in non-strict mode.
@@ -317,6 +321,7 @@ public interface IMetaDBManager : IMetaDBManagerCommon
     /// operation terminates immediately.
     /// When <see langword="false"/>, failures are collected and the method continues attempting to compact remaining tables.
     /// </param>
+    /// <param name="cancellationToken">Token used to cancel compaction work.</param>
     /// <returns>
     /// A tuple describing the outcome:
     /// <list type="bullet">

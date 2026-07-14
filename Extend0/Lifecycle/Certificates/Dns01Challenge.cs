@@ -7,6 +7,12 @@ namespace Extend0.Lifecycle.Certificates;
 /// <summary>
 /// Represents the DNS-01 proof material required by ACME-compatible certificate authorities.
 /// </summary>
+/// <param name="Domain">DNS identifier being authorized.</param>
+/// <param name="AuthorizationDomain">DNS identifier used for the authorization record, without a wildcard prefix.</param>
+/// <param name="Token">ACME challenge token.</param>
+/// <param name="KeyAuthorization">ACME key authorization value.</param>
+/// <param name="TxtRecordName">Fully qualified TXT record name to publish.</param>
+/// <param name="TxtRecordValue">TXT record value computed from the SHA-256 digest of the key authorization.</param>
 public sealed record Dns01Challenge(
     string Domain,
     string AuthorizationDomain,
@@ -15,8 +21,18 @@ public sealed record Dns01Challenge(
     string TxtRecordName,
     string TxtRecordValue)
 {
+    /// <summary>
+    /// DNS label prefix used by ACME DNS-01 TXT records.
+    /// </summary>
     public const string TxtRecordPrefix = "_acme-challenge";
 
+    /// <summary>
+    /// Creates DNS-01 proof material from a full ACME key authorization value.
+    /// </summary>
+    /// <param name="domain">DNS identifier being authorized.</param>
+    /// <param name="token">ACME challenge token.</param>
+    /// <param name="keyAuthorization">ACME key authorization in the form <c>token.accountThumbprint</c>.</param>
+    /// <returns>Computed DNS-01 proof material.</returns>
     public static Dns01Challenge Create(string domain, string token, string keyAuthorization)
     {
         var normalizedDomain = NormalizeDomain(domain);
@@ -34,6 +50,13 @@ public sealed record Dns01Challenge(
             txtRecordValue);
     }
 
+    /// <summary>
+    /// Creates DNS-01 proof material from an ACME token and account key thumbprint.
+    /// </summary>
+    /// <param name="domain">DNS identifier being authorized.</param>
+    /// <param name="token">ACME challenge token.</param>
+    /// <param name="accountKeyThumbprint">Base64url JWK thumbprint of the ACME account key.</param>
+    /// <returns>Computed DNS-01 proof material.</returns>
     public static Dns01Challenge CreateFromAccountThumbprint(
         string domain,
         string token,
@@ -44,6 +67,11 @@ public sealed record Dns01Challenge(
         return Create(domain, normalizedToken, $"{normalizedToken}.{normalizedThumbprint}");
     }
 
+    /// <summary>
+    /// Computes the DNS-01 TXT record value for an ACME key authorization.
+    /// </summary>
+    /// <param name="keyAuthorization">ACME key authorization value.</param>
+    /// <returns>Unpadded base64url SHA-256 digest used as the TXT record value.</returns>
     public static string ComputeTxtRecordValue(string keyAuthorization)
     {
         var normalized = NormalizeAsciiToken(keyAuthorization, nameof(keyAuthorization));

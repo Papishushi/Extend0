@@ -38,11 +38,16 @@ namespace Extend0.Metadata.Refs
         /// <summary>
         /// Zero-based row index of the referenced cell within the table.
         /// </summary>
-        public readonly uint Row = row;        /// <summary>
-                                               /// Reserved 64-bit field for future extensions (e.g. flags, versioning).
-                                               /// </summary>
+        public readonly uint Row = row;
+
+        /// <summary>
+        /// Reserved 64-bit field for future extensions, such as flags or versioning.
+        /// </summary>
         public readonly ulong Reserved = reserved;  // 8
 
+        /// <summary>
+        /// Determines whether this reference points to the same table location as another reference.
+        /// </summary>
         public readonly bool Equals(MetadataTableRef other) =>
                 TableId == other.TableId
              && Column  == other.Column
@@ -51,9 +56,20 @@ namespace Extend0.Metadata.Refs
 
         /// <inheritdoc/>
         public override readonly bool Equals(object? obj) => obj is MetadataTableRef other && Equals(other);
+
+        /// <summary>
+        /// Determines whether two references are equal.
+        /// </summary>
         public static bool operator ==(MetadataTableRef left, MetadataTableRef right) => left.Equals(right);
+
+        /// <summary>
+        /// Determines whether two references are different.
+        /// </summary>
         public static bool operator !=(MetadataTableRef left, MetadataTableRef right) => !(left==right);
 
+        /// <summary>
+        /// Computes a hash code for this reference.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override readonly int GetHashCode() => HashCode.Combine(TableId, Column, Row, Reserved);
     }

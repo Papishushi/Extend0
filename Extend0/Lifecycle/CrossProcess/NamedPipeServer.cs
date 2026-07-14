@@ -66,6 +66,8 @@ namespace Extend0.Lifecycle.CrossProcess
         /// <param name="impl">Service implementation whose public instance methods are exposed.</param>
         /// <param name="logger">Logger used by the server.</param>
         /// <param name="ct">External cancellation token. When signaled, the server stops.</param>
+        /// <param name="protocol">Optional protocol descriptor advertised during handshake.</param>
+        /// <param name="authentication">Optional Extend0 protocol authentication settings.</param>
         /// <exception cref="ArgumentNullException"><paramref name="pipeName"/> or <paramref name="impl"/> is <c>null</c>.</exception>
         public NamedPipeServer(
             string pipeName,
@@ -529,6 +531,7 @@ namespace Extend0.Lifecycle.CrossProcess
         /// Writes a JSON error response with the specified message.
         /// </summary>
         /// <param name="e">The error message to include in the response.</param>
+        /// <param name="hr">The HRESULT-style error code to include in the response.</param>
         /// <param name="writer">The stream writer used to emit the JSON response.</param>
         /// <returns>
         /// A task that completes when the error payload has been written.

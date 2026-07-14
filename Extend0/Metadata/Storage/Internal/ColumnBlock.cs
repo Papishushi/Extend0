@@ -6,8 +6,8 @@
     /// <remarks>
     /// <para>
     /// A <see cref="ColumnBlock"/> exposes raw pointers into the underlying storage for a column,
-    /// allowing high–performance access to cell <c>VALUE</c> regions without re-materializing full
-    /// <see cref="MetadataCell"/> instances.
+    /// allowing high-performance access to cell <c>VALUE</c> regions without re-materializing full
+    /// <c>MetadataCell</c> instances.
     /// </para>
     /// <para>
     /// The layout is assumed to be:

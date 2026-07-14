@@ -29,7 +29,7 @@ namespace Extend0.Metadata.Contract
     /// on configuration and rebuild policy.
     /// </para>
     /// <para>
-    /// <b>Thread-safety:</b> direct pointer-backed views such as <see cref="MetadataCell"/> and <see cref="ColumnBlock"/>
+    /// <b>Thread-safety:</b> direct pointer-backed views such as <see cref="MetadataCell"/> and internal column blocks
     /// must not be kept across concurrent growth, compaction, or remapping. Built-in tables serialize their own structural
     /// operations; callers that need a stable multi-step view should use the callback-style <c>WithExclusiveAccess</c>
     /// extension methods or manager <c>WithTable</c> scopes.
@@ -57,7 +57,7 @@ namespace Extend0.Metadata.Contract
         /// </summary>
         /// <remarks>
         /// Changing the store may invalidate previously materialized cells and/or indexes depending on the implementation.
-        /// If you replace the store, you typically should call <see cref="RebuildIndexes(bool)"/> afterwards.
+        /// If you replace the store, you typically should rebuild indexes afterwards.
         /// </remarks>
         ICellStore CellStore { get; set; }
 
@@ -151,6 +151,7 @@ namespace Extend0.Metadata.Contract
         /// When <see langword="true"/>, any exception thrown during compaction is propagated to the caller.
         /// When <see langword="false"/>, compaction failures are swallowed and the method returns <see langword="false"/>.
         /// </param>
+        /// <param name="cancellationToken">Token used to cancel compaction work.</param>
         /// <returns>
         /// <see langword="true"/> if the table supports compaction and the operation completed successfully; otherwise,
         /// <see langword="false"/> (either because compaction is not supported or because it failed in non-strict mode).

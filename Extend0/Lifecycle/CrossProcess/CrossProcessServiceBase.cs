@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Extend0.Lifecycle.CrossProcess
 {
-    /// <summary>ICrossProcessService
+    /// <summary>
     /// Convenience base class to implement <see cref="ICrossProcessService"/> once for all services.
     /// Inherit this in your concrete implementation and override virtual properties if needed.
     /// </summary>
@@ -21,12 +21,22 @@ namespace Extend0.Lifecycle.CrossProcess
         private string? _runtimeCoordinationName;
         private string? _runtimeCoordinationScope;
 
+        /// <summary>
+        /// Gets the optional logger used by default service diagnostics and probes.
+        /// </summary>
         protected ILogger? Logger { get; }
 
+        /// <summary>
+        /// Initializes the service base without a logger.
+        /// </summary>
         protected CrossProcessServiceBase()
         {
         }
 
+        /// <summary>
+        /// Initializes the service base with an optional logger.
+        /// </summary>
+        /// <param name="logger">Logger used by default diagnostics and connectivity probes.</param>
         protected CrossProcessServiceBase(ILogger? logger)
         {
             Logger = logger;

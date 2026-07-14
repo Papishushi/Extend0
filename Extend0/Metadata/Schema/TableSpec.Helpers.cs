@@ -7,10 +7,19 @@ namespace Extend0.Metadata.Schema
 {
     public readonly partial record struct TableSpec
     {
+        /// <summary>
+        /// Factory and path helpers for creating and locating MetaDB table specs.
+        /// </summary>
         public class Helpers
         {
+            /// <summary>
+            /// Default file extension used by single-file table spec sidecars.
+            /// </summary>
             public const string DefaultSpecExtension = ".meta.tablespec.json";
 
+            /// <summary>
+            /// Default spec file name used inside chunked table directories.
+            /// </summary>
             public const string ChunkedSpecFileName = "tablespec.json";
 
             private const long MaxSpecCandidateBytes = 16L * 1024L * 1024L;

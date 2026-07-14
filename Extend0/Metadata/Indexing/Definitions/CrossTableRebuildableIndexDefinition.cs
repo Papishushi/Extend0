@@ -248,7 +248,7 @@ public abstract class CrossTableRebuildableIndexDefinition<TInnerKey, TInnerValu
     /// </para>
     /// </remarks>
     /// <exception cref="IndexOutOfRangeException">
-    /// May be thrown if <paramref name="entry"/> contains an invalid column index for <paramref name="cols"/>.
+    /// May be thrown if <paramref name="entry"/> contains an invalid column index for the cached column metadata.
     /// </exception>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Style",

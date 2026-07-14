@@ -9,7 +9,7 @@ namespace Extend0
     /// <remarks>
     /// <para>
     /// Equality is exact: when hash codes collide, the dictionary still confirms by calling
-    /// <see cref="IEqualityComparer.Equals(byte[]?, byte[]?)"/> (sequence comparison).
+    /// the equality comparer again for sequence comparison.
     /// </para>
     /// <para>
     /// <b>Important:</b> Arrays used as keys must not be mutated after insertion into a hash-based collection.
@@ -33,18 +33,30 @@ namespace Extend0
         /// </summary>
         public static readonly ByteArrayComparer Ordinal = new();
 
+        /// <summary>
+        /// Determines whether two byte arrays contain the same bytes in the same order.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(byte[]? x, byte[]? y)
             => ReferenceEquals(x, y) || (x is not null && y is not null && x.AsSpan().SequenceEqual(y));
 
+        /// <summary>
+        /// Determines whether two writable byte spans contain the same bytes in the same order.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(Span<byte> x, Span<byte> y)
             => x.SequenceEqual(y);
 
+        /// <summary>
+        /// Determines whether two read-only byte spans contain the same bytes in the same order.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ReadOnlySpan<byte> x, ReadOnlySpan<byte> y)
             => x.SequenceEqual(y);
 
+        /// <summary>
+        /// Computes a stable 32-bit FNV-1a-derived hash code for a byte array.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetHashCode([DisallowNull] byte[] obj)
         {
@@ -52,10 +64,16 @@ namespace Extend0
             return FoldToInt32(GetHashCode64(obj));
         }
 
+        /// <summary>
+        /// Computes a stable 32-bit FNV-1a-derived hash code for a writable byte span.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetHashCode(Span<byte> obj)
             => FoldToInt32(GetHashCode64(obj));
 
+        /// <summary>
+        /// Computes a stable 32-bit FNV-1a-derived hash code for a read-only byte span.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetHashCode(ReadOnlySpan<byte> obj)
             => FoldToInt32(GetHashCode64(obj));

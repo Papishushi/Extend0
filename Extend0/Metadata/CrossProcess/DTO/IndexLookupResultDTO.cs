@@ -17,19 +17,11 @@
 /// a best-effort explanation suitable for logs/UI.
 /// </para>
 /// </remarks>
+/// <param name="Status">Structured outcome of the lookup request.</param>
+/// <param name="Hit">Hit coordinates when the lookup found an entry; otherwise default.</param>
+/// <param name="Notes">Optional best-effort diagnostic notes, not intended for programmatic parsing.</param>
 public readonly record struct IndexLookupResultDTO(
-    /// <summary>
-    /// Structured outcome of the lookup request.
-    /// </summary>
     IndexLookupStatusDTO Status,
-
-    /// <summary>
-    /// Hit coordinates when the lookup found an entry; otherwise default.
-    /// </summary>
     IndexHitDTO Hit,
-
-    /// <summary>
-    /// Optional best-effort diagnostic notes (not intended for programmatic parsing).
-    /// </summary>
     string? Notes = null
 );

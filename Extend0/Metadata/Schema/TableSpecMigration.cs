@@ -7,20 +7,79 @@ namespace Extend0.Metadata.Schema;
 /// </summary>
 public enum TableSpecMigrationStepKind
 {
+    /// <summary>
+    /// No schema migration is required.
+    /// </summary>
     NoOp = 0,
+
+    /// <summary>
+    /// The target schema advances or changes the table schema version.
+    /// </summary>
     BumpSchemaVersion = 1,
+
+    /// <summary>
+    /// The logical table name changes.
+    /// </summary>
     RenameTable = 2,
+
+    /// <summary>
+    /// The physical table storage layout changes.
+    /// </summary>
     ChangeStorageLayout = 3,
+
+    /// <summary>
+    /// The physical storage chunk size changes.
+    /// </summary>
     ChangeChunkSize = 4,
+
+    /// <summary>
+    /// A column is added by the target schema.
+    /// </summary>
     AddColumn = 5,
+
+    /// <summary>
+    /// A column is removed by the target schema.
+    /// </summary>
     RemoveColumn = 6,
+
+    /// <summary>
+    /// A column name changes.
+    /// </summary>
     RenameColumn = 7,
+
+    /// <summary>
+    /// A column key/value byte shape changes.
+    /// </summary>
     ChangeColumnShape = 8,
+
+    /// <summary>
+    /// A column initial capacity changes.
+    /// </summary>
     ChangeColumnCapacity = 9,
+
+    /// <summary>
+    /// A column read-only flag changes.
+    /// </summary>
     ChangeColumnReadOnlyFlag = 10,
+
+    /// <summary>
+    /// The migration requires a manual data transform.
+    /// </summary>
     ManualDataTransform = 11,
+
+    /// <summary>
+    /// The storage protection policy changes.
+    /// </summary>
     ChangeStorageProtectionPolicy = 12,
+
+    /// <summary>
+    /// The storage continuity policy changes.
+    /// </summary>
     ChangeStorageContinuityPolicy = 13,
+
+    /// <summary>
+    /// The hardware-attestation policy changes.
+    /// </summary>
     ChangeHardwareAttestationPolicy = 14
 }
 
@@ -29,16 +88,40 @@ public enum TableSpecMigrationStepKind
 /// </summary>
 public enum TableSpecMigrationImpact
 {
+    /// <summary>
+    /// The step has no operational impact.
+    /// </summary>
     None = 0,
+
+    /// <summary>
+    /// The step only changes schema metadata.
+    /// </summary>
     MetadataOnly = 1,
+
+    /// <summary>
+    /// The step requires rewriting or recreating physical storage.
+    /// </summary>
     StorageRewrite = 2,
+
+    /// <summary>
+    /// The step requires transforming existing row data.
+    /// </summary>
     DataTransform = 3,
+
+    /// <summary>
+    /// The step is not supported by automatic migration.
+    /// </summary>
     Unsupported = 4
 }
 
 /// <summary>
 /// A planned step for evolving a source schema into a target schema.
 /// </summary>
+/// <param name="Kind">Kind of migration operation represented by the step.</param>
+/// <param name="Impact">Operational impact of applying the step.</param>
+/// <param name="Description">Human-readable explanation of the step.</param>
+/// <param name="ColumnIndex">Optional zero-based column index affected by the step.</param>
+/// <param name="ColumnName">Optional column name affected by the step.</param>
 public sealed record TableSpecMigrationStep(
     TableSpecMigrationStepKind Kind,
     TableSpecMigrationImpact Impact,
@@ -49,17 +132,30 @@ public sealed record TableSpecMigrationStep(
 /// <summary>
 /// Migration plan produced from a source and target <see cref="TableSpec"/>.
 /// </summary>
+/// <param name="Source">Source schema currently represented by storage or code.</param>
+/// <param name="Target">Target schema that should become the new contract.</param>
+/// <param name="Compatibility">Compatibility report used to classify the migration.</param>
+/// <param name="Steps">Ordered migration steps needed to evolve source into target.</param>
 public sealed record TableSpecMigrationPlan(
     TableSpec Source,
     TableSpec Target,
     TableSpecCompatibilityReport Compatibility,
     IReadOnlyList<TableSpecMigrationStep> Steps)
 {
+    /// <summary>
+    /// Gets whether the plan contains only a no-op step.
+    /// </summary>
     public bool IsNoOp => Steps.Count == 1 && Steps[0].Kind == TableSpecMigrationStepKind.NoOp;
 
+    /// <summary>
+    /// Gets whether applying this plan requires explicit data transformation by the caller.
+    /// </summary>
     public bool RequiresManualDataTransform =>
         Steps.Any(static s => s.Impact is TableSpecMigrationImpact.DataTransform or TableSpecMigrationImpact.Unsupported);
 
+    /// <summary>
+    /// Gets whether the plan can be applied by automatic migration tooling.
+    /// </summary>
     public bool CanApplyAutomatically =>
         Compatibility.Level != TableSpecCompatibilityLevel.Incompatible && !RequiresManualDataTransform;
 }
@@ -69,6 +165,13 @@ public sealed record TableSpecMigrationPlan(
 /// </summary>
 public static class TableSpecMigration
 {
+    /// <summary>
+    /// Creates a migration plan that describes how to evolve one table spec into another.
+    /// </summary>
+    /// <param name="source">Source schema currently represented by storage or code.</param>
+    /// <param name="target">Target schema that should become the new contract.</param>
+    /// <param name="compatibilityOptions">Optional compatibility validation options.</param>
+    /// <returns>A migration plan with compatibility findings and ordered steps.</returns>
     public static TableSpecMigrationPlan CreatePlan(
         TableSpec source,
         TableSpec target,

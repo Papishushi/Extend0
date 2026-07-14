@@ -282,7 +282,7 @@ namespace Extend0.Metadata
         /// </param>
         /// <param name="factory">
         /// Optional factory that creates a <see cref="IMetadataTable"/> from a <see cref="TableSpec"/>.
-        /// If <c>null</c>, defaults to <see cref="CreateTable(TableSpec)"/>. The factory is invoked lazily on first use.
+        /// If <c>null</c>, defaults to the built-in table creation path. The factory is invoked lazily on first use.
         /// </param>
         /// <param name="capacityPolicy">
         /// Default capacity policy to apply when a per-call policy is not provided
@@ -397,8 +397,7 @@ namespace Extend0.Metadata
         /// The index is created on demand via <see cref="GetOrCreateCrossGlobalKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// The index must have been populated beforehand by <see cref="RebuildAllIndexes(bool)"/> or
-        /// <see cref="RebuildIndexes(Guid, bool)"/>. If the index is empty or stale, this method may return
+        /// The index must have been populated beforehand by rebuilding indexes. If the index is empty or stale, this method may return
         /// <see langword="false"/> even if the key exists in the underlying storage.
         /// </para>
         /// <para>
@@ -435,8 +434,7 @@ namespace Extend0.Metadata
         /// The index is created on demand via <see cref="GetOrCreateCrossGlobalKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// The index must have been populated beforehand by <see cref="RebuildAllIndexes(bool)"/> or
-        /// <see cref="RebuildIndexes(Guid, bool)"/>. If the index is empty or stale, this method may return
+        /// The index must have been populated beforehand by rebuilding indexes. If the index is empty or stale, this method may return
         /// <see langword="false"/> even if the key exists in the underlying storage.
         /// </para>
         /// <para>
@@ -2175,6 +2173,7 @@ namespace Extend0.Metadata
         ///   <item>
         ///     <description><c>_byName</c>: maps table name to its <see cref="Guid"/>.</description>
         ///   </item>
+        /// </list>
         /// <para>
         /// If name registration fails, the previously added id entry is rolled back and a warning
         /// is logged when debug logging is enabled.
@@ -2516,6 +2515,7 @@ namespace Extend0.Metadata
         /// <exception cref="InvalidOperationException">
         /// If capacity is insufficient and growth is disabled/misconfigured, or if the refs vector is full.
         /// </exception>
+        /// <param name="policy">Capacity policy applied when the parent refs column must grow.</param>
         public void LinkRef(Guid parentTableId, uint refsCol, uint parentRow, Guid childTableId, uint childCol = 0, uint childRow = 0, CapacityPolicy policy = CapacityPolicy.None)
         {
             var p = Require(parentTableId);
@@ -2893,7 +2893,7 @@ namespace Extend0.Metadata
         /// <param name="cancellationToken">Token used to cancel the rebuild operation.</param>
         /// <remarks>
         /// <para>
-        /// The method starts by clearing the current <b>index state</b> via <see cref="TableIndexesRegistry.ClearAll"/>.
+        /// The method starts by clearing the current <b>index state</b> via <c>ClearAll</c>.
         /// This does <b>not</b> unregister indexes; it only resets their internal/ephemeral contents so they can be rebuilt
         /// from the table data (implementation-defined per index).
         /// </para>
@@ -2982,6 +2982,7 @@ namespace Extend0.Metadata
         /// operation terminates immediately.
         /// When <see langword="false"/>, failures are collected and the method continues attempting to compact remaining tables.
         /// </param>
+        /// <param name="cancellationToken">Token used to cancel compaction work.</param>
         /// <returns>
         /// A <see cref="TryCompactAllTablesResult"/> containing an overall success flag and the identifiers of tables that
         /// failed to compact.
@@ -3042,6 +3043,7 @@ namespace Extend0.Metadata
         /// When <see langword="true"/>, any exception thrown during compaction is propagated to the caller.
         /// When <see langword="false"/>, exceptions are swallowed and the method returns <see langword="false"/>.
         /// </param>
+        /// <param name="cancellationToken">Token used to cancel compaction work.</param>
         /// <returns>
         /// <see langword="true"/> if the table is not created (<c>IsCreated == false</c>) or if compaction succeeds.
         /// <see langword="false"/> if the table is created but compaction is not supported or fails in non-strict mode.
@@ -3089,7 +3091,7 @@ namespace Extend0.Metadata
         /// manager would otherwise produce confusing downstream failures.
         /// </para>
         /// <para>
-        /// The disposed state is read using <see cref="Volatile.Read(ref int)"/> to ensure correct visibility
+        /// The disposed state is read using <c>Volatile.Read</c> to ensure correct visibility
         /// across threads. The check is aggressively inlined to minimize overhead.
         /// </para>
         /// </remarks>

@@ -1,7 +1,7 @@
 ﻿namespace Extend0.Metadata.CrossProcess.HResult
 {
     /// <summary>
-    /// Identifies the RPC operation that failed, encoded into the <c>HRESULT</c> code produced by <see cref="MakeRpcHResult"/>.
+    /// Identifies the RPC operation that failed, encoded into the <c>HRESULT</c> code produced by <c>MakeRpcHResult</c>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -9,7 +9,7 @@
     /// </para>
     /// <para>
     /// The current encoding uses only the low 8 bits of the operation id when building the final 16-bit code
-    /// (<c>(op &amp; 0xFF) &lt;&lt; 8 | err</c>). If you need more than 256 operations, update <see cref="MakeRpcHResult"/>
+    /// (<c>(op &amp; 0xFF) &lt;&lt; 8 | err</c>). If you need more than 256 operations, update <c>MakeRpcHResult</c>
     /// and ensure older clients can still interpret the result.
     /// </para>
     /// </remarks>
@@ -18,7 +18,7 @@
         /// <summary>Registers a table by name/path/columns.</summary>
         RegisterTable_NamePathColumns = 0x0001,
 
-        /// <summary>Registers a table from a <see cref="TableSpec"/>.</summary>
+        /// <summary>Registers a table from a table spec.</summary>
         RegisterTable_Spec = 0x0002,
 
         /// <summary>Resolves a table id by its registered name.</summary>

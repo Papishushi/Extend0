@@ -15,7 +15,7 @@
     /// <list type="bullet">
     ///   <item><description><see cref="System.IntPtr"/>, <see cref="System.UIntPtr"/>, <c>nint</c>, <c>nuint</c>, unmanaged pointers (<c>void*</c>, etc.).</description></item>
     ///   <item><description><c>ref struct</c> types and stack-only types: <see cref="System.Span{T}"/>, <see cref="System.ReadOnlySpan{T}"/>.</description></item>
-    ///   <item><description>Handles/OS resources: <see cref="System.Runtime.InteropServices.HandleRef"/>, <see cref="System.Threading.WaitHandle"/>, <see cref="System.Threading.Mutex"/>, <see cref="System.Threading.Semaphore"/>, <see cref="Microsoft.Win32.SafeHandles.SafeHandle"/> and derivatives.</description></item>
+    ///   <item><description>Handles/OS resources: <see cref="System.Runtime.InteropServices.HandleRef"/>, <see cref="System.Threading.WaitHandle"/>, <see cref="System.Threading.Mutex"/>, <see cref="System.Threading.Semaphore"/>, <see cref="System.Runtime.InteropServices.SafeHandle"/> and derivatives.</description></item>
     ///   <item><description>Streams and live I/O abstractions: <see cref="System.IO.Stream"/>, <see cref="System.IO.Pipelines.PipeReader"/>, <see cref="System.IO.Pipelines.PipeWriter"/>.</description></item>
     ///   <item><description><see cref="System.Threading.CancellationToken"/> (tokens are not sent over IPC; use method-specific flags/timeout args instead).</description></item>
     ///   <item><description>Delegates containing unmanaged function pointers.</description></item>

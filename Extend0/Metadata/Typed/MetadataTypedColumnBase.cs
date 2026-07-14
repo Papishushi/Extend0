@@ -7,6 +7,14 @@ namespace Extend0.Metadata.Typed;
 /// </summary>
 public abstract class MetadataTypedColumnBase
 {
+    /// <summary>
+    /// Initializes shared metadata for a generated typed column wrapper.
+    /// </summary>
+    /// <param name="table">Underlying dynamic MetaDB table.</param>
+    /// <param name="column">Zero-based column index in the underlying table.</param>
+    /// <param name="name">Expected schema column name.</param>
+    /// <param name="keySize">Fixed key segment size in bytes.</param>
+    /// <param name="valueSize">Fixed value segment size in bytes.</param>
     protected MetadataTypedColumnBase(IMetadataTable table, uint column, string name, int keySize, int valueSize)
     {
         Table = table ?? throw new ArgumentNullException(nameof(table));
@@ -44,9 +52,15 @@ public abstract class MetadataTypedColumnBase
     /// <summary>
     /// Ensures the column has at least <paramref name="minRows"/> physical rows.
     /// </summary>
+    /// <param name="minRows">Minimum row capacity required by the caller.</param>
+    /// <param name="zeroInit">Whether newly allocated storage should be zero-initialized.</param>
+    /// <returns><see langword="true"/> when the column has enough capacity; otherwise <see langword="false"/>.</returns>
     public bool TryGrowTo(uint minRows, bool zeroInit = true) =>
         Table.TryGrowColumnTo(Column, minRows, zeroInit);
 
+    /// <summary>
+    /// Validates that the wrapper still matches the underlying table schema.
+    /// </summary>
     protected void ValidateColumn()
     {
         if (Column >= Table.Spec.Columns.Length)

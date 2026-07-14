@@ -78,7 +78,7 @@ namespace Extend0.Metadata.Internal
         /// </summary>
         /// <remarks>
         /// Changing the store may invalidate previously materialized cells and/or indexes depending on the implementation.
-        /// If you replace the store, you typically should call <see cref="RebuildIndexes(bool)"/> afterwards.
+        /// If you replace the store, you typically should rebuild indexes afterwards.
         /// </remarks>
         public ICellStore CellStore { get => _store; set => _store = value; }
 
@@ -308,11 +308,11 @@ namespace Extend0.Metadata.Internal
         /// <remarks>
         /// <para>
         /// Indexes are treated as ephemeral caches. The method first clears current index state via
-        /// <see cref="TableIndexesRegistry.ClearAll"/> and then rebuilds indexes implementing <see cref="IRebuildableIndex"/>.
+        /// <c>ClearAll</c> and then rebuilds indexes implementing <see cref="IRebuildableIndex"/>.
         /// </para>
         /// <para>
         /// Concurrency: rebuild is executed in parallel using
-        /// <see cref="Parallel.ForEachAsync(IEnumerable{TSource}, CancellationToken, Func{TSource, CancellationToken, ValueTask})"/>.
+        /// <c>Parallel.ForEachAsync</c>.
         /// Multiple indexes may rebuild simultaneously; each index implementation must be thread-safe with respect to its own state.
         /// </para>
         /// <para>
@@ -484,7 +484,7 @@ namespace Extend0.Metadata.Internal
         /// <see cref="GetOrCreateColKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// The index must have been populated beforehand by rebuilding indexes.
         /// If the index is empty or stale, the lookup may return <see langword="false"/>
         /// even if the key exists in the underlying storage.
         /// </para>
@@ -531,7 +531,7 @@ namespace Extend0.Metadata.Internal
         /// <see cref="GetOrCreateColKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// The index must have been populated beforehand by rebuilding indexes.
         /// If the index is empty or stale, the lookup may return <see langword="false"/>
         /// even if the key exists in the underlying storage.
         /// </para>
@@ -614,7 +614,7 @@ namespace Extend0.Metadata.Internal
         /// <see cref="GetOrCreateGlobalKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// The index must have been populated beforehand by rebuilding indexes.
         /// If the index is empty or stale, the lookup may return <see langword="false"/>
         /// even if the key exists in the underlying storage.
         /// </para>
@@ -651,7 +651,7 @@ namespace Extend0.Metadata.Internal
         /// <see cref="GetOrCreateGlobalKeyIndex"/>; creation does not populate it.
         /// </para>
         /// <para>
-        /// The index must have been populated beforehand by <see cref="RebuildIndexes(bool)"/>.
+        /// The index must have been populated beforehand by rebuilding indexes.
         /// If the index is empty or stale, the lookup may return <see langword="false"/>
         /// even if the key exists in the underlying storage.
         /// </para>
@@ -1040,7 +1040,7 @@ namespace Extend0.Metadata.Internal
         /// <param name="rowsToShow">Number of rows to render in the preview.</param>
         /// <param name="widths">Precomputed column widths (including the row index column at index 0).</param>
         /// <remarks>
-        /// Each cell is retrieved from the underlying store and rendered using <see cref="Preview(ReadOnlySpan{byte}, int)"/>.
+        /// Each cell is retrieved from the underlying store and rendered using the preview helper.
         /// Missing or unreadable cells are rendered as empty strings.
         /// </remarks>
         private unsafe void WriteRows(StringBuilder sb, uint colCount, uint rowsToShow, int[] widths)
@@ -1085,7 +1085,7 @@ namespace Extend0.Metadata.Internal
         /// indices 1..colCount hold the widths for each data column.
         /// </param>
         /// <remarks>
-        /// Uses <see cref="Preview(ReadOnlySpan{byte}, int)"/> with <paramref name="MAX_COL_WIDTH"/>
+        /// Uses the preview helper with <paramref name="MAX_COL_WIDTH"/>
         /// to estimate a reasonable width for each column, capped at the specified maximum.
         /// </remarks>
         private unsafe void ObtainWidths(uint colCount, uint rowsToShow, int MAX_COL_WIDTH, int[] widths)
@@ -1176,6 +1176,7 @@ namespace Extend0.Metadata.Internal
         /// When <see langword="true"/>, any exception thrown during compaction or index rebuild is propagated to the caller.
         /// When <see langword="false"/>, failures are swallowed and the method returns <see langword="false"/>.
         /// </param>
+        /// <param name="cancellationToken">Token used to cancel compaction and index rebuild work.</param>
         /// <returns>
         /// <see langword="true"/> if the store implements <see cref="ICompactableStore"/>, compaction completed successfully,
         /// and indexes were rebuilt; otherwise, <see langword="false"/> (either because the store is not compactable or because
@@ -1187,7 +1188,7 @@ namespace Extend0.Metadata.Internal
         /// file, shrinking capacity, or relocating slabs). It may be expensive and can involve I/O and temporary extra space.
         /// </para>
         /// <para>
-        /// After a successful compaction, this method rebuilds all registered indexes via <see cref="RebuildIndexes(bool)"/>.
+        /// After a successful compaction, this method rebuilds all registered indexes.
         /// Indexes are treated as ephemeral caches and may be cleared and repopulated.
         /// </para>
         /// <para>
@@ -1197,7 +1198,7 @@ namespace Extend0.Metadata.Internal
         /// </remarks>
         /// <exception cref="Exception">
         /// When <paramref name="strict"/> is <see langword="true"/>, rethrows any exception produced by
-        /// <see cref="ICompactableStore.Compact"/> or by <see cref="RebuildIndexes(bool)"/>.
+        /// <see cref="ICompactableStore.Compact"/> or by index rebuild.
         /// </exception>
         public async Task<bool> TryCompactStore(bool strict, CancellationToken cancellationToken = default)
         {

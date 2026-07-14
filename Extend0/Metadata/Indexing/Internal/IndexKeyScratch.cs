@@ -8,7 +8,7 @@
 /// <para>
 /// Many built-in indexes store keys as fixed-size <see cref="byte"/> arrays whose length is
 /// dictated by schema (<c>KeySize</c>). When a lookup starts from a variable-length
-/// <see cref="ReadOnlySpan{byte}"/>, the lookup key must be materialized into an array with the
+/// <c>ReadOnlySpan&lt;byte&gt;</c>, the lookup key must be materialized into an array with the
 /// <em>exact</em> same size and padding rules as the stored keys, otherwise the comparer would not
 /// see the same bytes.
 /// </para>
@@ -98,7 +98,7 @@ internal static class IndexKeyScratch
     /// </para>
     /// <para>
     /// Precondition: <paramref name="key"/> length must be less than or equal to <paramref name="scratch"/> length.
-    /// If not, <see cref="ReadOnlySpan{byte}.CopyTo(Span{byte})"/> throws.
+    /// If not, <c>ReadOnlySpan&lt;byte&gt;.CopyTo</c> throws.
     /// </para>
     /// <para>
     /// This method always overwrites the entire buffer (by copy then clear), so it is safe to call even when the

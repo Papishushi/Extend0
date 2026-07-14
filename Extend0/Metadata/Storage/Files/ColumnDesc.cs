@@ -34,15 +34,21 @@ namespace Extend0.Metadata.Storage.Files
         /// Byte offset, relative to the beginning of the mapped file,
         /// where the first entry of this column starts.
         /// </summary>
-        public long BaseOffset = baseOffset; // inicio del slab de esta columna
+        public long BaseOffset = baseOffset;
 
         /// <summary>
         /// Total entry size in bytes (key + value) for this column.
         /// </summary>
         public readonly long EntrySizeBytes => KeySize + ValueSize;
 
+        /// <summary>
+        /// Determines whether this descriptor is equal to another object.
+        /// </summary>
         public readonly override bool Equals(object? obj) => obj is ColumnDesc desc&&Equals(desc);
 
+        /// <summary>
+        /// Determines whether this descriptor is equal to another descriptor.
+        /// </summary>
         public readonly bool Equals(ColumnDesc other) =>
                    KeySize==other.KeySize&&
                    ValueSize==other.ValueSize&&
@@ -50,10 +56,19 @@ namespace Extend0.Metadata.Storage.Files
                    BaseOffset==other.BaseOffset&&
                    EntrySizeBytes==other.EntrySizeBytes;
 
+        /// <summary>
+        /// Computes a hash code for this descriptor.
+        /// </summary>
         public override readonly int GetHashCode() => HashCode.Combine(KeySize, ValueSize, RowCapacity, BaseOffset, EntrySizeBytes);
 
+        /// <summary>
+        /// Determines whether two descriptors are equal.
+        /// </summary>
         public static bool operator ==(ColumnDesc left, ColumnDesc right) => left.Equals(right);
 
+        /// <summary>
+        /// Determines whether two descriptors are different.
+        /// </summary>
         public static bool operator !=(ColumnDesc left, ColumnDesc right) => !(left==right);
     }
 }

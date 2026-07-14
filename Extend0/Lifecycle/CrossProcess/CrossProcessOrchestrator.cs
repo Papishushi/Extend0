@@ -56,6 +56,12 @@ namespace Extend0.Lifecycle.CrossProcess
         /// When <see langword="true"/>, attempts to reserve the ownership mutex in the global namespace when the
         /// platform supports it.
         /// </param>
+        /// <param name="authentication">
+        /// Optional Extend0 protocol authentication options used by owner and client transports.
+        /// </param>
+        /// <param name="tls">
+        /// Optional TLS settings used by transports that support TLS.
+        /// </param>
         /// <param name="clientTransportFactory">
         /// Optional client transport factory for custom transports. When supplied, the orchestrator passes the resolved
         /// endpoint and protocol metadata into the factory instead of using a built-in transport implementation.

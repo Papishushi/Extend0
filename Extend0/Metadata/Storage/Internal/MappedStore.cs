@@ -137,7 +137,7 @@ namespace Extend0.Metadata.Storage.Internal
         ///   </description></item>
         ///   <item><description>
         ///     Ensures the target directory exists, persists the <see cref="TableSpec"/> to
-        ///     disk (via <see cref="TableSpec.SaveToDirectory(string)"/>), and creates or
+        ///     disk (via <c>TableSpec.SaveToDirectory</c>), and creates or
         ///     grows the backing file to the computed size.
         ///   </description></item>
         ///   <item><description>
@@ -1036,7 +1036,7 @@ namespace Extend0.Metadata.Storage.Internal
         /// </summary>
         /// <remarks>
         /// <para>
-        /// This must be called after <see cref="MemoryMappedViewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref byte*)"/>
+        /// This must be called after acquiring a pointer from <c>SafeMemoryMappedViewHandle</c>
         /// to avoid leaking a pinned view. Once released, <see cref="_base"/> becomes invalid and must not be dereferenced.
         /// </para>
         /// </remarks>
