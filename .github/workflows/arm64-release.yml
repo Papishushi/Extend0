@@ -37,7 +37,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7.0.0
-      - name: Read and validate package version
+      - name: Read and validate assembly version
         id: version
         shell: bash
         run: |
@@ -48,9 +48,9 @@ jobs:
               "Extend0/Extend0.csproj",
               "Extend0.Cli/Extend0.Cli.csproj",
           ]
-          versions = {ET.parse(project).findtext(".//Version") for project in projects}
+          versions = {ET.parse(project).findtext(".//AssemblyVersion") for project in projects}
           if None in versions or len(versions) != 1:
-              raise SystemExit(f"ARM64 project versions are not aligned: {versions}")
+              raise SystemExit(f"ARM64 assembly versions are not aligned: {versions}")
           print(versions.pop())
           PY
           )"
