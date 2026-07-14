@@ -1717,19 +1717,24 @@ public sealed class Extend0CliTests
         return root;
     }
 
-    private static Task RunRawNamedPipeHandshakeServerAsync(string pipeName, Func<NamedPipeServerStream, Task> handler) =>
-        Task.Run(async () =>
-        {
-            await using var server = new NamedPipeServerStream(
-                pipeName,
-                PipeDirection.InOut,
-                1,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous);
+    private static Task RunRawNamedPipeHandshakeServerAsync(string pipeName, Func<NamedPipeServerStream, Task> handler)
+    {
+        var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
 
-            await server.WaitForConnectionAsync();
-            await handler(server);
+        return Task.Run(async () =>
+        {
+            await using (server)
+            {
+                await server.WaitForConnectionAsync();
+                await handler(server);
+            }
         });
+    }
 
     private static string CreateTempDirectory()
     {

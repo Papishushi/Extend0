@@ -106,7 +106,9 @@ internal sealed class MetadataStorageLease : IDisposable
         {
             try
             {
-                if (_usesRegionLock)
+                // Linux uses an explicit byte-range lock; Windows and macOS use FileShare.None.
+            // Disposing the stream below releases the active ownership primitive on every platform.
+            if (_usesRegionLock && OperatingSystem.IsLinux())
                     stream.Unlock(0, 1);
             }
             catch (IOException)
