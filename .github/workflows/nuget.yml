@@ -170,6 +170,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: write
     steps:
       - uses: actions/download-artifact@v7.0.0
         with:
@@ -194,3 +195,15 @@ jobs:
           dotnet nuget push "artifacts/Extend0.BlittableAdapter.Generator.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
           dotnet nuget push "artifacts/Extend0.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
           dotnet nuget push "artifacts/Extend0.Cli.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+      - name: Publish coherent package set to GitHub Packages
+        shell: bash
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          VERSION: ${{ needs.pack.outputs.version }}
+        run: |
+          source_url="https://nuget.pkg.github.com/$OWNER/index.json"
+          dotnet nuget push "artifacts/Extend0.MetadataEntry.Generator.$VERSION.nupkg" --api-key "$GITHUB_PACKAGES_TOKEN" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/Extend0.BlittableAdapter.Generator.$VERSION.nupkg" --api-key "$GITHUB_PACKAGES_TOKEN" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/Extend0.$VERSION.nupkg" --api-key "$GITHUB_PACKAGES_TOKEN" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/Extend0.Cli.$VERSION.nupkg" --api-key "$GITHUB_PACKAGES_TOKEN" --source "$source_url" --skip-duplicate
