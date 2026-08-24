@@ -3,10 +3,9 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-# This workflow checks out code, performs a Codacy security scan
-# and integrates the results with the
-# GitHub Advanced Security code scanning feature.  For more information on
-# the Codacy security scan action usage and parameters, see
+# This workflow checks out code, performs a Codacy security scan,
+# generates SARIF, and uploads the results to GitHub code scanning.
+# For more information on the Codacy security scan action usage and parameters, see
 # https://github.com/codacy/codacy-analysis-cli-action.
 # For more information on Codacy Analysis CLI in general, see
 # https://github.com/codacy/codacy-analysis-cli.
@@ -17,7 +16,6 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    # The branches below must be a subset of the branches above
     branches: [ "main" ]
   schedule:
     - cron: '25 8 * * 2'
@@ -25,29 +23,44 @@ on:
 permissions:
   contents: read
 
+# Never keep an obsolete Codacy run alive after a newer commit arrives on the same ref.
+concurrency:
+  group: codacy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   codacy-security-scan:
     permissions:
-      contents: read # for actions/checkout to fetch code
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
-      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+      contents: read
+      security-events: write
     name: Codacy Security Scan
     runs-on: ubuntu-latest
+    # The classic Codacy CLI orchestrates Docker-based analyzers. Bound the whole job so
+    # registry/network/wrapper stalls cannot consume a runner indefinitely.
+    timeout-minutes: 30
     steps:
-      # Checkout the repository to the GitHub Actions runner
       - name: Checkout code
         uses: actions/checkout@v7
 
-      # Execute Codacy Analysis CLI and generate a SARIF output with the security issues identified during the analysis
       - name: Run Codacy Analysis CLI
         uses: codacy/codacy-analysis-cli-action@v4.4.7
         with:
-          # Check https://github.com/codacy/codacy-analysis-cli#project-token to get your project token from your Codacy repository
-          # You can also omit the token and run the tools that support default configurations
+          # The project token enables repository-specific Codacy configuration when available.
+          # Dependabot pull requests do not receive repository secrets, so Codacy falls back
+          # to tools that support default configurations in that context.
           project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
           verbose: true
-          # Adjust severity of non-security issues
-          gh-code-scanning-compat: false
-          # Force 0 exit code to allow SARIF file generation
-          # This will handover control about PR rejection to the GitHub side
+          output: results.sarif
+          format: sarif
+          # Bound each individual analyzer as well as the overall job.
+          tool-timeout: 10minutes
+          # Reduce non-security issue severity for GitHub code scanning compatibility.
+          gh-code-scanning-compat: true
+          # Let GitHub code scanning own alert presentation and merge-policy decisions.
           max-allowed-issues: 2147483647
+
+      - name: Upload Codacy SARIF results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+          category: codacy
