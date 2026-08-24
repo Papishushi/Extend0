@@ -172,7 +172,7 @@ jobs:
       id-token: write
       packages: write
     steps:
-      - uses: actions/download-artifact@v7.0.0
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: extend0-nuget-${{ needs.pack.outputs.version }}
           path: artifacts
