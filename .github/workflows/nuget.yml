@@ -42,7 +42,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v5.4.0
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Show SDK
@@ -63,7 +63,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v5.4.0
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Verify coherent assembly and package version
@@ -176,7 +176,7 @@ jobs:
         with:
           name: extend0-nuget-${{ needs.pack.outputs.version }}
           path: artifacts
-      - uses: actions/setup-dotnet@v5.4.0
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
       - name: Request short-lived NuGet API key
