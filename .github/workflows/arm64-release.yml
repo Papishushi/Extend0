@@ -185,7 +185,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7.0.0
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: extend0-arm64-raw-${{ needs.version.outputs.version }}-${{ matrix.rid }}
           path: input
@@ -252,7 +252,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v7.0.0
+      - uses: actions/download-artifact@v8.0.1
         with:
           pattern: extend0-arm64-${{ needs.version.outputs.version }}-*
           path: dist
