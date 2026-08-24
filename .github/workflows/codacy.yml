@@ -23,6 +23,11 @@ on:
 permissions:
   contents: read
 
+# Never keep an obsolete Codacy run alive after a newer commit arrives on the same ref.
+concurrency:
+  group: codacy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   codacy-security-scan:
     permissions:
@@ -30,6 +35,9 @@ jobs:
       security-events: write
     name: Codacy Security Scan
     runs-on: ubuntu-latest
+    # The classic Codacy CLI orchestrates Docker-based analyzers. Bound the whole job so
+    # registry/network/wrapper stalls cannot consume a runner indefinitely.
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -44,6 +52,8 @@ jobs:
           verbose: true
           output: results.sarif
           format: sarif
+          # Bound each individual analyzer as well as the overall job.
+          tool-timeout: 10minutes
           # Reduce non-security issue severity for GitHub code scanning compatibility.
           gh-code-scanning-compat: true
           # Let GitHub code scanning own alert presentation and merge-policy decisions.
