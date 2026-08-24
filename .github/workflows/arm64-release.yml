@@ -36,7 +36,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7
       - name: Read and validate assembly version
         id: version
         shell: bash
@@ -80,7 +80,7 @@ jobs:
             archive: tar.gz
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5.4.0
         with:
           global-json-file: global.json
@@ -184,7 +184,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7.0.0
         with:
           name: extend0-arm64-raw-${{ needs.version.outputs.version }}-${{ matrix.rid }}
